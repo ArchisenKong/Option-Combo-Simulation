@@ -1,0 +1,46 @@
+{
+  "id": "month_collision",
+  "source": "synthetic",
+  "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §2 (现存缺陷), F03, F35",
+  "description": "One contract entered by hand with its delivery month and two CSV/TWS rows carrying last-trade dates. The last-trade dates are synthetic placeholders that fall in the month before delivery, as CL's do; they are not CME calendar dates.",
+  "pointValue": 1000,
+  "contracts": {
+    "CLZ6": { "deliveryMonth": "202612", "lastTradeDate": "20261119" },
+    "CLF7": { "deliveryMonth": "202701", "lastTradeDate": "20261218" }
+  },
+  "events": [
+    {
+      "ref": "manual-z6", "origin": "manual_form", "account": "U1111111",
+      "tradeDate": "2026-10-01", "localSymbol": "CLZ6", "conId": null,
+      "recordedDate": "2026-12", "recordedDateMeaning": "delivery_month",
+      "contracts": 1, "price": 70
+    },
+    {
+      "ref": "csv-f7", "origin": "csv", "account": "U1111111",
+      "tradeDate": "2026-10-02", "localSymbol": "CLF7", "conId": 777,
+      "recordedDate": "20261218", "recordedDateMeaning": "last_trade_date",
+      "contracts": -1, "price": 71
+    },
+    {
+      "ref": "csv-z6", "origin": "csv", "account": "U1111111",
+      "tradeDate": "2026-10-03", "localSymbol": "CLZ6", "conId": 555,
+      "recordedDate": "20261119", "recordedDateMeaning": "last_trade_date",
+      "contracts": 1, "price": 69
+    }
+  ],
+  "expected": {
+    "positions": [
+      { "localSymbol": "CLZ6", "deliveryMonth": "202612", "contracts": 2, "averagePrice": 69.5 },
+      { "localSymbol": "CLF7", "deliveryMonth": "202701", "contracts": -1, "averagePrice": 71 }
+    ],
+    "futuresRealizedPnl": 0
+  },
+  "legacyEngineResultForTheRecord": {
+    "note": "What js/cost_basis_core.js computed on 2026-09-24. Recorded so the defect stays documented; no test may assert it as correct.",
+    "futuresContracts": 1,
+    "futuresAvgCost": 69,
+    "futuresRealizedPnl": 1000,
+    "blendedCost": 68,
+    "warnings": []
+  }
+}

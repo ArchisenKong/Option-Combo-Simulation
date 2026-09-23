@@ -184,8 +184,8 @@
                             <div class="panel-heading"><div><span class="eyebrow">新增</span><h2 id="book-title">新建综合成本账本</h2></div></div>
                             <form id="new-book-form" class="new-book-form">
                                 <div class="field"><label for="new-book-account">IB 账户</label><select id="new-book-account" required disabled><option value="" selected disabled>等待 TWS 账户列表…</option></select><input id="new-book-account-manual" type="text" maxlength="32" hidden autocomplete="off" spellcheck="false" placeholder="输入 IB 账号，例如 U1234567"><small id="new-book-account-hint">连接后选择 TWS 账户。</small></div>
-                                <div class="field"><label for="new-book-symbol">Underlying Symbol</label><input id="new-book-symbol" type="text" maxlength="32" required autocomplete="off" spellcheck="false" placeholder="TQQQ"></div><div class="field"><label for="new-book-type">账本类型</label><select id="new-book-type"><option value="STK">股票 / ETF 期权</option><option value="FUT">FOP / FUT</option></select></div><div class="field"><label for="new-book-start">起算日</label><input id="new-book-start" type="date"></div><div class="field"><label for="new-book-spc" id="new-book-spc-label">每张交割股数</label><input id="new-book-spc" type="number" min="1" step="1" value="100" required></div>
-                                <p class="form-hint" id="new-book-type-hint">股票 / ETF 账本按交割股数计算每股成本；FOP / FUT 账本按期货月份和点值计算。现金结算指数期权仍不适用。</p>
+                                <div class="field"><label for="new-book-symbol">Underlying Symbol</label><input id="new-book-symbol" type="text" maxlength="32" required autocomplete="off" spellcheck="false" placeholder="TQQQ"></div><div class="field"><label for="new-book-type">账本类型</label><select id="new-book-type"><option value="STK">股票 / ETF 期权</option><option value="FUT" disabled>FOP / FUT（已停用）</option></select></div><div class="field"><label for="new-book-start">起算日</label><input id="new-book-start" type="date"></div><div class="field"><label for="new-book-spc" id="new-book-spc-label">每张交割股数</label><input id="new-book-spc" type="number" min="1" step="1" value="100" required></div>
+                                <p class="form-hint" id="new-book-type-hint">股票 / ETF 账本按交割股数计算每股成本。FOP / FUT 账本暂停新建：现有引擎可能把不同期货月份合并计算，等待独立 FOP 账本上线。现金结算指数期权仍不适用。</p>
                                 <div class="form-actions"><button id="btn-create-book" class="primary" type="submit">创建账本</button><button id="btn-cancel-book" type="button">返回当前账本</button></div>
                             </form>
                         </section>
@@ -331,7 +331,7 @@
         <p id="premium-expiry-note" class="premium-expiry-note">这是已收取权利金的到期分布，不是到期日再收款，也不是最终盈亏。金额为未平 Short Call / Put 分摊的开仓净收入（含已记开仓费用）；部分平仓后只保留未平部分，不含 Long Option 支出。分摊可能产生不足一美分的金额，明细保留 4 位小数，顶部合计按 2 位小数显示。是否已结算以账本流水为准，过期但尚无结算记录的仓位仍列在这里。</p>
     </dialog>
 
-    <script src="js/cost_basis_core.js?v=f29b8ae4e601"></script>
+    <script src="js/cost_basis_core.js?v=f86e74f62800"></script>
     <script src="js/american_binomial.js?v=a49313f2567b"></script>
     <script src="js/cost_basis_import.js?v=26be6c5acd9a"></script>
     <script src="js/market_curves.js?v=f15898beaf0c"></script>
@@ -339,6 +339,6 @@
     <script src="js/cost_basis_stress_core.js?v=76e942b27d9d"></script>
     <script src="js/cost_basis_stress_band.js?v=6f716f8dc838"></script>
     <script src="js/cost_basis_stress_worker.js?v=3d63d7e54061"></script>
-    <script src="js/cost_basis.js?v=050d191d3ebe"></script>
+    <script src="js/cost_basis.js?v=886d868b1404"></script>
 </body>
 </html>

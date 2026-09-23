@@ -148,6 +148,16 @@ _CONTRACT_MONTH_RE = re.compile(r'^\d{6}(?:\d{2})?$')
 # mean what they think it means.
 DELIVERABLE_SEC_TYPES = ('STK', 'FUT')
 
+# FUT/FOP ledgers are frozen until the standalone FOP ledger ships
+# (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §2 and §13 P0). The shared
+# engine keys a futures position by the first six digits of its date, so a CL
+# last-trade date and another contract's delivery month collide and a calendar
+# spread silently books as a close. No FUT ledger exists on the user's
+# machines, so creation and every write are refused rather than patched.
+# Reading, export and whole-book deletion stay open, so a ledger arriving from
+# another database can still be taken out.
+FROZEN_BOOK_SEC_TYPES = frozenset({'FUT'})
+
 
 class CostBasisStoreError(Exception):
     """Base class. The WebSocket layer maps these to protocol error codes."""
@@ -215,6 +225,22 @@ class DatabaseBusyError(CostBasisStoreError):
 
 class DatabaseCorruptError(CostBasisStoreError):
     code = 'database_corrupt'
+
+
+class FuturesBookFrozenError(CostBasisStoreError):
+    """A FUT/FOP ledger cannot be created or written; see FROZEN_BOOK_SEC_TYPES."""
+
+    code = 'futures_book_frozen'
+
+
+def _reject_frozen_sec_type(sec_type, action):
+    if str(sec_type or 'STK').strip().upper() in FROZEN_BOOK_SEC_TYPES:
+        raise FuturesBookFrozenError(
+            f'{action} is disabled for FUT/FOP ledgers: the current engine can '
+            'merge different futures months, so these ledgers are read-only until '
+            'the standalone FOP ledger replaces it. Export or delete the ledger '
+            'instead.'
+        )
 
 
 # Schema v2. Deliberately NOT a foreign key onto cost_basis_events: the whole
@@ -1889,6 +1915,7 @@ class CostBasisStore:
                 f'{sec_type} has no deliverable underlying, so a per-share blended '
                 f'cost cannot be computed; supported: {", ".join(DELIVERABLE_SEC_TYPES)}'
             )
+        _reject_frozen_sec_type(sec_type, 'creating a ledger')
         currency = str(currency or 'USD').strip().upper()
         if not currency.isalpha() or len(currency) != 3:
             raise InvalidRequestError('currency must be a 3-letter code')
@@ -2177,10 +2204,16 @@ class CostBasisStore:
             raise BookNotFoundError('no ledger with that id')
         return _book_row_to_dict(row)
 
+    def _get_writable_book(self, conn, book_id, action):
+        """The book, provided its type may still be written (FROZEN_BOOK_SEC_TYPES)."""
+        book = self._get_book(conn, book_id)
+        _reject_frozen_sec_type(book.get('secType'), action)
+        return book
+
     def archive_book(self, book_id):
         conn = self._connect()
         try:
-            book = self._get_book(conn, book_id)
+            book = self._get_writable_book(conn, book_id, 'archiving')
             if book['archivedAtUtc']:
                 return book
             conn.execute(
@@ -2308,7 +2341,7 @@ class CostBasisStore:
         _require_token('clientToken', client_token)
         conn = self._connect()
         try:
-            book = self._get_book(conn, book_id)
+            book = self._get_writable_book(conn, book_id, 'appending an event')
             event = _bind_event_to_book_account(event, book)
             event = self._resolve_shares_per_contract(conn, book_id, event)
             normalized = _validate_event_shape(event, book)
@@ -3540,7 +3573,7 @@ class CostBasisStore:
 
         conn = self._connect()
         try:
-            book = self._get_book(conn, book_id)
+            book = self._get_writable_book(conn, book_id, 'importing')
             self._require_book_identity(book, book_identity)
             normalized_rows = self._normalize_event_batch(
                 conn, book_id, events, book, include_existing_history=True)
@@ -3771,7 +3804,7 @@ class CostBasisStore:
         group_id = f'split-{client_token}'
         conn = self._connect()
         try:
-            book = self._get_book(conn, book_id)
+            book = self._get_writable_book(conn, book_id, 'recording a split')
             self._require_book_identity(book, book_identity)
             if not str(book.get('account') or '').strip():
                 raise InvalidRequestError(
@@ -3860,7 +3893,7 @@ class CostBasisStore:
             raise InvalidRequestError('a void requires a reason')
         conn = self._connect()
         try:
-            self._get_book(conn, book_id)
+            self._get_writable_book(conn, book_id, 'voiding a split')
             conn.execute('BEGIN IMMEDIATE')
             try:
                 replay = conn.execute(
@@ -3924,7 +3957,7 @@ class CostBasisStore:
 
         conn = self._connect()
         try:
-            self._get_book(conn, book_id)
+            self._get_writable_book(conn, book_id, 'voiding an event')
             conn.execute('BEGIN IMMEDIATE')
             try:
                 replay = conn.execute(
@@ -4053,7 +4086,7 @@ class CostBasisStore:
 
         conn = self._connect()
         try:
-            book = self._get_book(conn, book_id)
+            book = self._get_writable_book(conn, book_id, 'resetting the ledger')
             self._require_book_identity(book, book_identity)
             conn.execute('BEGIN IMMEDIATE')
             try:
@@ -4147,7 +4180,7 @@ class CostBasisStore:
         registration = self._statement_registration(statement)
         conn = self._connect()
         try:
-            book = self._get_book(conn, book_id)
+            book = self._get_writable_book(conn, book_id, 'rebuilding the ledger')
             self._require_book_identity(book, book_identity)
             # Validate the replacement BEFORE opening the transaction so a
             # malformed batch never even reaches the delete.
@@ -4324,7 +4357,7 @@ class CostBasisStore:
         _require_token('resetId', reset_id)
         conn = self._connect()
         try:
-            book = self._get_book(conn, book_id)
+            book = self._get_writable_book(conn, book_id, 'restoring the ledger')
             self._require_book_identity(book, book_identity)
             conn.execute('BEGIN IMMEDIATE')
             try:
@@ -4488,7 +4521,7 @@ class CostBasisStore:
 
         conn = self._connect()
         try:
-            self._get_book(conn, book_id)
+            self._get_writable_book(conn, book_id, 'saving a snapshot')
             rows = conn.execute(
                 'SELECT event_id, seq, kind, trade_date, account, right, strike, '
                 'broker_timestamp, '

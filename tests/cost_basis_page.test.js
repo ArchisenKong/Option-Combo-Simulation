@@ -3174,11 +3174,14 @@ module.exports = {
             },
         },
         {
-            name: 'the page exposes a distinct FOP FUT book and its roll controls',
+            // FUT/FOP ledgers are frozen until the standalone FOP ledger ships
+            // (tests/cost_basis_fop_guard.test.js); the legacy entry fields stay
+            // until P6 retires this page's FUT branches.
+            name: 'the page keeps the frozen FOP FUT option and its legacy roll fields',
             run() {
                 const html = readPage();
                 const source = readScript();
-                assert.match(html, /<option value="FUT">FOP \/ FUT<\/option>/);
+                assert.match(html, /<option value="FUT" disabled>FOP \/ FUT（已停用）<\/option>/);
                 ['futureExpiry', 'futureContracts', 'rollToExpiry',
                     'rollToPrice', 'rollGroup'].forEach((field) => {
                     assert.ok(html.includes(`data-field="${field}"`));

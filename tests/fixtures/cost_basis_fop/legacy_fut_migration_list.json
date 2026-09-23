@@ -1,0 +1,119 @@
+{
+  "id": "legacy_fut_migration_list",
+  "source": "synthetic",
+  "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §13.3 P0 step 4",
+  "description": "Old tests that wrote FUT/FOP ledgers through the shared engine. P0 freezes those ledgers, so each test was converted to a rejection check or narrowed. The economic vectors are kept here so P3/P6 can re-assert them against the standalone FOP engine instead of dropping them silently.",
+  "entries": [
+    {
+      "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_future_trade_and_roll_round_trip_all_contract_fields",
+      "p0": "payload reused as a refused write in tests/cost_basis_fop_guard_test.py",
+      "vector": {
+        "trade": { "kind": "futures_trade", "tradeDate": "2026-08-01", "futureExpiry": "202609", "futureConId": 1001, "futureLocalSymbol": "ESU6", "futureContracts": 1, "sharesPerContract": 50, "price": 5000 },
+        "roll": { "futureExpiry": "202609", "price": 5100, "rollToExpiry": "202612", "rollToConId": 1002, "rollToLocalSymbol": "ESZ6", "rollToPrice": 5120, "fees": 4 },
+        "asserted": "every contract field of the roll round-trips"
+      },
+      "newEngine": "P2/P3: contract records round-trip; a roll is two real futures_trade rows (plan §6.2), so the aggregated futures_roll shape does not return"
+    },
+    {
+      "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_negative_futures_prices_are_valid_and_round_trip",
+      "p0": "payload reused as a refused write",
+      "vector": {
+        "open": { "tradeDate": "2020-04-01", "localSymbol": "CLK20", "pointValue": 1000, "contracts": 1, "price": -37.63 },
+        "roll": { "closePrice": -30, "rollToLocalSymbol": "CLM20", "rollToPrice": -20 },
+        "asserted": "negative prices are stored exactly, no abs()"
+      },
+      "newEngine": "P3 F15: zero/negative FUT prices through every path"
+    },
+    {
+      "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_month_and_last_trade_date_share_one_futures_timeline",
+      "p0": "removed: it asserted the defect",
+      "vector": {
+        "asserted": "future_key(futureExpiry=202609) == future_key(futureExpiry=20260918)",
+        "why_invalid": "true for ES, whose last trade date falls in the delivery month; false for CL, whose last trade date falls in the month before. The same rule is what merges CLZ6 and CLF7 in month_collision.json."
+      },
+      "newEngine": "P2/P3 F03, F35: delivery month and last trade date are separate fields and never derived from each other"
+    },
+    {
+      "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_book_type_boundary_rejects_cross_asset_events",
+      "p0": "the STK half (a stock ledger refuses futures_trade) is still asserted in the guard test; the FUT half needs a writable FUT ledger",
+      "vector": {
+        "asserted": "a STK ledger refuses futures_trade; a FUT ledger refuses share_trade and an option_trade with optionSecType=OPT"
+      },
+      "newEngine": "P2 F46: FOP ledger kind whitelist (plan §8.1)"
+    },
+    {
+      "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_roll_cannot_transfer_a_month_the_ledger_does_not_hold",
+      "p0": "payload reused as a refused write",
+      "vector": {
+        "asserted": "a roll out of 202609 with no 202609 position raises PositionOverdrawError"
+      },
+      "newEngine": "P3: closing more than the contract holds is refused (plan §5.1)"
+    },
+    {
+      "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_fop_assignment_opens_one_future_at_strike_with_fees_only_cash",
+      "p0": "payload reused as a refused write",
+      "vector": {
+        "shortPut": { "right": "P", "strike": 5000, "expiry": "20260821", "contracts": -1, "pointValue": 50, "price": 50, "cashAmount": 2500 },
+        "assignment": { "contracts": 1, "futureExpiry": "202609", "futureContracts": 1, "fees": 3, "cashAmount": -3 },
+        "asserted": "assignment stores price = strike 5000, futureContracts +1, no shares; a futures_trade carrying notional cash -250000 is refused"
+      },
+      "newEngine": "P3 F06 and the plan §8.1 per-kind cash rules"
+    },
+    {
+      "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_complete_csv_history_supersedes_an_adopted_future_baseline",
+      "p0": "not re-asserted: needs a writable FUT ledger",
+      "vector": {
+        "asserted": "a complete CSV import covering the TWS-adopted baseline supersedes (voids) the baseline row"
+      },
+      "newEngine": "P4 F19: complete history atomically replaces a temporary baseline"
+    },
+    {
+      "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_incremental_csv_after_snapshot_keeps_the_adopted_baseline",
+      "p0": "not re-asserted: needs a writable FUT ledger",
+      "vector": {
+        "asserted": "an incremental import after the snapshot keeps the adopted baseline"
+      },
+      "newEngine": "P4 F19"
+    },
+    {
+      "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_roll_target_identity_can_reconstruct_an_adopted_new_month",
+      "p0": "not re-asserted: needs a writable FUT ledger",
+      "vector": {
+        "asserted": "an old-month trade plus an aggregated roll into 202612 reconstructs a TWS-adopted 202612 baseline"
+      },
+      "newEngine": "P4 F09/F19 with two real legs instead of an aggregated roll"
+    },
+    {
+      "source": "tests/cost_basis_store_test.py::MigrationTests::test_real_v2_event_table_is_atomically_rebuilt_for_futures",
+      "p0": "narrowed: the v2 rebuild is still checked; creating a FUT ledger afterwards is now asserted to be refused",
+      "vector": {
+        "asserted": "after migrating a real v2 database, a FUT ledger could be created and a futures_trade appended"
+      },
+      "newEngine": "P2 F25: migration of the new FOP tables"
+    },
+    {
+      "source": "tests/cost_basis_ws_test.py::test_same_root_can_have_distinct_stock_and_futures_books",
+      "p0": "converted: STK ES is created, FUT ES is refused with futures_book_frozen",
+      "vector": {
+        "asserted": "one account can hold an STK and a FUT ledger for the same root; the FUT ledger keeps defaultMultiplier 50"
+      },
+      "newEngine": "P1/P2 F02: STK and FOP ledgers for the same root stay isolated"
+    },
+    {
+      "source": "tests/cost_basis_randomized_test.py::Campaign.verify_futures_store",
+      "p0": "converted to verify_futures_store_frozen: the store refuses the FUT ledger; the pure-core FUT prefixes still run",
+      "vector": {
+        "asserted": "a generated FUT history imported into SQLite, and rebuilt from shuffled rows, replays to the oracle snapshot"
+      },
+      "newEngine": "P6 randomized regression against the standalone engine (plan §14.2)"
+    },
+    {
+      "source": "tests/cost_basis_page.test.js::the page exposes a distinct FOP FUT book and its roll controls",
+      "p0": "converted: the FUT option is present but disabled",
+      "vector": {
+        "asserted": "the create form offers FOP / FUT and the entry form has futureExpiry/futureContracts/rollToExpiry/rollToPrice/rollGroup fields"
+      },
+      "newEngine": "P1/P5: the standalone FOP page and its own entry form"
+    }
+  ]
+}

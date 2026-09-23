@@ -21,7 +21,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT/'tests/helpers'))
 from cost_basis_random_model import generate, Oracle, option_key, csv_text
-from cost_basis_store import (CostBasisStore, PositionOverdrawError, LedgerChangedError,
+from cost_basis_store import (CostBasisStore, FuturesBookFrozenError, PositionOverdrawError, LedgerChangedError,
                               ImportRevisionConflictError, InvalidRequestError)
 
 class Bridge:
@@ -132,7 +132,7 @@ class Campaign:
             self.last_stage='sqlite-state-machine'
             self.verify_store(case,pages['activity'])
             self.verify_invalid_store(seed)
-            if core_case['book']['secType']=='FUT': self.verify_futures_store(core_case)
+            if core_case['book']['secType']=='FUT': self.verify_futures_store_frozen(core_case)
         self.coverage['seeds']+=1
 
     def verify_invalid(self, seed):
@@ -304,29 +304,22 @@ class Campaign:
             assert store.ledger_version(bid)==void_version
             self.coverage['backup_corruption_and_voided_duplicate']+=2
 
-    def verify_futures_store(self, case):
+    def verify_futures_store_frozen(self, case):
+        # FUT/FOP ledgers are frozen until the standalone FOP ledger ships
+        # (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §13.3 P0). The pure-core
+        # FUT prefixes above still run; the persisted-import and unordered
+        # rebuild checks move to the new engine (P6), recorded in
+        # tests/fixtures/cost_basis_fop/legacy_fut_migration_list.json.
         seed=case['seed']
         with tempfile.TemporaryDirectory(prefix='cost-basis-futures-random-') as directory:
             store=CostBasisStore(pathlib.Path(directory)/'ledger.db').initialize()
-            book=store.create_book(account=case['book']['account'],symbol='ES',sec_type='FUT',
-                                   default_shares_per_contract=50,start_date='2026-01-01')
-            bid=book['bookId']
-            store.import_events(bid,case['rows'],import_batch_id=f'futures-batch-{seed}',
-                client_token_prefix=f'futures-token-{seed}',book_identity=book,
-                expected_ledger_version=store.ledger_version(bid))
-            persisted=store.list_events(bid,limit=1000)['events']
-            check_snapshot(self.bridge.call(op='replay',rows=persisted,options=case['book']),
-                           case['expected'][-1],(seed,'FUT persisted'))
-            plan=store.reset_confirmation(bid)
-            shuffled=copy.deepcopy(case['rows'])
-            for i,e in enumerate(shuffled):e['brokerTimestamp']=e['tradeDate']+f'T10:{i//60:02}:{i%60:02}'
-            random.Random(seed).shuffle(shuffled)
-            store.rebuild_book(bid,shuffled,confirmation=plan['phrase'],client_token=f'futures-rebuild-{seed}',
-                import_batch_id=f'futures-rebuilt-batch-{seed}',book_identity=book,
-                expected_ledger_version=plan['ledgerVersion'])
-            check_snapshot(self.bridge.call(op='replay',rows=store.list_events(bid,limit=1000)['events'],options=case['book']),
-                           case['expected'][-1],(seed,'FUT unordered rebuild'))
-            self.coverage['futures_sqlite_state_machines']+=1
+            try:
+                store.create_book(account=case['book']['account'],symbol='ES',sec_type='FUT',
+                                  default_shares_per_contract=50,start_date='2026-01-01')
+            except FuturesBookFrozenError: pass
+            else: raise AssertionError((seed,'FUT ledger created while frozen'))
+            assert store.list_books(include_archived=True)==[], (seed,'frozen FUT create wrote a row')
+            self.coverage['futures_store_frozen']+=1
 
 class RandomizedLedgerTests(unittest.TestCase):
     def test_counterexample_reducer_retains_the_trigger(self):

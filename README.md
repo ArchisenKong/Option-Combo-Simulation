@@ -401,7 +401,12 @@ answers one question for one IB account and one underlying: **what did this
 stock or futures position actually cost this account, all in?** The active
 book identity is `account + symbol + security type + currency`, so two managed
 accounts may keep independent books for the same symbol. A book is explicitly either `STK`
-(stock/ETF plus OPT) or `FUT` (deliverable FOP plus FUT). The ledger, CSV,
+(stock/ETF plus OPT) or `FUT` (deliverable FOP plus FUT). **`FUT` books are
+frozen for now:** this engine keys a futures position by the first six digits
+of its date, so a CL last-trade date and another contract's delivery month can
+merge silently. New `FUT` books cannot be created, and an existing one is
+read-only (view, export or delete) until the standalone FOP ledger in
+`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md` replaces this path. The ledger, CSV,
 manual-entry, export, snapshot and scenario-replay paths work against either
 backend. Current positions/AvgCost, recent executions, fresh prices, option IV
 and discount-curve inputs require the live IB backend; without it the page
@@ -710,7 +715,8 @@ Calls and Puts. A 100-share lot bought at 50 plus a long Put costing 200 will
 therefore show 52 in the running full-cash column and 50 in the headline; that
 is intentional, not a reconciliation error.
 
-Those three selectable lenses apply to an `STK` book. A `FUT` book instead
+Those three selectable lenses apply to an `STK` book. A `FUT` book (frozen, see
+above) instead
 shows the current FUT entry average and one blended cost in futures points:
 the current contract basis, minus realized FUT P&L and realized FOP premium,
 plus fees, divided by signed point exposure. Open FOP premium remains at risk

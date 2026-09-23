@@ -30,6 +30,7 @@ from cost_basis_store import (
     BookNotFoundError,
     EventAlreadyVoidedError,
     EventNotFoundError,
+    FuturesBookFrozenError,
     ImportRevisionConflictError,
     InvalidRequestError,
     LedgerChangedError,
@@ -37,7 +38,6 @@ from cost_basis_store import (
     SCHEMA_USER_VERSION,
     StoreUnavailableError,
     contract_key,
-    future_key,
     derive_cash_amount,
     resolve_db_path,
     _exact_event_timestamp,
@@ -1829,187 +1829,11 @@ class ResetCountTests(CostBasisStoreTestBase):
         self.assertEqual(appended['event']['bookId'], self.book_id)
 
 
-class FuturesLedgerStoreTests(CostBasisStoreTestBase):
-    def setUp(self):
-        super().setUp()
-        self.future_book = self.store.create_book(
-            account='U1111111', symbol='ES', sec_type='FUT', start_date='2026-01-01',
-            default_shares_per_contract=50)
-        self.future_book_id = self.future_book['bookId']
-
-    def append_future(self, event):
-        return self.store.append_event(
-            self.future_book_id, event, client_token=_token())
-
-    @staticmethod
-    def future_trade(**overrides):
-        event = {
-            'kind': 'futures_trade', 'tradeDate': '2026-08-01',
-            'account': 'U1111111', 'futureExpiry': '202609',
-            'futureConId': 1001, 'futureLocalSymbol': 'ESU6',
-            'futureContracts': 1, 'sharesPerContract': 50,
-            'price': 5000, 'fees': 0, 'cashAmount': 0,
-        }
-        event.update(overrides)
-        return event
-
-    def test_future_trade_and_roll_round_trip_all_contract_fields(self):
-        self.append_future(self.future_trade())
-        rolled = self.append_future({
-            'kind': 'futures_roll', 'tradeDate': '2026-08-24',
-            'account': 'U1111111', 'futureExpiry': '202609',
-            'futureConId': 1001, 'futureLocalSymbol': 'ESU6',
-            'futureContracts': 1, 'sharesPerContract': 50,
-            'price': 5100, 'rollToExpiry': '202612',
-            'rollToConId': 1002, 'rollToLocalSymbol': 'ESZ6',
-            'rollToPrice': 5120, 'rollGroup': 'roll-test-1',
-            'fees': 4, 'cashAmount': -4,
-        })['event']
-        self.assertEqual(rolled['futureExpiry'], '202609')
-        self.assertEqual(rolled['rollToExpiry'], '202612')
-        self.assertEqual(rolled['rollToPrice'], 5120.0)
-        self.assertEqual(rolled['rollGroup'], 'roll-test-1')
-
-    def test_negative_futures_prices_are_valid_and_round_trip(self):
-        opened = self.append_future(self.future_trade(
-            tradeDate='2020-04-01',
-            futureExpiry='202005', futureConId=5001,
-            futureLocalSymbol='CLK20', sharesPerContract=1000,
-            price=-37.63))['event']
-        self.assertEqual(opened['price'], -37.63)
-        rolled = self.append_future({
-            'kind': 'futures_roll', 'tradeDate': '2020-04-20',
-            'account': 'U1111111', 'futureExpiry': '202005',
-            'futureConId': 5001, 'futureLocalSymbol': 'CLK20',
-            'futureContracts': 1, 'sharesPerContract': 1000,
-            'price': -30, 'rollToExpiry': '202006',
-            'rollToConId': 5002, 'rollToLocalSymbol': 'CLM20',
-            'rollToPrice': -20, 'rollGroup': 'negative-roll',
-            'fees': 0, 'cashAmount': 0,
-        })['event']
-        self.assertEqual(rolled['price'], -30)
-        self.assertEqual(rolled['rollToPrice'], -20)
-
-    def test_month_and_last_trade_date_share_one_futures_timeline(self):
-        self.append_future(self.future_trade(futureExpiry='202609'))
-        self.append_future(self.future_trade(
-            tradeDate='2026-08-02', futureExpiry='20260918',
-            futureContracts=-1, price=5010))
-        self.assertEqual(
-            future_key({'account': 'U1111111', 'futureExpiry': '202609',
-                        'sharesPerContract': 50}),
-            future_key({'account': 'U1111111', 'futureExpiry': '20260918',
-                        'sharesPerContract': 50}))
-
-    def test_book_type_boundary_rejects_cross_asset_events(self):
-        with self.assertRaises(InvalidRequestError):
-            self.append(self.future_trade())
-        with self.assertRaises(InvalidRequestError):
-            self.append_future({
-                'kind': 'share_trade', 'tradeDate': '2026-08-01',
-                'account': 'U1111111', 'shares': 100, 'price': 50,
-                'fees': 0, 'cashAmount': -5000,
-            })
-        with self.assertRaises(InvalidRequestError):
-            wrong_option = self.short_put()
-            wrong_option['optionSecType'] = 'OPT'
-            self.append_future(wrong_option)
-
-    def test_roll_cannot_transfer_a_month_the_ledger_does_not_hold(self):
-        with self.assertRaises(PositionOverdrawError):
-            self.append_future({
-                'kind': 'futures_roll', 'tradeDate': '2026-08-24',
-                'account': 'U1111111', 'futureExpiry': '202609',
-                'futureContracts': 1, 'sharesPerContract': 50,
-                'price': 5100, 'rollToExpiry': '202612',
-                'rollToPrice': 5120, 'rollGroup': 'roll-test-2',
-                'fees': 0, 'cashAmount': 0,
-            })
-
-    def test_fop_assignment_opens_one_future_at_strike_with_fees_only_cash(self):
-        self.append_future({
-            'kind': 'option_trade', 'optionSecType': 'FOP',
-            'tradeDate': '2026-08-01', 'account': 'U1111111',
-            'right': 'P', 'strike': 5000, 'expiry': '20260821',
-            'contracts': -1, 'sharesPerContract': 50, 'price': 50,
-            'fees': 0, 'cashAmount': 2500,
-        })
-        assigned = self.append_future({
-            'kind': 'option_assignment', 'optionSecType': 'FOP',
-            'tradeDate': '2026-08-21', 'account': 'U1111111',
-            'right': 'P', 'strike': 5000, 'expiry': '20260821',
-            'contracts': 1, 'sharesPerContract': 50,
-            'futureExpiry': '202609', 'futureContracts': 1,
-            'fees': 3, 'cashAmount': -3,
-        })['event']
-        self.assertIsNone(assigned['shares'])
-        self.assertEqual(assigned['futureContracts'], 1.0)
-        self.assertEqual(assigned['price'], 5000.0)
-        with self.assertRaises(InvalidRequestError):
-            bad = dict(self.future_trade(tradeDate='2026-08-22'))
-            bad['cashAmount'] = -250000
-            self.append_future(bad)
-
-    def test_complete_csv_history_supersedes_an_adopted_future_baseline(self):
-        adopted = self.append_future(self.future_trade(
-            tradeDate='2026-08-26', source='reconcile', tag='tws_snapshot',
-            note='Snapshot timestamp 2026-08-26T12:00:00.'))['event']
-        imported = self.future_trade(
-            tradeDate='2026-08-25', source='csv_import',
-            externalRef='csv-fut-1', note='IBKR 2026-08-25, 10:00:00')
-        result = self.reviewed_import_events(
-            self.future_book_id, [imported], import_batch_id=_token('batch'),
-            client_token_prefix=_token('prefix'),
-            supersede_tws_event_ids=[adopted['eventId']])
-        self.assertEqual(result['inserted'], 1)
-        self.assertEqual(result['supersededTwsBaselines'], 1)
-        rows = self.store.list_events(
-            self.future_book_id, include_voided=True)['events']
-        baseline = next(row for row in rows if row['eventId'] == adopted['eventId'])
-        self.assertIsNotNone(baseline['voidedAtUtc'])
-
-    def test_incremental_csv_after_snapshot_keeps_the_adopted_baseline(self):
-        adopted = self.append_future(self.future_trade(
-            tradeDate='2026-08-26', source='reconcile', tag='tws_snapshot',
-            note='Snapshot timestamp 2026-08-26T12:00:00.'))['event']
-        imported = self.future_trade(
-            tradeDate='2026-08-27', futureContracts=-1, source='csv_import',
-            externalRef='csv-fut-close', note='IBKR 2026-08-27, 10:00:00')
-        result = self.reviewed_import_events(
-            self.future_book_id, [imported], import_batch_id=_token('batch'),
-            client_token_prefix=_token('prefix'))
-        self.assertEqual(result['inserted'], 1)
-        self.assertEqual(result['supersededTwsBaselines'], 0)
-        rows = self.store.list_events(
-            self.future_book_id, include_voided=True)['events']
-        baseline = next(row for row in rows if row['eventId'] == adopted['eventId'])
-        self.assertIsNone(baseline['voidedAtUtc'])
-
-    def test_roll_target_identity_can_reconstruct_an_adopted_new_month(self):
-        adopted = self.append_future(self.future_trade(
-            tradeDate='2026-08-26', futureExpiry='202612', futureConId=1002,
-            futureLocalSymbol='ESZ6', source='reconcile', tag='tws_snapshot',
-            note='Snapshot timestamp 2026-08-26T12:00:00.'))['event']
-        old = self.future_trade(
-            tradeDate='2026-08-01', source='csv_import',
-            externalRef='csv-old-month', note='IBKR 2026-08-01, 10:00:00')
-        roll = {
-            'kind': 'futures_roll', 'tradeDate': '2026-08-24',
-            'account': 'U1111111', 'futureExpiry': '202609',
-            'futureConId': 1001, 'futureLocalSymbol': 'ESU6',
-            'futureContracts': 1, 'sharesPerContract': 50, 'price': 5100,
-            'rollToExpiry': '202612', 'rollToConId': 1002,
-            'rollToLocalSymbol': 'ESZ6', 'rollToPrice': 5120,
-            'rollGroup': 'roll-csv-target', 'fees': 0, 'cashAmount': 0,
-            'source': 'csv_import', 'externalRef': 'csv-roll-target',
-            'note': 'IBKR 2026-08-24, 10:00:00',
-        }
-        result = self.reviewed_import_events(
-            self.future_book_id, [old, roll], import_batch_id=_token('batch'),
-            client_token_prefix=_token('prefix'),
-            supersede_tws_event_ids=[adopted['eventId']])
-        self.assertEqual(result['inserted'], 2)
-        self.assertEqual(result['supersededTwsBaselines'], 1)
+# FUT/FOP ledgers are frozen until the standalone FOP ledger ships
+# (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §13.3 P0). The tests that
+# wrote them now live as refusals in tests/cost_basis_fop_guard_test.py, and
+# their economic vectors are kept for the new engine in
+# tests/fixtures/cost_basis_fop/legacy_fut_migration_list.json.
 
 
 class MigrationTests(unittest.TestCase):
@@ -2198,16 +2022,12 @@ class MigrationTests(unittest.TestCase):
         event = store.list_events('bookv2aa1')['events'][0]
         self.assertEqual(event['shares'], 10.0)
         self.assertIsNone(event['futureExpiry'])
-        future = store.create_book(
-            account='U1', symbol='ES', sec_type='FUT', start_date='2026-01-01',
-            default_shares_per_contract=50)
-        self.assertEqual(future['secType'], 'FUT')
-        stored = store.append_event(future['bookId'], {
-            'kind': 'futures_trade', 'tradeDate': '2026-08-01', 'account': 'U1',
-            'futureExpiry': '202609', 'futureContracts': 1,
-            'sharesPerContract': 50, 'price': 5000, 'fees': 0, 'cashAmount': 0,
-        }, client_token=_token())['event']
-        self.assertEqual(stored['kind'], 'futures_trade')
+        # The rebuilt table carries the futures columns, but FUT ledgers are
+        # frozen (cost_basis_fop_guard_test.py), so none can be created on it.
+        with self.assertRaises(FuturesBookFrozenError):
+            store.create_book(
+                account='U1', symbol='ES', sec_type='FUT', start_date='2026-01-01',
+                default_shares_per_contract=50)
 
     def test_v3_notes_are_migrated_into_the_official_broker_timestamp_column(self):
         import cost_basis_store as module

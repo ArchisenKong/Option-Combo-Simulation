@@ -1,0 +1,40 @@
+{
+  "format": "cost-basis-fop-capabilities",
+  "version": 1,
+  "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §9.7",
+  "stage": "P0 draft",
+  "importMappingVersion": null,
+  "notes": [
+    "P0 draft. No FOP importer exists yet and FUT/FOP ledgers are frozen, so nothing here is consumed at runtime. P4 wires the importer and the store to this file.",
+    "A key is format/section/asset/event. The asset may carry a qualifier (FOP.cash_settled) for rows whose format is ordinary but whose product is outside the first release.",
+    "Section slugs are placeholders until P4 maps them to the real Activity Statement and Flex section names."
+  ],
+  "statusDefinitions": {
+    "real_verified": "Accepted from a de-identified real statement: needs at least one evidence entry of kind deidentified_real with verifiedOn and mappingVersion. Only these keys may be written.",
+    "synthetic_only": "No real-statement acceptance. Preview only. A synthetic evidence entry, when present, records that the synthetic fixture passed; it never makes the key writable.",
+    "out_of_scope": "Recognised and deliberately not imported (daily settlement and cash sections, plan §6.3). Neither blocks nor writes.",
+    "unsupported": "A recognised economic row the first release does not support (plan §1.2). Blocks its batch and cannot be claimed by a manual event."
+  },
+  "keys": [
+    { "key": "activity/trades/FUT/trade", "status": "synthetic_only", "evidence": [] },
+    { "key": "activity/trades/FOP/trade", "status": "synthetic_only", "evidence": [] },
+    { "key": "activity/trades/FOP/assignment", "status": "synthetic_only", "evidence": [] },
+    { "key": "activity/trades/FOP/exercise", "status": "synthetic_only", "evidence": [] },
+    { "key": "activity/trades/FOP/expiry", "status": "synthetic_only", "evidence": [] },
+    { "key": "activity/trades/FUT/delivery_leg", "status": "synthetic_only", "evidence": [] },
+    { "key": "flex/trades/FUT/trade", "status": "synthetic_only", "evidence": [] },
+    { "key": "flex/trades/FOP/trade", "status": "synthetic_only", "evidence": [] },
+    { "key": "flex/trades/FOP/assignment", "status": "synthetic_only", "evidence": [] },
+    { "key": "flex/trades/FOP/exercise", "status": "synthetic_only", "evidence": [] },
+    { "key": "flex/trades/FOP/expiry", "status": "synthetic_only", "evidence": [] },
+    { "key": "flex/trades/FUT/delivery_leg", "status": "synthetic_only", "evidence": [] },
+    { "key": "activity/cash_report/ALL/cash", "status": "out_of_scope", "evidence": [] },
+    { "key": "activity/mark_to_market/ALL/summary", "status": "out_of_scope", "evidence": [] },
+    { "key": "flex/cash_report/ALL/cash", "status": "out_of_scope", "evidence": [] },
+    { "key": "flex/statement_of_funds/ALL/cash", "status": "out_of_scope", "evidence": [] },
+    { "key": "activity/trades/FOP.cash_settled/any", "status": "unsupported", "evidence": [] },
+    { "key": "flex/trades/FOP.cash_settled/any", "status": "unsupported", "evidence": [] },
+    { "key": "activity/trades/FOP.nonpositive_strike/any", "status": "unsupported", "evidence": [] },
+    { "key": "flex/trades/FOP.nonpositive_strike/any", "status": "unsupported", "evidence": [] }
+  ]
+}

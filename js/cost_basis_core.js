@@ -56,6 +56,27 @@
         'request_cost_basis_option_scenario_inputs',
     ]);
 
+    // FUT/FOP ledgers are frozen until the standalone FOP ledger ships
+    // (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §2, §13 P0): this engine
+    // keys a futures position by the first six digits of its date and so can
+    // merge different months. The store refuses these writes as well; this
+    // list only keeps the page from sending them. Reading, export and
+    // whole-book deletion stay open.
+    const FUTURES_FROZEN_WRITE_ACTIONS = Object.freeze([
+        'append_cost_basis_event',
+        'void_cost_basis_event',
+        'append_cost_basis_split_group',
+        'void_cost_basis_split_group',
+        'import_cost_basis_events',
+        'save_cost_basis_snapshot',
+        'rebuild_cost_basis_book',
+        'restore_cost_basis_reset',
+        'restore_cost_basis_backup',
+    ]);
+
+    const FUTURES_FROZEN_MESSAGE = 'FUT/FOP 账本已停用：现有引擎可能把不同期货月份'
+        + '合并计算，在独立 FOP 账本上线前只能查看、导出或删除。';
+
     const EVENT_KINDS = Object.freeze([
         'opening_balance', 'share_trade', 'option_trade', 'option_assignment',
         'option_exercise', 'option_expiry', 'dividend', 'fee', 'split',
@@ -129,6 +150,20 @@
     function _upper(value) {
         return String(value === null || value === undefined ? '' : value)
             .trim().replace(/\s+/g, ' ').toUpperCase();
+    }
+
+    /**
+     * Why a request must not be sent while FUT/FOP ledgers are frozen, or ''.
+     *
+     * `book` is the ledger the request targets, looked up by the caller from
+     * `fields.bookId`; a new ledger is judged by the secType it asks for.
+     */
+    function frozenFuturesWriteReason(action, fields, book) {
+        if (action === 'create_cost_basis_book') {
+            return _upper((fields || {}).secType) === 'FUT' ? FUTURES_FROZEN_MESSAGE : '';
+        }
+        if (FUTURES_FROZEN_WRITE_ACTIONS.indexOf(action) < 0) return '';
+        return book && _upper(book.secType) === 'FUT' ? FUTURES_FROZEN_MESSAGE : '';
     }
 
     function _dateDigits(value) {
@@ -3417,6 +3452,9 @@
 
     globalScope.OptionComboCostBasisCore = {
         ALLOWED_CLIENT_ACTIONS,
+        FUTURES_FROZEN_WRITE_ACTIONS,
+        FUTURES_FROZEN_MESSAGE,
+        frozenFuturesWriteReason,
         EVENT_KINDS,
         GROUP_ONLY_EVENT_KINDS,
         OPTION_KINDS,

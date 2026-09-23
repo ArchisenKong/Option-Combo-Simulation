@@ -724,12 +724,21 @@
      *
      * The action is checked against the core whitelist before it can reach
      * the socket, so this page cannot be turned into an order path by a
-     * later edit that forgets the rule.
+     * later edit that forgets the rule. Writes to a frozen FUT/FOP ledger
+     * stop here too (core.frozenFuturesWriteReason); the store refuses them
+     * regardless.
      */
     function request(action, fields) {
         return new Promise((resolve, reject) => {
             if (core.ALLOWED_CLIENT_ACTIONS.indexOf(action) < 0) {
                 reject(new Error(`action ${action} is not allowed from this page`));
+                return;
+            }
+            const targetBookId = (fields || {}).bookId;
+            const frozen = core.frozenFuturesWriteReason(action, fields,
+                state.books.find((book) => book.bookId === targetBookId) || null);
+            if (frozen) {
+                reject(new Error(frozen));
                 return;
             }
             const socket = state.ws;
@@ -1800,7 +1809,8 @@
             + ` · ${futures ? '点值' : '每张交割股数'} ${book.defaultSharesPerContract}`
             + ` · ${state.eventsTotal} 条事件`
             + (book.firstEventDate ? ` · ${book.firstEventDate} 至 ${book.lastEventDate}` : '')
-            + (!book.account ? ' · 兼容模式：可包含多账户历史' : ''));
+            + (!book.account ? ' · 兼容模式：可包含多账户历史' : '')
+            + (futures ? ` · ${core.FUTURES_FROZEN_MESSAGE}` : ''));
         if (state.activeView === 'ledger') {
             _text($('page-title'), `${book.account || '旧版账户'} / ${book.symbol}`);
         }

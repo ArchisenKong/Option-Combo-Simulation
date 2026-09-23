@@ -42,6 +42,7 @@ const suites = [
     require('./cost_basis_stress.test'),
     require('./cost_basis_stress_worker.test'),
     require('./cost_basis_splits.test'),
+    require('./cost_basis_fop_guard.test'),
     require('./workspace_db_admin_core.test'),
     require('./workspace_db_admin_page.test'),
     require('./session_ui.test'),

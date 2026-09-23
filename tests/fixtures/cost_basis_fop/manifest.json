@@ -1,0 +1,51 @@
+{
+  "format": "cost-basis-fop-test-manifest",
+  "version": 1,
+  "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §13.3 and §14.4",
+  "notes": [
+    "tests/run_cost_basis_fop.js --stage <P> runs every node suite up to that stage, and fails on a missing file, a listed case the suite lacks, a case the suite has but this manifest does not list, an unknown stage, or zero selected cases.",
+    "Python suites are checked for their listed cases and run separately with unittest (§14.4).",
+    "A requirement tag with a parenthesised qualifier covers only that part of the F item; the item is complete only when its last dependent stage passes (§14.4)."
+  ],
+  "stages": ["P0", "P1", "P2", "P3", "P4", "P5", "P6"],
+  "sources": ["synthetic", "deidentified_real"],
+  "suites": [
+    {
+      "stage": "P0",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_guard.test.js",
+      "name": "cost_basis_fop_guard",
+      "cases": [
+        { "name": "every allowed page action is classified as read-only, frozen for FUT, create or delete", "requirements": ["F38 (P0 part)"] },
+        { "name": "the core names a reason for every FUT write and none for reads, export or deletion", "requirements": ["F35 (entry)", "F38 (P0 part)", "F11 (reads, export, deletion stay open)"] },
+        { "name": "the page stops frozen FUT writes before they reach the socket", "requirements": ["F35 (entry)", "F38 (P0 part)"] },
+        { "name": "a FUT ledger explains that it is read-only and a stock ledger does not", "requirements": ["F38 (P0 part)"] },
+        { "name": "the create form keeps FOP / FUT visible but disabled", "requirements": ["F35 (entry)"] },
+        { "name": "the capability draft is well formed and marks no row type real_verified", "requirements": ["P0 gate: capability draft"] },
+        { "name": "the month collision gold standard is internally consistent", "requirements": ["F03 (vector)", "F35 (vector)"] },
+        { "name": "the legacy FUT migration list keeps every converted test", "requirements": ["P0 step 4"] }
+      ]
+    },
+    {
+      "stage": "P0",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_guard_test.py",
+      "cases": [
+        { "name": "FuturesLedgerFreezeStoreTests.test_creating_a_futures_ledger_is_refused", "requirements": ["F35 (entry)", "F38 (P0 part)"] },
+        { "name": "FuturesLedgerFreezeStoreTests.test_every_write_to_a_legacy_futures_ledger_is_refused_and_changes_nothing", "requirements": ["F35 (entry)", "F38 (P0 part)"] },
+        { "name": "FuturesLedgerFreezeStoreTests.test_legacy_futures_ledger_can_still_be_read_exported_and_deleted", "requirements": ["F11 (legacy FUT ledger: export and delete only)"] },
+        { "name": "FuturesLedgerFreezeStoreTests.test_futures_backup_cannot_be_restored_into_a_stock_ledger", "requirements": ["F11 (FUT backup refused)"] },
+        { "name": "FuturesLedgerFreezeStoreTests.test_stock_ledgers_are_unaffected", "requirements": ["F28 (stock writes unaffected)"] },
+        { "name": "FuturesLedgerFreezeWsTests.test_protocol_refuses_to_create_a_futures_ledger", "requirements": ["F35 (entry)", "F38 (P0 part)"] },
+        { "name": "FuturesLedgerFreezeWsTests.test_protocol_refuses_every_write_action_on_a_legacy_futures_ledger", "requirements": ["F35 (entry)", "F38 (P0 part)"] },
+        { "name": "FuturesLedgerFreezeWsTests.test_protocol_still_reads_exports_and_deletes_a_legacy_futures_ledger", "requirements": ["F11 (legacy FUT ledger: export and delete only)"] },
+        { "name": "CapabilityDraftTests.test_capability_draft_is_well_formed_and_writes_nothing", "requirements": ["P0 gate: capability draft"] }
+      ]
+    }
+  ],
+  "fixtures": [
+    { "id": "capabilities", "file": "cost_basis_fop_capabilities.json", "source": "synthetic", "requirements": ["P0 gate: capability draft"] },
+    { "id": "month_collision", "file": "tests/fixtures/cost_basis_fop/month_collision.json", "source": "synthetic", "requirements": ["F03", "F35"] },
+    { "id": "legacy_fut_migration_list", "file": "tests/fixtures/cost_basis_fop/legacy_fut_migration_list.json", "source": "synthetic", "requirements": ["P0 step 4"] }
+  ]
+}

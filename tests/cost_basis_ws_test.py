@@ -423,15 +423,16 @@ class BookActionTests(CostBasisWsTestBase):
             [(book['account'], book['symbol']) for book in listed['books']],
             [('U1111111', 'TQQQ'), ('U2222222', 'TQQQ')])
 
-    async def test_same_root_can_have_distinct_stock_and_futures_books(self):
+    async def test_futures_books_are_frozen_beside_a_stock_book_of_the_same_root(self):
+        # FUT/FOP ledgers are frozen until the standalone FOP ledger ships
+        # (tests/cost_basis_fop_guard_test.py covers every write path).
         await self.make_book(symbol='ES')
         response = await self.call(
             'create_cost_basis_book', account='U1111111', symbol='ES',
             startDate='2026-01-01',
             secType='FUT', defaultSharesPerContract=50)
-        self.assertTrue(response['success'], response)
-        self.assertEqual(response['book']['secType'], 'FUT')
-        self.assertEqual(response['book']['defaultMultiplier'], 50)
+        self.assertFalse(response['success'], response)
+        self.assertEqual(response['code'], 'futures_book_frozen')
 
     async def test_missing_field_is_an_invalid_request(self):
         response = await self.call('create_cost_basis_book', symbol='TQQQ')
