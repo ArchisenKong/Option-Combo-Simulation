@@ -2303,6 +2303,53 @@ async def _request_cost_basis_market_price(request):
 cost_basis_store_env['fetch_market_price'] = _request_cost_basis_market_price
 
 
+def _cost_basis_fop_details_dict(details):
+    """One IB ContractDetails as the FOP resolver's dict (IB field names)."""
+    contract = getattr(details, 'contract', None)
+    return {
+        'conId': getattr(contract, 'conId', None),
+        'secType': getattr(contract, 'secType', '') or '',
+        'symbol': getattr(contract, 'symbol', '') or '',
+        'tradingClass': getattr(contract, 'tradingClass', '') or '',
+        'localSymbol': getattr(contract, 'localSymbol', '') or '',
+        'exchange': getattr(contract, 'exchange', '') or '',
+        'currency': getattr(contract, 'currency', '') or '',
+        'right': getattr(contract, 'right', '') or '',
+        'strike': getattr(contract, 'strike', None),
+        'lastTradeDateOrContractMonth': getattr(contract, 'lastTradeDateOrContractMonth', '') or '',
+        'multiplier': getattr(contract, 'multiplier', '') or '',
+        'underConId': getattr(details, 'underConId', None),
+        'contractMonth': getattr(details, 'contractMonth', '') or '',
+    }
+
+
+async def _request_cost_basis_fop_contract_details(query):
+    """Read-only contract details for the standalone FOP ledger's resolver.
+
+    cost_basis_fop_broker bounds the batch, the concurrency and each call's
+    time, and derives nothing from dates: this only asks IB for the details
+    of one conId or one fully specified FOP. No order, exercise or market
+    data subscription is involved.
+    """
+    if not ib.isConnected():
+        raise RuntimeError('TWS is not connected')
+    query = query or {}
+    if query.get('conId'):
+        contract = Contract(conId=int(query['conId']))
+    else:
+        contract = Contract(
+            secType='FOP', symbol=str(query.get('symbol') or ''),
+            tradingClass=str(query.get('tradingClass') or ''),
+            right=str(query.get('right') or ''), strike=float(query.get('strike') or 0),
+            lastTradeDateOrContractMonth=str(query.get('lastTradeDateOrContractMonth') or ''),
+            exchange=str(query.get('exchange') or ''), currency=str(query.get('currency') or ''))
+    details = await ib.reqContractDetailsAsync(contract)
+    return [_cost_basis_fop_details_dict(item) for item in (details or [])]
+
+
+cost_basis_store_env['fetch_fop_contract_details'] = _request_cost_basis_fop_contract_details
+
+
 # Identity and matching live in ib_server_market_data so they are unit
 # tested without importing this module; the aliases keep call sites stable.
 _cost_basis_option_identity = cost_basis_option_identity

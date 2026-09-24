@@ -1,0 +1,3794 @@
+{
+  "format": "cost-basis-fop-protocol-types",
+  "version": 1,
+  "source": "tests/fixtures/cost_basis_fop/contract/protocol.json (types and formats; kept equal by the contract test)",
+  "formats": {
+    "IsoDate": "YYYY-MM-DD, a calendar or exchange trade date; always 10 characters.",
+    "UtcInstant": "YYYY-MM-DDTHH:MM:SS.ffffffZ in UTC, always six fractional digits and 27 characters, so text order is time order in both readers and in SQLite. Every economic or evidence time uses it: executions, ranges, baselines, observations and as-of instants. It keeps every digit its source gave and pads the rest with zeros; nothing is rounded or truncated, so a fill at 14:30:05.900 is after an as-of of 14:30:05.000000. A source more precise than a microsecond is not cut either: it becomes a TimeRange from the microsecond below to the one above (plan §9.2). An instant is as precise as its source; time.sourceTimeText keeps the original text, and fills a source puts in the same instant are ordered by time.orderEvidence.",
+    "RecordedAtUtc": "YYYY-MM-DDTHH:MM:SSZ, 20 characters: when the server wrote a row, in the form cost_basis_store already stamps createdAtUtc, updatedAtUtc, archivedAtUtc and voidedAtUtc. Bookkeeping only: never an economic time and never compared with a UtcInstant."
+  },
+  "types": {
+    "Token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$"
+    },
+    "Account": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9*_-]{1,32}$"
+    },
+    "Symbol": {
+      "type": "string",
+      "pattern": "^[A-Z0-9][A-Z0-9.\\-]{0,31}$"
+    },
+    "Currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "IsoDate": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "UtcInstant": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$"
+    },
+    "RecordedAtUtc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "ContractMonth": {
+      "type": "string",
+      "pattern": "^\\d{6}$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "EvidenceStatus": {
+      "type": "string",
+      "enum": [
+        "verified_broker",
+        "verified_statement",
+        "manual_attested",
+        "unresolved",
+        "conflict"
+      ]
+    },
+    "LedgerVersion": {
+      "type": "object",
+      "fields": {
+        "eventCount": {
+          "type": "integer",
+          "min": 0
+        },
+        "liveEventCount": {
+          "type": "integer",
+          "min": 0
+        },
+        "maxSeq": {
+          "type": "integer",
+          "min": 0
+        },
+        "digest": {
+          "ref": "Digest"
+        }
+      },
+      "required": [
+        "eventCount",
+        "liveEventCount",
+        "maxSeq",
+        "digest"
+      ]
+    },
+    "BookIdentity": {
+      "type": "object",
+      "fields": {
+        "account": {
+          "ref": "Account"
+        },
+        "symbol": {
+          "ref": "Symbol"
+        },
+        "secType": {
+          "type": "string",
+          "enum": [
+            "STK",
+            "FUT"
+          ]
+        },
+        "currency": {
+          "ref": "Currency"
+        }
+      },
+      "required": [
+        "account",
+        "symbol",
+        "secType",
+        "currency"
+      ]
+    },
+    "FopBookCreateRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "create_cost_basis_book"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "account": {
+          "ref": "Account"
+        },
+        "symbol": {
+          "ref": "Symbol"
+        },
+        "startDate": {
+          "ref": "IsoDate"
+        },
+        "secType": {
+          "type": "const",
+          "value": "FUT"
+        },
+        "currency": {
+          "ref": "Currency"
+        },
+        "note": {
+          "type": "string"
+        },
+        "fop": {
+          "type": "object",
+          "fields": {
+            "engineVersion": {
+              "type": "integer",
+              "min": 1
+            },
+            "productRules": {
+              "type": "string",
+              "enum": [
+                "NYMEX-CL-v1"
+              ]
+            },
+            "historyScope": {
+              "type": "string",
+              "enum": [
+                "full_history",
+                "since_baseline"
+              ]
+            }
+          },
+          "required": [
+            "engineVersion",
+            "productRules",
+            "historyScope"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "account",
+        "symbol",
+        "startDate",
+        "secType",
+        "currency",
+        "fop"
+      ]
+    },
+    "ContractRecord": {
+      "type": "variant",
+      "on": "secType",
+      "cases": {
+        "FUT": {
+          "type": "object",
+          "fields": {
+            "contractId": {
+              "ref": "Token"
+            },
+            "revision": {
+              "type": "integer",
+              "min": 1
+            },
+            "conId": {
+              "type": "integer",
+              "min": 1,
+              "nullable": true
+            },
+            "root": {
+              "ref": "Symbol"
+            },
+            "tradingClass": {
+              "type": "string",
+              "nullable": true
+            },
+            "localSymbol": {
+              "type": "string",
+              "nullable": true
+            },
+            "exchange": {
+              "type": "string",
+              "minLength": 1
+            },
+            "currency": {
+              "ref": "Currency"
+            },
+            "ruleVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidenceStatus": {
+              "ref": "EvidenceStatus"
+            },
+            "evidenceSummary": {
+              "type": "string"
+            },
+            "observedAtUtc": {
+              "ref": "UtcInstant"
+            },
+            "secType": {
+              "type": "const",
+              "value": "FUT"
+            },
+            "futureContractMonth": {
+              "ref": "ContractMonth"
+            },
+            "futureLastTradeDate": {
+              "ref": "IsoDate",
+              "nullable": true
+            },
+            "futureLastTradeAsOf": {
+              "ref": "UtcInstant",
+              "nullable": true
+            },
+            "futurePointValue": {
+              "type": "number",
+              "exclusiveMin": 0
+            }
+          },
+          "required": [
+            "contractId",
+            "revision",
+            "conId",
+            "root",
+            "tradingClass",
+            "localSymbol",
+            "exchange",
+            "currency",
+            "ruleVersion",
+            "evidenceStatus",
+            "evidenceSummary",
+            "observedAtUtc",
+            "secType",
+            "futureContractMonth",
+            "futureLastTradeDate",
+            "futureLastTradeAsOf",
+            "futurePointValue"
+          ]
+        },
+        "FOP": {
+          "type": "object",
+          "fields": {
+            "contractId": {
+              "ref": "Token"
+            },
+            "revision": {
+              "type": "integer",
+              "min": 1
+            },
+            "conId": {
+              "type": "integer",
+              "min": 1,
+              "nullable": true
+            },
+            "root": {
+              "ref": "Symbol"
+            },
+            "tradingClass": {
+              "type": "string",
+              "nullable": true
+            },
+            "localSymbol": {
+              "type": "string",
+              "nullable": true
+            },
+            "exchange": {
+              "type": "string",
+              "minLength": 1
+            },
+            "currency": {
+              "ref": "Currency"
+            },
+            "ruleVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidenceStatus": {
+              "ref": "EvidenceStatus"
+            },
+            "evidenceSummary": {
+              "type": "string"
+            },
+            "observedAtUtc": {
+              "ref": "UtcInstant"
+            },
+            "secType": {
+              "type": "const",
+              "value": "FOP"
+            },
+            "optionRight": {
+              "type": "string",
+              "enum": [
+                "C",
+                "P"
+              ]
+            },
+            "optionStrike": {
+              "type": "number",
+              "exclusiveMin": 0
+            },
+            "optionExpiry": {
+              "ref": "IsoDate"
+            },
+            "optionExpiryAsOf": {
+              "ref": "UtcInstant",
+              "nullable": true
+            },
+            "premiumMultiplier": {
+              "type": "number",
+              "exclusiveMin": 0
+            },
+            "deliverableFuturesPerOption": {
+              "type": "number",
+              "exclusiveMin": 0
+            },
+            "settlementType": {
+              "type": "string",
+              "enum": [
+                "physical_future"
+              ]
+            },
+            "exerciseStyle": {
+              "type": "string",
+              "enum": [
+                "american",
+                "european"
+              ]
+            }
+          },
+          "required": [
+            "contractId",
+            "revision",
+            "conId",
+            "root",
+            "tradingClass",
+            "localSymbol",
+            "exchange",
+            "currency",
+            "ruleVersion",
+            "evidenceStatus",
+            "evidenceSummary",
+            "observedAtUtc",
+            "secType",
+            "optionRight",
+            "optionStrike",
+            "optionExpiry",
+            "optionExpiryAsOf",
+            "premiumMultiplier",
+            "deliverableFuturesPerOption",
+            "settlementType",
+            "exerciseStyle"
+          ]
+        }
+      }
+    },
+    "BindingRecord": {
+      "type": "object",
+      "fields": {
+        "bindingId": {
+          "ref": "Token"
+        },
+        "revision": {
+          "type": "integer",
+          "min": 1
+        },
+        "optionContractId": {
+          "ref": "Token"
+        },
+        "futureContractId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "status": {
+          "ref": "EvidenceStatus"
+        },
+        "evidenceSummary": {
+          "type": "string"
+        },
+        "evidenceCredential": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        },
+        "observedAtUtc": {
+          "ref": "UtcInstant"
+        }
+      },
+      "required": [
+        "bindingId",
+        "revision",
+        "optionContractId",
+        "futureContractId",
+        "status",
+        "evidenceSummary",
+        "evidenceCredential",
+        "observedAtUtc"
+      ],
+      "rules": [
+        {
+          "id": "binding_unresolved_has_no_future",
+          "when": {
+            "field": "status",
+            "in": [
+              "unresolved",
+              "conflict"
+            ]
+          },
+          "forbid": [
+            "futureContractId"
+          ]
+        },
+        {
+          "id": "binding_resolved_has_future",
+          "when": {
+            "field": "status",
+            "in": [
+              "verified_broker",
+              "verified_statement",
+              "manual_attested"
+            ]
+          },
+          "require": [
+            "futureContractId"
+          ]
+        },
+        {
+          "id": "binding_verified_needs_server_credential",
+          "when": {
+            "field": "status",
+            "in": [
+              "verified_broker",
+              "verified_statement"
+            ]
+          },
+          "require": [
+            "evidenceCredential"
+          ]
+        },
+        {
+          "id": "binding_unverified_carries_no_credential",
+          "when": {
+            "field": "status",
+            "in": [
+              "manual_attested",
+              "unresolved",
+              "conflict"
+            ]
+          },
+          "forbid": [
+            "evidenceCredential"
+          ]
+        }
+      ]
+    },
+    "ContractRef": {
+      "type": "object",
+      "fields": {
+        "contractId": {
+          "ref": "Token"
+        },
+        "revision": {
+          "type": "integer",
+          "min": 1
+        }
+      },
+      "required": [
+        "contractId",
+        "revision"
+      ]
+    },
+    "BindingRef": {
+      "type": "object",
+      "fields": {
+        "bindingId": {
+          "ref": "Token"
+        },
+        "revision": {
+          "type": "integer",
+          "min": 1
+        }
+      },
+      "required": [
+        "bindingId",
+        "revision"
+      ]
+    },
+    "TimeRange": {
+      "type": "object",
+      "fields": {
+        "startUtc": {
+          "ref": "UtcInstant"
+        },
+        "endUtc": {
+          "ref": "UtcInstant"
+        }
+      },
+      "required": [
+        "startUtc",
+        "endUtc"
+      ],
+      "rules": [
+        {
+          "id": "time_range_ordered",
+          "lessOrEqual": [
+            "startUtc",
+            "endUtc"
+          ]
+        }
+      ]
+    },
+    "TimeFacts": {
+      "type": "object",
+      "fields": {
+        "exchangeTradeDate": {
+          "ref": "IsoDate",
+          "nullable": true
+        },
+        "executedAtUtc": {
+          "ref": "UtcInstant",
+          "nullable": true
+        },
+        "timeRange": {
+          "ref": "TimeRange",
+          "nullable": true
+        },
+        "sourceTimeText": {
+          "type": "string",
+          "nullable": true
+        },
+        "sourceTimezone": {
+          "type": "string",
+          "nullable": true
+        },
+        "orderEvidence": {
+          "type": "string",
+          "nullable": true
+        }
+      },
+      "required": [
+        "exchangeTradeDate",
+        "executedAtUtc",
+        "timeRange",
+        "sourceTimeText",
+        "sourceTimezone",
+        "orderEvidence"
+      ],
+      "rules": [
+        {
+          "id": "time_is_an_instant_or_a_range",
+          "exactlyOne": [
+            "executedAtUtc",
+            "timeRange"
+          ]
+        }
+      ]
+    },
+    "SourceRef": {
+      "type": "object",
+      "fields": {
+        "namespace": {
+          "type": "string",
+          "enum": [
+            "flex_trade",
+            "ib_exec",
+            "activity_row",
+            "tws_exec"
+          ]
+        },
+        "sourceRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "trade",
+            "option_leg",
+            "future_leg",
+            "fee"
+          ]
+        },
+        "quantity": {
+          "type": "number",
+          "nullable": true
+        },
+        "fees": {
+          "type": "number",
+          "min": 0,
+          "nullable": true
+        }
+      },
+      "required": [
+        "namespace",
+        "sourceRef",
+        "role",
+        "quantity",
+        "fees"
+      ]
+    },
+    "SourceSubmission": {
+      "type": "object",
+      "fields": {
+        "account": {
+          "ref": "Account"
+        },
+        "namespace": {
+          "type": "string",
+          "enum": [
+            "flex_trade",
+            "ib_exec",
+            "activity_row",
+            "tws_exec"
+          ]
+        },
+        "sourceRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capabilityKey": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "flex_csv",
+            "activity_csv",
+            "tws_execution"
+          ]
+        },
+        "section": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        },
+        "rawFields": {
+          "type": "map",
+          "values": {
+            "type": "string"
+          },
+          "minEntries": 1
+        },
+        "statedQuantity": {
+          "type": "number",
+          "nullable": true
+        },
+        "statedFees": {
+          "type": "number",
+          "nullable": true
+        }
+      },
+      "required": [
+        "account",
+        "namespace",
+        "sourceRef",
+        "capabilityKey",
+        "format",
+        "section",
+        "rawFields",
+        "statedQuantity",
+        "statedFees"
+      ],
+      "rules": [
+        {
+          "id": "statement_row_names_its_capability",
+          "when": {
+            "field": "namespace",
+            "in": [
+              "flex_trade",
+              "activity_row"
+            ]
+          },
+          "require": [
+            "capabilityKey",
+            "section"
+          ]
+        }
+      ]
+    },
+    "StatementRegistration": {
+      "type": "object",
+      "fields": {
+        "format": {
+          "type": "string",
+          "enum": [
+            "flex_csv",
+            "activity_csv"
+          ]
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fileSha256": {
+          "ref": "Digest"
+        },
+        "account": {
+          "ref": "Account"
+        },
+        "periodFrom": {
+          "ref": "IsoDate"
+        },
+        "periodThrough": {
+          "ref": "IsoDate"
+        },
+        "checks": {
+          "type": "map",
+          "values": {
+            "type": "boolean"
+          }
+        },
+        "confirmedDuplicates": {
+          "type": "integer",
+          "min": 0
+        }
+      },
+      "required": [
+        "format",
+        "fileName",
+        "fileSha256",
+        "account",
+        "periodFrom",
+        "periodThrough",
+        "checks",
+        "confirmedDuplicates"
+      ],
+      "rules": [
+        {
+          "id": "statement_period_ordered",
+          "lessOrEqual": [
+            "periodFrom",
+            "periodThrough"
+          ]
+        }
+      ]
+    },
+    "FopEvent": {
+      "type": "variant",
+      "on": "kind",
+      "cases": {
+        "futures_trade": {
+          "type": "object",
+          "fields": {
+            "account": {
+              "ref": "Account"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "csv_import",
+                "execution_report",
+                "reconcile"
+              ]
+            },
+            "externalRef": {
+              "type": "string",
+              "minLength": 1,
+              "nullable": true
+            },
+            "packageKey": {
+              "ref": "Token",
+              "nullable": true
+            },
+            "note": {
+              "type": "string"
+            },
+            "time": {
+              "ref": "TimeFacts"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "ref": "SourceRef"
+              }
+            },
+            "kind": {
+              "type": "const",
+              "value": "futures_trade"
+            },
+            "contractRef": {
+              "ref": "ContractRef"
+            },
+            "futureContracts": {
+              "type": "integer",
+              "nonzero": true
+            },
+            "price": {
+              "type": "number"
+            },
+            "cashAmount": {
+              "type": "number"
+            },
+            "fees": {
+              "type": "number",
+              "min": 0
+            },
+            "openClose": {
+              "type": "string",
+              "enum": [
+                "O",
+                "C",
+                "CO"
+              ],
+              "nullable": true
+            },
+            "includeInCost": {
+              "type": "const",
+              "value": true
+            }
+          },
+          "required": [
+            "account",
+            "source",
+            "externalRef",
+            "packageKey",
+            "note",
+            "time",
+            "sources",
+            "kind",
+            "contractRef",
+            "futureContracts",
+            "price",
+            "cashAmount",
+            "fees",
+            "openClose",
+            "includeInCost"
+          ],
+          "rules": [
+            {
+              "id": "cash_is_minus_fees",
+              "equals": {
+                "field": "cashAmount",
+                "negate": "fees"
+              }
+            }
+          ]
+        },
+        "option_trade": {
+          "type": "object",
+          "fields": {
+            "account": {
+              "ref": "Account"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "csv_import",
+                "execution_report",
+                "reconcile"
+              ]
+            },
+            "externalRef": {
+              "type": "string",
+              "minLength": 1,
+              "nullable": true
+            },
+            "packageKey": {
+              "ref": "Token",
+              "nullable": true
+            },
+            "note": {
+              "type": "string"
+            },
+            "time": {
+              "ref": "TimeFacts"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "ref": "SourceRef"
+              }
+            },
+            "kind": {
+              "type": "const",
+              "value": "option_trade"
+            },
+            "contractRef": {
+              "ref": "ContractRef"
+            },
+            "contracts": {
+              "type": "integer",
+              "nonzero": true
+            },
+            "price": {
+              "type": "number",
+              "min": 0
+            },
+            "cashAmount": {
+              "type": "number"
+            },
+            "fees": {
+              "type": "number",
+              "min": 0
+            },
+            "openClose": {
+              "type": "string",
+              "enum": [
+                "O",
+                "C",
+                "CO"
+              ],
+              "nullable": true
+            },
+            "includeInCost": {
+              "type": "const",
+              "value": true
+            }
+          },
+          "required": [
+            "account",
+            "source",
+            "externalRef",
+            "packageKey",
+            "note",
+            "time",
+            "sources",
+            "kind",
+            "contractRef",
+            "contracts",
+            "price",
+            "cashAmount",
+            "fees",
+            "openClose",
+            "includeInCost"
+          ]
+        },
+        "option_assignment": {
+          "type": "object",
+          "fields": {
+            "account": {
+              "ref": "Account"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "csv_import",
+                "execution_report",
+                "reconcile"
+              ]
+            },
+            "externalRef": {
+              "type": "string",
+              "minLength": 1,
+              "nullable": true
+            },
+            "packageKey": {
+              "ref": "Token",
+              "nullable": true
+            },
+            "note": {
+              "type": "string"
+            },
+            "time": {
+              "ref": "TimeFacts"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "ref": "SourceRef"
+              }
+            },
+            "kind": {
+              "type": "const",
+              "value": "option_assignment"
+            },
+            "contractRef": {
+              "ref": "ContractRef"
+            },
+            "deliveredContractRef": {
+              "ref": "ContractRef"
+            },
+            "bindingRef": {
+              "ref": "BindingRef"
+            },
+            "contracts": {
+              "type": "integer",
+              "min": 1
+            },
+            "futureContracts": {
+              "type": "integer",
+              "nonzero": true
+            },
+            "price": {
+              "type": "number",
+              "exclusiveMin": 0
+            },
+            "cashAmount": {
+              "type": "number"
+            },
+            "fees": {
+              "type": "number",
+              "min": 0
+            },
+            "includeInCost": {
+              "type": "const",
+              "value": true
+            }
+          },
+          "required": [
+            "account",
+            "source",
+            "externalRef",
+            "packageKey",
+            "note",
+            "time",
+            "sources",
+            "kind",
+            "contractRef",
+            "deliveredContractRef",
+            "bindingRef",
+            "contracts",
+            "futureContracts",
+            "price",
+            "cashAmount",
+            "fees",
+            "includeInCost"
+          ],
+          "rules": [
+            {
+              "id": "cash_is_minus_fees",
+              "equals": {
+                "field": "cashAmount",
+                "negate": "fees"
+              }
+            }
+          ]
+        },
+        "option_exercise": {
+          "type": "object",
+          "fields": {
+            "account": {
+              "ref": "Account"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "csv_import",
+                "execution_report",
+                "reconcile"
+              ]
+            },
+            "externalRef": {
+              "type": "string",
+              "minLength": 1,
+              "nullable": true
+            },
+            "packageKey": {
+              "ref": "Token",
+              "nullable": true
+            },
+            "note": {
+              "type": "string"
+            },
+            "time": {
+              "ref": "TimeFacts"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "ref": "SourceRef"
+              }
+            },
+            "kind": {
+              "type": "const",
+              "value": "option_exercise"
+            },
+            "contractRef": {
+              "ref": "ContractRef"
+            },
+            "deliveredContractRef": {
+              "ref": "ContractRef"
+            },
+            "bindingRef": {
+              "ref": "BindingRef"
+            },
+            "contracts": {
+              "type": "integer",
+              "max": -1
+            },
+            "futureContracts": {
+              "type": "integer",
+              "nonzero": true
+            },
+            "price": {
+              "type": "number",
+              "exclusiveMin": 0
+            },
+            "cashAmount": {
+              "type": "number"
+            },
+            "fees": {
+              "type": "number",
+              "min": 0
+            },
+            "includeInCost": {
+              "type": "const",
+              "value": true
+            }
+          },
+          "required": [
+            "account",
+            "source",
+            "externalRef",
+            "packageKey",
+            "note",
+            "time",
+            "sources",
+            "kind",
+            "contractRef",
+            "deliveredContractRef",
+            "bindingRef",
+            "contracts",
+            "futureContracts",
+            "price",
+            "cashAmount",
+            "fees",
+            "includeInCost"
+          ],
+          "rules": [
+            {
+              "id": "cash_is_minus_fees",
+              "equals": {
+                "field": "cashAmount",
+                "negate": "fees"
+              }
+            }
+          ]
+        },
+        "option_expiry": {
+          "type": "object",
+          "fields": {
+            "account": {
+              "ref": "Account"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "csv_import",
+                "execution_report",
+                "reconcile"
+              ]
+            },
+            "externalRef": {
+              "type": "string",
+              "minLength": 1,
+              "nullable": true
+            },
+            "packageKey": {
+              "ref": "Token",
+              "nullable": true
+            },
+            "note": {
+              "type": "string"
+            },
+            "time": {
+              "ref": "TimeFacts"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "ref": "SourceRef"
+              }
+            },
+            "kind": {
+              "type": "const",
+              "value": "option_expiry"
+            },
+            "contractRef": {
+              "ref": "ContractRef"
+            },
+            "contracts": {
+              "type": "integer",
+              "nonzero": true
+            },
+            "cashAmount": {
+              "type": "number"
+            },
+            "fees": {
+              "type": "number",
+              "min": 0
+            },
+            "includeInCost": {
+              "type": "const",
+              "value": true
+            }
+          },
+          "required": [
+            "account",
+            "source",
+            "externalRef",
+            "packageKey",
+            "note",
+            "time",
+            "sources",
+            "kind",
+            "contractRef",
+            "contracts",
+            "cashAmount",
+            "fees",
+            "includeInCost"
+          ],
+          "rules": [
+            {
+              "id": "cash_is_minus_fees",
+              "equals": {
+                "field": "cashAmount",
+                "negate": "fees"
+              }
+            }
+          ]
+        },
+        "opening_balance": {
+          "type": "object",
+          "fields": {
+            "account": {
+              "ref": "Account"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "csv_import",
+                "execution_report",
+                "reconcile"
+              ]
+            },
+            "externalRef": {
+              "type": "string",
+              "minLength": 1,
+              "nullable": true
+            },
+            "packageKey": {
+              "ref": "Token",
+              "nullable": true
+            },
+            "note": {
+              "type": "string"
+            },
+            "time": {
+              "ref": "TimeFacts"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "ref": "SourceRef"
+              }
+            },
+            "kind": {
+              "type": "const",
+              "value": "opening_balance"
+            },
+            "contractRef": {
+              "ref": "ContractRef"
+            },
+            "contracts": {
+              "type": "integer",
+              "nonzero": true,
+              "nullable": true
+            },
+            "futureContracts": {
+              "type": "integer",
+              "nonzero": true,
+              "nullable": true
+            },
+            "price": {
+              "type": "number",
+              "nullable": true
+            },
+            "cashAmount": {
+              "type": "const",
+              "value": 0
+            },
+            "fees": {
+              "type": "const",
+              "value": 0
+            },
+            "baselineKind": {
+              "type": "string",
+              "enum": [
+                "trade_cost",
+                "reference_price",
+                "unknown_cost"
+              ]
+            },
+            "baselineAsOfUtc": {
+              "ref": "UtcInstant"
+            },
+            "includeInCost": {
+              "type": "const",
+              "value": true
+            }
+          },
+          "required": [
+            "account",
+            "source",
+            "externalRef",
+            "packageKey",
+            "note",
+            "time",
+            "sources",
+            "kind",
+            "contractRef",
+            "contracts",
+            "futureContracts",
+            "price",
+            "cashAmount",
+            "fees",
+            "baselineKind",
+            "baselineAsOfUtc",
+            "includeInCost"
+          ],
+          "rules": [
+            {
+              "id": "baseline_holds_one_quantity",
+              "exactlyOne": [
+                "contracts",
+                "futureContracts"
+              ]
+            },
+            {
+              "id": "unknown_cost_has_no_price",
+              "when": {
+                "field": "baselineKind",
+                "in": [
+                  "unknown_cost"
+                ]
+              },
+              "forbid": [
+                "price"
+              ]
+            },
+            {
+              "id": "known_baseline_has_a_price",
+              "when": {
+                "field": "baselineKind",
+                "in": [
+                  "trade_cost",
+                  "reference_price"
+                ]
+              },
+              "require": [
+                "price"
+              ]
+            }
+          ]
+        },
+        "fee": {
+          "type": "object",
+          "fields": {
+            "account": {
+              "ref": "Account"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "csv_import",
+                "execution_report",
+                "reconcile"
+              ]
+            },
+            "externalRef": {
+              "type": "string",
+              "minLength": 1,
+              "nullable": true
+            },
+            "packageKey": {
+              "ref": "Token",
+              "nullable": true
+            },
+            "note": {
+              "type": "string"
+            },
+            "time": {
+              "ref": "TimeFacts"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "ref": "SourceRef"
+              }
+            },
+            "kind": {
+              "type": "const",
+              "value": "fee"
+            },
+            "feeSource": {
+              "ref": "FeeSourceRef",
+              "nullable": true
+            },
+            "feeCategory": {
+              "type": "string",
+              "enum": [
+                "futures",
+                "short_option",
+                "long_option",
+                "strategy"
+              ]
+            },
+            "feeIsRefund": {
+              "type": "boolean"
+            },
+            "cashAmount": {
+              "type": "number",
+              "nonzero": true
+            },
+            "fees": {
+              "type": "const",
+              "value": 0
+            },
+            "includeInCost": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "account",
+            "source",
+            "externalRef",
+            "packageKey",
+            "note",
+            "time",
+            "sources",
+            "kind",
+            "feeSource",
+            "feeCategory",
+            "feeIsRefund",
+            "cashAmount",
+            "fees",
+            "includeInCost"
+          ],
+          "rules": [
+            {
+              "id": "fee_takes_cash",
+              "when": {
+                "field": "feeIsRefund",
+                "in": [
+                  false
+                ]
+              },
+              "sign": {
+                "cashAmount": "negative"
+              }
+            },
+            {
+              "id": "refund_returns_cash",
+              "when": {
+                "field": "feeIsRefund",
+                "in": [
+                  true
+                ]
+              },
+              "sign": {
+                "cashAmount": "positive"
+              }
+            }
+          ]
+        },
+        "manual_adjust": {
+          "type": "object",
+          "fields": {
+            "account": {
+              "ref": "Account"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "csv_import",
+                "execution_report",
+                "reconcile"
+              ]
+            },
+            "externalRef": {
+              "type": "string",
+              "minLength": 1,
+              "nullable": true
+            },
+            "packageKey": {
+              "ref": "Token",
+              "nullable": true
+            },
+            "note": {
+              "type": "string",
+              "minLength": 1
+            },
+            "time": {
+              "ref": "TimeFacts"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "ref": "SourceRef"
+              }
+            },
+            "kind": {
+              "type": "const",
+              "value": "manual_adjust"
+            },
+            "adjustmentScope": {
+              "type": "string",
+              "enum": [
+                "strategy",
+                "seller_lens"
+              ]
+            },
+            "cashAmount": {
+              "type": "number",
+              "nonzero": true
+            },
+            "fees": {
+              "type": "const",
+              "value": 0
+            },
+            "includeInCost": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "account",
+            "source",
+            "externalRef",
+            "packageKey",
+            "note",
+            "time",
+            "sources",
+            "kind",
+            "adjustmentScope",
+            "cashAmount",
+            "fees",
+            "includeInCost"
+          ]
+        }
+      }
+    },
+    "FopPackage": {
+      "type": "object",
+      "fields": {
+        "version": {
+          "type": "const",
+          "value": 1
+        },
+        "engineVersion": {
+          "type": "integer",
+          "min": 1
+        },
+        "contracts": {
+          "type": "array",
+          "items": {
+            "ref": "ContractRecord"
+          }
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "ref": "BindingRecord"
+          }
+        },
+        "sourceRecords": {
+          "type": "array",
+          "items": {
+            "ref": "SourceSubmission"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "ref": "FopEvent"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "version",
+        "engineVersion",
+        "contracts",
+        "bindings",
+        "sourceRecords",
+        "events"
+      ]
+    },
+    "FopPackageSingle": {
+      "type": "object",
+      "fields": {
+        "version": {
+          "type": "const",
+          "value": 1
+        },
+        "engineVersion": {
+          "type": "integer",
+          "min": 1
+        },
+        "contracts": {
+          "type": "array",
+          "items": {
+            "ref": "ContractRecord"
+          }
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "ref": "BindingRecord"
+          }
+        },
+        "sourceRecords": {
+          "type": "array",
+          "items": {
+            "ref": "SourceSubmission"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "ref": "FopEvent"
+          },
+          "minItems": 1,
+          "maxItems": 1
+        }
+      },
+      "required": [
+        "version",
+        "engineVersion",
+        "contracts",
+        "bindings",
+        "sourceRecords",
+        "events"
+      ]
+    },
+    "AppendRequest": {
+      "type": "object",
+      "fields": {
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "expectedLedgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "bookIdentity": {
+          "ref": "BookIdentity"
+        },
+        "action": {
+          "type": "const",
+          "value": "append_cost_basis_event"
+        },
+        "clientToken": {
+          "ref": "Token"
+        },
+        "fopPackage": {
+          "ref": "FopPackageSingle"
+        }
+      },
+      "required": [
+        "requestId",
+        "bookId",
+        "expectedLedgerVersion",
+        "bookIdentity",
+        "action",
+        "clientToken",
+        "fopPackage"
+      ]
+    },
+    "ImportRequest": {
+      "type": "object",
+      "fields": {
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "expectedLedgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "bookIdentity": {
+          "ref": "BookIdentity"
+        },
+        "action": {
+          "type": "const",
+          "value": "import_cost_basis_events"
+        },
+        "importBatchId": {
+          "ref": "Token"
+        },
+        "clientTokenPrefix": {
+          "ref": "Token"
+        },
+        "statement": {
+          "ref": "StatementRegistration",
+          "nullable": true
+        },
+        "supersedeTwsEventIds": {
+          "type": "array",
+          "items": {
+            "ref": "Token"
+          }
+        },
+        "fopPackage": {
+          "ref": "FopPackage"
+        }
+      },
+      "required": [
+        "requestId",
+        "bookId",
+        "expectedLedgerVersion",
+        "bookIdentity",
+        "action",
+        "importBatchId",
+        "clientTokenPrefix",
+        "statement",
+        "supersedeTwsEventIds",
+        "fopPackage"
+      ]
+    },
+    "VoidRequest": {
+      "type": "object",
+      "fields": {
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "expectedLedgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "bookIdentity": {
+          "ref": "BookIdentity"
+        },
+        "engineVersion": {
+          "type": "integer",
+          "min": 1
+        },
+        "action": {
+          "type": "const",
+          "value": "void_cost_basis_event"
+        },
+        "eventId": {
+          "ref": "Token"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientToken": {
+          "ref": "Token"
+        }
+      },
+      "required": [
+        "requestId",
+        "bookId",
+        "expectedLedgerVersion",
+        "bookIdentity",
+        "engineVersion",
+        "action",
+        "eventId",
+        "reason",
+        "clientToken"
+      ]
+    },
+    "RefValue": {
+      "type": "object",
+      "fields": {
+        "id": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "revision": {
+          "type": "integer",
+          "min": 1,
+          "nullable": true
+        }
+      },
+      "required": [
+        "id",
+        "revision"
+      ]
+    },
+    "ReferenceChange": {
+      "type": "object",
+      "fields": {
+        "eventId": {
+          "ref": "Token"
+        },
+        "reference": {
+          "type": "string",
+          "enum": [
+            "contract",
+            "delivered_contract",
+            "binding",
+            "fee_source"
+          ]
+        },
+        "before": {
+          "ref": "RefValue"
+        },
+        "after": {
+          "ref": "RefValue"
+        }
+      },
+      "required": [
+        "eventId",
+        "reference",
+        "before",
+        "after"
+      ]
+    },
+    "MetadataOperation": {
+      "type": "variant",
+      "on": "kind",
+      "cases": {
+        "adopt_binding": {
+          "type": "object",
+          "fields": {
+            "kind": {
+              "type": "const",
+              "value": "adopt_binding"
+            },
+            "binding": {
+              "ref": "BindingRecord"
+            },
+            "affected": {
+              "type": "array",
+              "items": {
+                "ref": "ReferenceChange"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "binding",
+            "affected"
+          ]
+        },
+        "correct_contract": {
+          "type": "object",
+          "fields": {
+            "kind": {
+              "type": "const",
+              "value": "correct_contract"
+            },
+            "contract": {
+              "ref": "ContractRecord"
+            },
+            "affected": {
+              "type": "array",
+              "items": {
+                "ref": "ReferenceChange"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "contract",
+            "affected"
+          ]
+        },
+        "close_cycle": {
+          "type": "object",
+          "fields": {
+            "kind": {
+              "type": "const",
+              "value": "close_cycle"
+            },
+            "boundaryId": {
+              "ref": "Token"
+            },
+            "anchorEventId": {
+              "ref": "Token"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "boundaryId",
+            "anchorEventId",
+            "label"
+          ]
+        },
+        "revoke_cycle": {
+          "type": "object",
+          "fields": {
+            "kind": {
+              "type": "const",
+              "value": "revoke_cycle"
+            },
+            "boundaryId": {
+              "ref": "Token"
+            }
+          },
+          "required": [
+            "kind",
+            "boundaryId"
+          ]
+        }
+      }
+    },
+    "MetadataCommitRequest": {
+      "type": "object",
+      "fields": {
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "expectedLedgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "bookIdentity": {
+          "ref": "BookIdentity"
+        },
+        "engineVersion": {
+          "type": "integer",
+          "min": 1
+        },
+        "action": {
+          "type": "const",
+          "value": "commit_cost_basis_fop_metadata"
+        },
+        "clientToken": {
+          "ref": "Token"
+        },
+        "operation": {
+          "ref": "MetadataOperation"
+        }
+      },
+      "required": [
+        "requestId",
+        "bookId",
+        "expectedLedgerVersion",
+        "bookIdentity",
+        "engineVersion",
+        "action",
+        "clientToken",
+        "operation"
+      ]
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "const",
+          "value": false
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "invalid_request",
+            "book_not_found",
+            "book_exists",
+            "event_not_found",
+            "event_already_voided",
+            "position_overdraw",
+            "ledger_changed",
+            "import_revision_conflict",
+            "reset_confirmation_mismatch",
+            "delete_confirmation_mismatch",
+            "database_busy",
+            "database_corrupt",
+            "store_unavailable",
+            "remote_access_disabled",
+            "futures_book_frozen",
+            "fop_engine_version_mismatch",
+            "fop_capability_not_verified",
+            "fop_unsupported_row",
+            "fop_identity_conflict",
+            "fop_binding_evidence_invalid",
+            "fop_ordering_ambiguous",
+            "fop_cycle_boundary_violated",
+            "fop_reference_revision_conflict",
+            "fop_contract_details_unavailable"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "success",
+        "code",
+        "message"
+      ]
+    },
+    "FopDetails": {
+      "type": "object",
+      "fields": {
+        "contractRef": {
+          "ref": "ContractRef",
+          "nullable": true
+        },
+        "deliveredContractRef": {
+          "ref": "ContractRef",
+          "nullable": true
+        },
+        "bindingRef": {
+          "ref": "BindingRef",
+          "nullable": true
+        },
+        "openClose": {
+          "type": "string",
+          "enum": [
+            "O",
+            "C",
+            "CO"
+          ],
+          "nullable": true
+        },
+        "feeCategory": {
+          "type": "string",
+          "enum": [
+            "futures",
+            "short_option",
+            "long_option",
+            "strategy"
+          ],
+          "nullable": true
+        },
+        "feeIsRefund": {
+          "type": "boolean"
+        },
+        "feeSourceEventId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "adjustmentScope": {
+          "type": "string",
+          "enum": [
+            "strategy",
+            "seller_lens"
+          ],
+          "nullable": true
+        },
+        "baselineKind": {
+          "type": "string",
+          "enum": [
+            "trade_cost",
+            "reference_price",
+            "unknown_cost"
+          ],
+          "nullable": true
+        },
+        "baselineAsOfUtc": {
+          "ref": "UtcInstant",
+          "nullable": true
+        },
+        "time": {
+          "ref": "TimeFacts"
+        }
+      },
+      "required": [
+        "contractRef",
+        "deliveredContractRef",
+        "bindingRef",
+        "openClose",
+        "feeCategory",
+        "feeIsRefund",
+        "feeSourceEventId",
+        "adjustmentScope",
+        "baselineKind",
+        "baselineAsOfUtc",
+        "time"
+      ]
+    },
+    "DisplayProjection": {
+      "type": "object",
+      "fields": {
+        "localSymbol": {
+          "type": "string",
+          "nullable": true
+        },
+        "contractMonth": {
+          "ref": "ContractMonth",
+          "nullable": true
+        },
+        "right": {
+          "type": "string",
+          "enum": [
+            "C",
+            "P"
+          ],
+          "nullable": true
+        },
+        "strike": {
+          "type": "number",
+          "nullable": true
+        },
+        "expiry": {
+          "ref": "IsoDate",
+          "nullable": true
+        },
+        "deliveredLocalSymbol": {
+          "type": "string",
+          "nullable": true
+        },
+        "deliveredContractMonth": {
+          "ref": "ContractMonth",
+          "nullable": true
+        }
+      },
+      "required": [
+        "localSymbol",
+        "contractMonth",
+        "right",
+        "strike",
+        "expiry",
+        "deliveredLocalSymbol",
+        "deliveredContractMonth"
+      ]
+    },
+    "ListedFopEvent": {
+      "type": "object",
+      "fields": {
+        "eventId": {
+          "ref": "Token"
+        },
+        "seq": {
+          "type": "integer",
+          "min": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "futures_trade",
+            "option_trade",
+            "option_assignment",
+            "option_exercise",
+            "option_expiry",
+            "opening_balance",
+            "fee",
+            "manual_adjust"
+          ]
+        },
+        "tradeDate": {
+          "ref": "IsoDate"
+        },
+        "brokerTimestamp": {
+          "type": "string",
+          "nullable": true
+        },
+        "account": {
+          "ref": "Account"
+        },
+        "contracts": {
+          "type": "integer",
+          "nullable": true
+        },
+        "futureContracts": {
+          "type": "integer",
+          "nullable": true
+        },
+        "price": {
+          "type": "number",
+          "nullable": true
+        },
+        "cashAmount": {
+          "type": "number"
+        },
+        "fees": {
+          "type": "number",
+          "min": 0
+        },
+        "includeInCost": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "csv_import",
+            "execution_report",
+            "reconcile"
+          ]
+        },
+        "externalRef": {
+          "type": "string",
+          "nullable": true
+        },
+        "note": {
+          "type": "string"
+        },
+        "voidedAtUtc": {
+          "ref": "RecordedAtUtc",
+          "nullable": true
+        },
+        "fop": {
+          "ref": "FopDetails"
+        },
+        "display": {
+          "ref": "DisplayProjection"
+        }
+      },
+      "required": [
+        "eventId",
+        "seq",
+        "kind",
+        "tradeDate",
+        "brokerTimestamp",
+        "account",
+        "contracts",
+        "futureContracts",
+        "price",
+        "cashAmount",
+        "fees",
+        "includeInCost",
+        "source",
+        "externalRef",
+        "note",
+        "voidedAtUtc",
+        "fop",
+        "display"
+      ]
+    },
+    "ListEventsResponse": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "const",
+          "value": true
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "ref": "ListedFopEvent"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "min": 0
+        },
+        "offset": {
+          "type": "integer",
+          "min": 0
+        },
+        "limit": {
+          "type": "integer",
+          "min": 1
+        },
+        "ledgerVersion": {
+          "ref": "LedgerVersion"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "success",
+        "bookId",
+        "events",
+        "total",
+        "offset",
+        "limit",
+        "ledgerVersion"
+      ]
+    },
+    "Quote": {
+      "type": "object",
+      "fields": {
+        "contractId": {
+          "ref": "Token"
+        },
+        "bid": {
+          "type": "number",
+          "nullable": true
+        },
+        "ask": {
+          "type": "number",
+          "nullable": true
+        },
+        "last": {
+          "type": "number",
+          "nullable": true
+        },
+        "mark": {
+          "type": "number",
+          "nullable": true
+        },
+        "markSource": {
+          "type": "string",
+          "enum": [
+            "mid",
+            "one_sided_conservative",
+            "settlement_reference",
+            "close_reference",
+            "unavailable"
+          ]
+        },
+        "referenceDate": {
+          "ref": "IsoDate",
+          "nullable": true
+        },
+        "observedAtUtc": {
+          "ref": "UtcInstant",
+          "nullable": true
+        },
+        "marketDataType": {
+          "type": "integer",
+          "nullable": true
+        }
+      },
+      "required": [
+        "contractId",
+        "bid",
+        "ask",
+        "last",
+        "mark",
+        "markSource",
+        "referenceDate",
+        "observedAtUtc",
+        "marketDataType"
+      ],
+      "rules": [
+        {
+          "id": "unavailable_quote_has_no_mark",
+          "when": {
+            "field": "markSource",
+            "in": [
+              "unavailable"
+            ]
+          },
+          "forbid": [
+            "mark"
+          ]
+        },
+        {
+          "id": "usable_quote_has_a_mark",
+          "when": {
+            "field": "markSource",
+            "in": [
+              "mid",
+              "one_sided_conservative",
+              "settlement_reference",
+              "close_reference"
+            ]
+          },
+          "require": [
+            "mark"
+          ]
+        },
+        {
+          "id": "reference_quote_has_its_date",
+          "when": {
+            "field": "markSource",
+            "in": [
+              "settlement_reference",
+              "close_reference"
+            ]
+          },
+          "require": [
+            "referenceDate"
+          ]
+        }
+      ]
+    },
+    "FopSnapshotSummary": {
+      "type": "object",
+      "fields": {
+        "ledgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "quoteBatchId": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        },
+        "quotes": {
+          "type": "array",
+          "items": {
+            "ref": "Quote"
+          }
+        },
+        "completeness": {
+          "type": "object",
+          "fields": {
+            "quantity": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_checked"
+              ]
+            },
+            "openingCost": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_checked"
+              ]
+            },
+            "binding": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_checked"
+              ]
+            },
+            "marketData": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_checked"
+              ]
+            },
+            "coverage": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_checked"
+              ]
+            },
+            "cash": {
+              "type": "const",
+              "value": "not_checked"
+            }
+          },
+          "required": [
+            "quantity",
+            "openingCost",
+            "binding",
+            "marketData",
+            "coverage",
+            "cash"
+          ]
+        }
+      },
+      "required": [
+        "ledgerVersion",
+        "quoteBatchId",
+        "quotes",
+        "completeness"
+      ]
+    },
+    "SnapshotRequest": {
+      "type": "object",
+      "fields": {
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "expectedLedgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "bookIdentity": {
+          "ref": "BookIdentity"
+        },
+        "action": {
+          "type": "const",
+          "value": "save_cost_basis_snapshot"
+        },
+        "asOfDate": {
+          "ref": "IsoDate"
+        },
+        "summary": {
+          "ref": "FopSnapshotSummary"
+        },
+        "accountScope": {
+          "type": "string"
+        },
+        "twsSnapshot": {
+          "type": "json",
+          "nullable": true
+        },
+        "reconciled": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "bookId",
+        "expectedLedgerVersion",
+        "bookIdentity",
+        "action",
+        "asOfDate",
+        "summary",
+        "accountScope",
+        "twsSnapshot",
+        "reconciled",
+        "note"
+      ]
+    },
+    "BookRecord": {
+      "type": "object",
+      "fields": {
+        "bookId": {
+          "ref": "Token"
+        },
+        "account": {
+          "ref": "Account"
+        },
+        "symbol": {
+          "ref": "Symbol"
+        },
+        "secType": {
+          "type": "const",
+          "value": "FUT"
+        },
+        "currency": {
+          "ref": "Currency"
+        },
+        "defaultSharesPerContract": {
+          "type": "const",
+          "value": null
+        },
+        "startDate": {
+          "ref": "IsoDate"
+        },
+        "note": {
+          "type": "string"
+        },
+        "createdAtUtc": {
+          "ref": "RecordedAtUtc"
+        },
+        "updatedAtUtc": {
+          "ref": "RecordedAtUtc"
+        },
+        "archivedAtUtc": {
+          "ref": "RecordedAtUtc",
+          "nullable": true
+        }
+      },
+      "required": [
+        "bookId",
+        "account",
+        "symbol",
+        "secType",
+        "currency",
+        "defaultSharesPerContract",
+        "startDate",
+        "note",
+        "createdAtUtc",
+        "updatedAtUtc",
+        "archivedAtUtc"
+      ]
+    },
+    "FopBookRecord": {
+      "type": "object",
+      "fields": {
+        "engineVersion": {
+          "type": "integer",
+          "min": 1
+        },
+        "productRules": {
+          "type": "string",
+          "minLength": 1
+        },
+        "historyScope": {
+          "type": "string",
+          "enum": [
+            "full_history",
+            "since_baseline"
+          ]
+        },
+        "createdAtUtc": {
+          "ref": "RecordedAtUtc"
+        },
+        "updatedAtUtc": {
+          "ref": "RecordedAtUtc"
+        }
+      },
+      "required": [
+        "engineVersion",
+        "productRules",
+        "historyScope",
+        "createdAtUtc",
+        "updatedAtUtc"
+      ]
+    },
+    "StoredContract": {
+      "type": "object",
+      "fields": {
+        "record": {
+          "ref": "ContractRecord"
+        },
+        "supersededByRevision": {
+          "type": "integer",
+          "min": 2,
+          "nullable": true
+        },
+        "createdAtUtc": {
+          "ref": "RecordedAtUtc"
+        }
+      },
+      "required": [
+        "record",
+        "supersededByRevision",
+        "createdAtUtc"
+      ]
+    },
+    "StoredBinding": {
+      "type": "object",
+      "fields": {
+        "bindingId": {
+          "ref": "Token"
+        },
+        "revision": {
+          "type": "integer",
+          "min": 1
+        },
+        "optionContractId": {
+          "ref": "Token"
+        },
+        "futureContractId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "status": {
+          "ref": "EvidenceStatus"
+        },
+        "evidenceSummary": {
+          "type": "string"
+        },
+        "evidenceDigest": {
+          "ref": "Digest",
+          "nullable": true
+        },
+        "observedAtUtc": {
+          "ref": "UtcInstant"
+        },
+        "supersededByRevision": {
+          "type": "integer",
+          "min": 2,
+          "nullable": true
+        },
+        "createdAtUtc": {
+          "ref": "RecordedAtUtc"
+        }
+      },
+      "required": [
+        "bindingId",
+        "revision",
+        "optionContractId",
+        "futureContractId",
+        "status",
+        "evidenceSummary",
+        "evidenceDigest",
+        "observedAtUtc",
+        "supersededByRevision",
+        "createdAtUtc"
+      ],
+      "rules": [
+        {
+          "id": "binding_unresolved_has_no_future",
+          "when": {
+            "field": "status",
+            "in": [
+              "unresolved",
+              "conflict"
+            ]
+          },
+          "forbid": [
+            "futureContractId"
+          ]
+        },
+        {
+          "id": "binding_resolved_has_future",
+          "when": {
+            "field": "status",
+            "in": [
+              "verified_broker",
+              "verified_statement",
+              "manual_attested"
+            ]
+          },
+          "require": [
+            "futureContractId"
+          ]
+        },
+        {
+          "id": "stored_verified_binding_has_digest",
+          "when": {
+            "field": "status",
+            "in": [
+              "verified_broker",
+              "verified_statement"
+            ]
+          },
+          "require": [
+            "evidenceDigest"
+          ]
+        }
+      ]
+    },
+    "StoredFopEvent": {
+      "type": "object",
+      "fields": {
+        "row": {
+          "ref": "ListedFopEvent"
+        },
+        "clientToken": {
+          "ref": "Token"
+        },
+        "createdAtUtc": {
+          "ref": "RecordedAtUtc"
+        },
+        "voidedByEventId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "voidReason": {
+          "type": "string",
+          "nullable": true
+        },
+        "primarySourceId": {
+          "ref": "Token",
+          "nullable": true
+        }
+      },
+      "required": [
+        "row",
+        "clientToken",
+        "createdAtUtc",
+        "voidedByEventId",
+        "voidReason",
+        "primarySourceId"
+      ]
+    },
+    "CycleRecord": {
+      "type": "object",
+      "fields": {
+        "boundaryId": {
+          "ref": "Token"
+        },
+        "revision": {
+          "type": "integer",
+          "min": 1
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "closed",
+            "revoked"
+          ]
+        },
+        "anchorEventId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "label": {
+          "type": "string"
+        },
+        "supersededByRevision": {
+          "type": "integer",
+          "min": 2,
+          "nullable": true
+        },
+        "createdAtUtc": {
+          "ref": "RecordedAtUtc"
+        }
+      },
+      "required": [
+        "boundaryId",
+        "revision",
+        "state",
+        "anchorEventId",
+        "label",
+        "supersededByRevision",
+        "createdAtUtc"
+      ],
+      "rules": [
+        {
+          "id": "closed_boundary_has_anchor",
+          "when": {
+            "field": "state",
+            "in": [
+              "closed"
+            ]
+          },
+          "require": [
+            "anchorEventId"
+          ]
+        },
+        {
+          "id": "revoked_boundary_has_no_anchor",
+          "when": {
+            "field": "state",
+            "in": [
+              "revoked"
+            ]
+          },
+          "forbid": [
+            "anchorEventId"
+          ]
+        }
+      ]
+    },
+    "SourceRecord": {
+      "type": "object",
+      "fields": {
+        "sourceId": {
+          "ref": "Token"
+        },
+        "account": {
+          "ref": "Account"
+        },
+        "namespace": {
+          "type": "string",
+          "enum": [
+            "flex_trade",
+            "ib_exec",
+            "activity_row",
+            "tws_exec"
+          ]
+        },
+        "sourceRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capabilityKey": {
+          "type": "string",
+          "nullable": true
+        },
+        "format": {
+          "type": "string",
+          "nullable": true
+        },
+        "section": {
+          "type": "string",
+          "nullable": true
+        },
+        "rawFields": {
+          "type": "map",
+          "values": {
+            "type": "string"
+          },
+          "minEntries": 1
+        },
+        "statedQuantity": {
+          "type": "number",
+          "nullable": true
+        },
+        "statedFees": {
+          "type": "number",
+          "nullable": true
+        },
+        "importBatchId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "createdAtUtc": {
+          "ref": "RecordedAtUtc"
+        }
+      },
+      "required": [
+        "sourceId",
+        "account",
+        "namespace",
+        "sourceRef",
+        "capabilityKey",
+        "format",
+        "section",
+        "rawFields",
+        "statedQuantity",
+        "statedFees",
+        "importBatchId",
+        "createdAtUtc"
+      ]
+    },
+    "AllocationRecord": {
+      "type": "object",
+      "fields": {
+        "sourceId": {
+          "ref": "Token"
+        },
+        "eventId": {
+          "ref": "Token"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "trade",
+            "option_leg",
+            "future_leg",
+            "fee"
+          ]
+        },
+        "quantity": {
+          "type": "number",
+          "nullable": true
+        },
+        "fees": {
+          "type": "number",
+          "min": 0,
+          "nullable": true
+        },
+        "createdAtUtc": {
+          "ref": "RecordedAtUtc"
+        }
+      },
+      "required": [
+        "sourceId",
+        "eventId",
+        "role",
+        "quantity",
+        "fees",
+        "createdAtUtc"
+      ]
+    },
+    "OperationRecord": {
+      "type": "object",
+      "fields": {
+        "operationId": {
+          "ref": "Token"
+        },
+        "clientToken": {
+          "ref": "Token"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "adopt_binding",
+            "correct_contract",
+            "close_cycle",
+            "revoke_cycle",
+            "rebuild"
+          ]
+        },
+        "payloadDigest": {
+          "ref": "Digest"
+        },
+        "ledgerDigestBefore": {
+          "ref": "Digest"
+        },
+        "ledgerDigestAfter": {
+          "ref": "Digest"
+        },
+        "createdAtUtc": {
+          "ref": "RecordedAtUtc"
+        }
+      },
+      "required": [
+        "operationId",
+        "clientToken",
+        "kind",
+        "payloadDigest",
+        "ledgerDigestBefore",
+        "ledgerDigestAfter",
+        "createdAtUtc"
+      ]
+    },
+    "ReferenceRevisionRecord": {
+      "type": "object",
+      "fields": {
+        "operationId": {
+          "ref": "Token"
+        },
+        "eventId": {
+          "ref": "Token"
+        },
+        "reference": {
+          "type": "string",
+          "enum": [
+            "contract",
+            "delivered_contract",
+            "binding",
+            "fee_source"
+          ]
+        },
+        "before": {
+          "ref": "RefValue"
+        },
+        "after": {
+          "ref": "RefValue"
+        }
+      },
+      "required": [
+        "operationId",
+        "eventId",
+        "reference",
+        "before",
+        "after"
+      ]
+    },
+    "EventIdMappingRecord": {
+      "type": "object",
+      "fields": {
+        "operationId": {
+          "ref": "Token"
+        },
+        "oldEventId": {
+          "ref": "Token"
+        },
+        "newEventId": {
+          "ref": "Token"
+        }
+      },
+      "required": [
+        "operationId",
+        "oldEventId",
+        "newEventId"
+      ]
+    },
+    "BackupPayloadV2": {
+      "type": "object",
+      "fields": {
+        "book": {
+          "ref": "BookRecord"
+        },
+        "fopBook": {
+          "ref": "FopBookRecord"
+        },
+        "contracts": {
+          "type": "array",
+          "items": {
+            "ref": "StoredContract"
+          }
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "ref": "StoredBinding"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "ref": "StoredFopEvent"
+          }
+        },
+        "cycles": {
+          "type": "array",
+          "items": {
+            "ref": "CycleRecord"
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "ref": "SourceRecord"
+          }
+        },
+        "allocations": {
+          "type": "array",
+          "items": {
+            "ref": "AllocationRecord"
+          }
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "ref": "OperationRecord"
+          }
+        },
+        "referenceRevisions": {
+          "type": "array",
+          "items": {
+            "ref": "ReferenceRevisionRecord"
+          }
+        },
+        "eventIdMappings": {
+          "type": "array",
+          "items": {
+            "ref": "EventIdMappingRecord"
+          }
+        },
+        "requests": {
+          "type": "array",
+          "items": {
+            "ref": "RequestRecord"
+          }
+        }
+      },
+      "required": [
+        "book",
+        "fopBook",
+        "contracts",
+        "bindings",
+        "events",
+        "cycles",
+        "sources",
+        "allocations",
+        "operations",
+        "referenceRevisions",
+        "eventIdMappings",
+        "requests"
+      ]
+    },
+    "BackupEnvelopeV2": {
+      "type": "object",
+      "fields": {
+        "format": {
+          "type": "const",
+          "value": "cost-basis-backup"
+        },
+        "version": {
+          "type": "const",
+          "value": 2
+        },
+        "kind": {
+          "type": "const",
+          "value": "fop"
+        },
+        "sha256": {
+          "ref": "Digest"
+        },
+        "payload": {
+          "ref": "BackupPayloadV2"
+        }
+      },
+      "required": [
+        "format",
+        "version",
+        "kind",
+        "sha256",
+        "payload"
+      ]
+    },
+    "FeeSourceRef": {
+      "type": "object",
+      "fields": {
+        "eventId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "packageKey": {
+          "ref": "Token",
+          "nullable": true
+        }
+      },
+      "required": [
+        "eventId",
+        "packageKey"
+      ],
+      "rules": [
+        {
+          "id": "fee_source_is_one_reference",
+          "exactlyOne": [
+            "eventId",
+            "packageKey"
+          ]
+        }
+      ]
+    },
+    "FopResetRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "reset_cost_basis_book"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "expectedLedgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "bookIdentity": {
+          "ref": "BookIdentity"
+        },
+        "engineVersion": {
+          "type": "integer",
+          "min": 1
+        },
+        "confirmation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientToken": {
+          "ref": "Token"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId",
+        "expectedLedgerVersion",
+        "bookIdentity",
+        "engineVersion",
+        "confirmation",
+        "clientToken",
+        "reason"
+      ]
+    },
+    "FopRebuildRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "rebuild_cost_basis_book"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "expectedLedgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "bookIdentity": {
+          "ref": "BookIdentity"
+        },
+        "confirmation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientToken": {
+          "ref": "Token"
+        },
+        "importBatchId": {
+          "ref": "Token"
+        },
+        "statement": {
+          "ref": "StatementRegistration",
+          "nullable": true
+        },
+        "reason": {
+          "type": "string"
+        },
+        "revokeBoundaries": {
+          "type": "array",
+          "items": {
+            "ref": "Token"
+          }
+        },
+        "fopPackage": {
+          "ref": "FopPackage"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId",
+        "expectedLedgerVersion",
+        "bookIdentity",
+        "confirmation",
+        "clientToken",
+        "importBatchId",
+        "statement",
+        "reason",
+        "revokeBoundaries",
+        "fopPackage"
+      ]
+    },
+    "FopRestoreResetRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "restore_cost_basis_reset"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "expectedLedgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "bookIdentity": {
+          "ref": "BookIdentity"
+        },
+        "engineVersion": {
+          "type": "integer",
+          "min": 1
+        },
+        "resetId": {
+          "ref": "Token"
+        },
+        "confirmation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientToken": {
+          "ref": "Token"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId",
+        "expectedLedgerVersion",
+        "bookIdentity",
+        "engineVersion",
+        "resetId",
+        "confirmation",
+        "clientToken"
+      ]
+    },
+    "FopRestoreBackupRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "restore_cost_basis_backup"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "expectedLedgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "bookIdentity": {
+          "ref": "BookIdentity"
+        },
+        "engineVersion": {
+          "type": "integer",
+          "min": 1
+        },
+        "backup": {
+          "ref": "BackupEnvelopeV2"
+        },
+        "confirmation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clientToken": {
+          "ref": "Token"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId",
+        "expectedLedgerVersion",
+        "bookIdentity",
+        "engineVersion",
+        "backup",
+        "confirmation",
+        "clientToken"
+      ]
+    },
+    "ContractCandidate": {
+      "type": "variant",
+      "on": "secType",
+      "cases": {
+        "FUT": {
+          "type": "object",
+          "fields": {
+            "contractId": {
+              "ref": "Token",
+              "nullable": true
+            },
+            "revision": {
+              "type": "integer",
+              "min": 1,
+              "nullable": true
+            },
+            "conId": {
+              "type": "integer",
+              "min": 1,
+              "nullable": true
+            },
+            "root": {
+              "ref": "Symbol"
+            },
+            "tradingClass": {
+              "type": "string",
+              "nullable": true
+            },
+            "localSymbol": {
+              "type": "string",
+              "nullable": true
+            },
+            "exchange": {
+              "type": "string",
+              "minLength": 1
+            },
+            "currency": {
+              "ref": "Currency"
+            },
+            "ruleVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidenceStatus": {
+              "ref": "EvidenceStatus"
+            },
+            "evidenceSummary": {
+              "type": "string"
+            },
+            "observedAtUtc": {
+              "ref": "UtcInstant"
+            },
+            "secType": {
+              "type": "const",
+              "value": "FUT"
+            },
+            "futureContractMonth": {
+              "ref": "ContractMonth"
+            },
+            "futureLastTradeDate": {
+              "ref": "IsoDate",
+              "nullable": true
+            },
+            "futureLastTradeAsOf": {
+              "ref": "UtcInstant",
+              "nullable": true
+            },
+            "futurePointValue": {
+              "type": "number",
+              "exclusiveMin": 0
+            }
+          },
+          "required": [
+            "contractId",
+            "revision",
+            "conId",
+            "root",
+            "tradingClass",
+            "localSymbol",
+            "exchange",
+            "currency",
+            "ruleVersion",
+            "evidenceStatus",
+            "evidenceSummary",
+            "observedAtUtc",
+            "secType",
+            "futureContractMonth",
+            "futureLastTradeDate",
+            "futureLastTradeAsOf",
+            "futurePointValue"
+          ]
+        },
+        "FOP": {
+          "type": "object",
+          "fields": {
+            "contractId": {
+              "ref": "Token",
+              "nullable": true
+            },
+            "revision": {
+              "type": "integer",
+              "min": 1,
+              "nullable": true
+            },
+            "conId": {
+              "type": "integer",
+              "min": 1,
+              "nullable": true
+            },
+            "root": {
+              "ref": "Symbol"
+            },
+            "tradingClass": {
+              "type": "string",
+              "nullable": true
+            },
+            "localSymbol": {
+              "type": "string",
+              "nullable": true
+            },
+            "exchange": {
+              "type": "string",
+              "minLength": 1
+            },
+            "currency": {
+              "ref": "Currency"
+            },
+            "ruleVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidenceStatus": {
+              "ref": "EvidenceStatus"
+            },
+            "evidenceSummary": {
+              "type": "string"
+            },
+            "observedAtUtc": {
+              "ref": "UtcInstant"
+            },
+            "secType": {
+              "type": "const",
+              "value": "FOP"
+            },
+            "optionRight": {
+              "type": "string",
+              "enum": [
+                "C",
+                "P"
+              ]
+            },
+            "optionStrike": {
+              "type": "number",
+              "exclusiveMin": 0
+            },
+            "optionExpiry": {
+              "ref": "IsoDate"
+            },
+            "optionExpiryAsOf": {
+              "ref": "UtcInstant",
+              "nullable": true
+            },
+            "premiumMultiplier": {
+              "type": "number",
+              "exclusiveMin": 0
+            },
+            "deliverableFuturesPerOption": {
+              "type": "number",
+              "exclusiveMin": 0
+            },
+            "settlementType": {
+              "type": "string",
+              "enum": [
+                "physical_future"
+              ]
+            },
+            "exerciseStyle": {
+              "type": "string",
+              "enum": [
+                "american",
+                "european"
+              ]
+            }
+          },
+          "required": [
+            "contractId",
+            "revision",
+            "conId",
+            "root",
+            "tradingClass",
+            "localSymbol",
+            "exchange",
+            "currency",
+            "ruleVersion",
+            "evidenceStatus",
+            "evidenceSummary",
+            "observedAtUtc",
+            "secType",
+            "optionRight",
+            "optionStrike",
+            "optionExpiry",
+            "optionExpiryAsOf",
+            "premiumMultiplier",
+            "deliverableFuturesPerOption",
+            "settlementType",
+            "exerciseStyle"
+          ]
+        }
+      }
+    },
+    "ContractDetailsRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "request_cost_basis_fop_contract_details"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "contracts": {
+          "type": "array",
+          "items": {
+            "ref": "ContractRecord"
+          },
+          "minItems": 1,
+          "maxItems": 20
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId",
+        "contracts"
+      ]
+    },
+    "ContractDetailsResult": {
+      "type": "object",
+      "fields": {
+        "contractId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "verified_broker",
+            "unresolved",
+            "conflict"
+          ]
+        },
+        "option": {
+          "ref": "ContractCandidate",
+          "nullable": true
+        },
+        "future": {
+          "ref": "ContractCandidate",
+          "nullable": true
+        },
+        "evidenceSummary": {
+          "type": "string"
+        },
+        "evidenceCredential": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "contractId",
+        "status",
+        "option",
+        "future",
+        "evidenceSummary",
+        "evidenceCredential",
+        "problems"
+      ],
+      "rules": [
+        {
+          "id": "verified_result_carries_the_pair_and_credential",
+          "when": {
+            "field": "status",
+            "in": [
+              "verified_broker"
+            ]
+          },
+          "require": [
+            "option",
+            "future",
+            "evidenceCredential"
+          ]
+        },
+        {
+          "id": "unverified_result_carries_no_credential",
+          "when": {
+            "field": "status",
+            "in": [
+              "unresolved",
+              "conflict"
+            ]
+          },
+          "forbid": [
+            "evidenceCredential"
+          ]
+        }
+      ]
+    },
+    "ContractDetailsResponse": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "cost_basis_fop_contract_details"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "const",
+          "value": true
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "ref": "ContractDetailsResult"
+          }
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "success",
+        "bookId",
+        "results"
+      ]
+    },
+    "RequestRecord": {
+      "type": "object",
+      "fields": {
+        "clientToken": {
+          "ref": "Token"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "append",
+            "void",
+            "metadata",
+            "reset",
+            "restore_reset",
+            "restore_backup",
+            "rebuild"
+          ]
+        },
+        "requestDigest": {
+          "ref": "Digest"
+        },
+        "resultJson": {
+          "type": "string",
+          "minLength": 2
+        },
+        "createdAtUtc": {
+          "ref": "RecordedAtUtc"
+        }
+      },
+      "required": [
+        "clientToken",
+        "action",
+        "requestDigest",
+        "resultJson",
+        "createdAtUtc"
+      ]
+    }
+  }
+}

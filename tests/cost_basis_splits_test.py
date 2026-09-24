@@ -18,6 +18,7 @@ import unittest
 import uuid
 
 import cost_basis_store as module
+from cost_basis_fop_test_support import strip_v11_tables  # noqa: E402
 from cost_basis_store import (
     SCHEMA_USER_VERSION,
     CostBasisStore,
@@ -247,7 +248,7 @@ class SchemaV10Tests(TempStoreCase):
     def test_fresh_database_can_store_split_groups(self):
         conn = self.raw()
         try:
-            self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], 10)
+            self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], SCHEMA_USER_VERSION)
             columns = {row['name'] for row in conn.execute('PRAGMA table_info(cost_basis_events)')}
             self.assertTrue(set(NEW_COLUMNS) <= columns)
             indexes = {row['name'] for row in conn.execute(
@@ -345,6 +346,7 @@ class MigrationV9ToV10Tests(TempStoreCase):
         conn = self.raw()
         try:
             conn.execute('BEGIN IMMEDIATE')
+            strip_v11_tables(conn)
             conn.execute('ALTER TABLE cost_basis_events RENAME TO old_events')
             conn.execute(v9_sql)
             conn.execute(f'INSERT INTO cost_basis_events ({columns}) '

@@ -26,6 +26,10 @@
         + '（现有引擎可能把不同期货月份合并计算），这里不计算成本或盈亏，也不写入任何数据。';
     const LEGACY_STATE = '这是旧版 FUT 账本，已冻结为只读。独立 FOP 引擎完成前，这里只显示账本身份；'
         + '需要查看流水、导出或删除时，请在旧页面打开。';
+    // A FUT ledger with FOP metadata belongs to the new engine; the stock page
+    // cannot show its rows, so it gets no link there.
+    const FOP_STATE = '这是独立 FOP 账本。写入尚未发布，这里暂时只显示账本身份；'
+        + '流水、导出和删除在后续阶段提供。';
 
     const state = {
         ws: null,
@@ -57,7 +61,7 @@
 
     /** The identity rows shown for one ledger. */
     function bookIdentity(book) {
-        return [
+        const rows = [
             ['账户', book.account || '旧版未限定账户'],
             ['根代码', book.symbol || ''],
             ['类型', book.secType || ''],
@@ -65,6 +69,10 @@
             ['起算日', book.startDate || ''],
             ['事件数', String(book.eventCount === undefined ? '' : book.eventCount)],
         ];
+        if (book.fop) {
+            rows.push(['规则', `${book.fop.productRules} · 引擎 v${book.fop.engineVersion}`]);
+        }
+        return rows;
     }
 
     function bookLabel(book) {
@@ -160,8 +168,11 @@
                 identity.appendChild(term);
                 identity.appendChild(detail);
             });
-            _text($('book-state'), LEGACY_STATE);
-            $('book-legacy-link').href = `cost_basis.html?bookId=${encodeURIComponent(view.book.bookId)}`;
+            const fopLedger = Boolean(view.book.fop);
+            _text($('book-state'), fopLedger ? FOP_STATE : LEGACY_STATE);
+            const legacyLink = $('book-legacy-link');
+            legacyLink.hidden = fopLedger;
+            legacyLink.href = `cost_basis.html?bookId=${encodeURIComponent(view.book.bookId)}`;
             _show('book-view');
             return;
         }
@@ -255,6 +266,7 @@
         PAGE,
         STAGE_NOTICE,
         LEGACY_STATE,
+        FOP_STATE,
         describeView,
         bookIdentity,
         bookLabel,

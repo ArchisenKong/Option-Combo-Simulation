@@ -4,7 +4,8 @@
 -- This is the frozen structure, not the migration. P2 writes the migration in
 -- cost_basis_store.py, assigns the next free schema version and must keep
 -- these tables, columns and constraints; changing them means revising this
--- file and its tests first.
+-- file and its tests first. Revised in P2, before any release: section 9
+-- (the request log) answers the P2 review (R5, R7, R11).
 --
 -- Run order (tests/cost_basis_fop_contract_test.py follows it):
 --   PRAGMA foreign_keys = OFF   (before BEGIN; it has no effect inside one)
@@ -286,4 +287,23 @@ CREATE TABLE cost_basis_fop_event_id_mappings (
     old_event_id TEXT NOT NULL,
     new_event_id TEXT NOT NULL REFERENCES cost_basis_events(event_id),
     PRIMARY KEY (operation_id, old_event_id)
+);
+
+-- 9. One row per accepted FOP write request: its token, what it asked and what
+--    it was answered. A retry with the same token is the same request only
+--    when the action and the request digest match, and then it gets the stored
+--    answer whatever the ledger has become since; any other use of the token
+--    is refused. A reset, restore or rebuild replaces the graph but keeps
+--    these rows; deleting the ledger removes them. A backup carries them, and
+--    a restore under the same ledger id brings them back (never under another
+--    id, where every token is new). Not part of the ledger version.
+CREATE TABLE cost_basis_fop_requests (
+    client_token   TEXT PRIMARY KEY,
+    book_id        TEXT NOT NULL REFERENCES cost_basis_books(book_id),
+    action         TEXT NOT NULL CHECK (action IN (
+                       'append', 'void', 'metadata', 'reset', 'restore_reset',
+                       'restore_backup', 'rebuild')),
+    request_digest TEXT NOT NULL CHECK (length(request_digest) = 64),
+    result_json    TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL
 );

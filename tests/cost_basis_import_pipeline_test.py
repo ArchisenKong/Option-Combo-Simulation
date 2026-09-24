@@ -7,6 +7,7 @@ import tempfile
 import unittest
 import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from cost_basis_fop_test_support import strip_v11_tables  # noqa: E402
 from cost_basis_store import (CostBasisStore, InvalidRequestError, LedgerChangedError,
                               ResetConfirmationError, ImportRevisionConflictError, PositionOverdrawError)
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -261,6 +262,7 @@ console.log(JSON.stringify({warnings:ledger.warnings,positions:ledger.openOption
         before=self.store.list_events(self.bid,include_voided=True)['events']
         with self.store._connect() as conn:
             conn.execute('DROP TABLE cost_basis_reset_coverage')
+            strip_v11_tables(conn)
             conn.execute('PRAGMA user_version = 8')
         self.store.initialize()
         self.assertEqual(before,self.store.list_events(self.bid,include_voided=True)['events'])

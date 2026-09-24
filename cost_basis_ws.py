@@ -26,7 +26,11 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime, timezone
 
+import cost_basis_fop_broker
+import cost_basis_fop_domain
+import cost_basis_fop_schema
 from cost_basis_store import (
     CostBasisStore,
     CostBasisStoreError,
@@ -66,6 +70,9 @@ SERVER_ACTIONS = {
     'request_cost_basis_executions': 'cost_basis_executions',
     'request_cost_basis_market_price': 'cost_basis_market_price',
     'request_cost_basis_option_scenario_inputs': 'cost_basis_option_scenario_inputs',
+    # Standalone FOP ledger (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §10.2).
+    'commit_cost_basis_fop_metadata': 'cost_basis_fop_metadata_committed',
+    'request_cost_basis_fop_contract_details': 'cost_basis_fop_contract_details',
 }
 
 COST_BASIS_CLIENT_ACTIONS = frozenset(SERVER_ACTIONS)
@@ -188,7 +195,9 @@ def ensure_store_initialized(store_env):
             return store_env
         try:
             db_path = resolve_db_path(config=store_env.get('_config'))
-            store = CostBasisStore(db_path).initialize()
+            store = CostBasisStore(
+                db_path, display_timezone=_display_timezone(store_env.get('_config'))
+            ).initialize()
         except CostBasisStoreError as exc:
             logger.error(
                 'cost basis ledger unavailable (%s): %s — market data and '
@@ -201,7 +210,36 @@ def ensure_store_initialized(store_env):
         store_env['available'] = True
         store_env['reason'] = ''
         logger.info('cost basis ledger ready at %s', store.db_path)
+        migration = store.last_migration
+        if migration and migration.get('backupPath'):
+            logger.warning(
+                'cost basis ledger migrated from schema v%s to v%s; the previous build '
+                'cannot open it. A verified copy of the old file is at %s',
+                migration['fromVersion'], migration['toVersion'], migration['backupPath'])
+            if migration.get('preservedOrphans'):
+                logger.warning(
+                    'rows of ledgers deleted before v11 were kept, not removed: %s',
+                    migration['preservedOrphans'])
         return store_env
+
+
+def _display_timezone(config):
+    """[tws] timezone: the zone of a FOP row's trade date projection (plan §8.1)."""
+    if config is None:
+        return 'America/New_York'
+    try:
+        return (config.get('tws', 'timezone', fallback='') or '').strip() or 'America/New_York'
+    except Exception:
+        return 'America/New_York'
+
+
+def _fop_message(data, type_name):
+    """Refuse a FOP message the frozen contract refuses, before the store runs."""
+    try:
+        cost_basis_fop_domain.require_shape(type_name, data, type_name)
+    except cost_basis_fop_domain.FopDomainError as exc:
+        raise InvalidRequestError(str(exc)) from exc
+    return data
 
 
 def _peer_ip(remote_address):
@@ -317,6 +355,14 @@ async def build_cost_basis_response(store_env, websocket, data, *,
             response['features'] = {
                 'optionScenarioInputs': callable(
                     store_env.get('fetch_option_scenario_inputs')),
+                # A client whose FOP engine differs gets an explicit upgrade
+                # error on every FOP write (plan §8.2 item 5).
+                'fopLedger': {
+                    'engineVersion': cost_basis_fop_domain.FOP_ENGINE_VERSION,
+                    'productRules': sorted(cost_basis_fop_domain.SUPPORTED_PRODUCT_RULES),
+                    'writesReleased': bool(getattr(store, '_fop_writes_enabled', False)),
+                    'contractDetails': callable(store_env.get('fetch_fop_contract_details')),
+                },
             }
         return response
 
@@ -326,6 +372,31 @@ async def build_cost_basis_response(store_env, websocket, data, *,
             store_env.get('reason') or 'store_unavailable',
             'the cost basis ledger is unavailable',
         )
+
+    if action == 'request_cost_basis_fop_contract_details':
+        fetcher = store_env.get('fetch_fop_contract_details')
+        if not callable(fetcher):
+            return _error_response(
+                server_action, request_id, 'fop_contract_details_unavailable',
+                'this backend cannot resolve FOP contracts')
+        try:
+            _fop_message(data, 'ContractDetailsRequest')
+            book = await asyncio.to_thread(store.get_book, _required_str(data, 'bookId'))
+            if book.get('fop') is None:
+                raise InvalidRequestError('contracts are resolved for FOP ledgers only')
+            observed_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            results = await cost_basis_fop_broker.resolve_fop_contracts(
+                store, book, data['contracts'], contract_details=fetcher,
+                observed_at=observed_at)
+        except cost_basis_fop_broker.BrokerResolutionError as exc:
+            return _error_response(server_action, request_id, exc.code, str(exc))
+        except CostBasisStoreError as exc:
+            _log_result(action, request_id, data, started, error=exc.code)
+            return _error_response(server_action, request_id, exc.code, str(exc))
+        response = {'action': server_action, 'requestId': request_id, 'success': True,
+                    'bookId': book['bookId'], 'results': results}
+        _log_result(action, request_id, data, started, result={'results': len(results)})
+        return response
 
     if action == 'request_cost_basis_executions':
         fetcher = store_env.get('fetch_executions')
@@ -491,6 +562,13 @@ async def _dispatch_store_call(store, action, data):
         # (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §1.1). Only a stock
         # ledger keeps the conventional 100 shares per contract.
         sec_type = _required_str(data, 'secType').strip().upper()
+        if 'fop' in data:
+            # A FOP ledger: FUT with FOP metadata and no stock multiplier.
+            _fop_message(data, 'FopBookCreateRequest')
+            book = await asyncio.to_thread(lambda: store.create_fop_book(
+                account=data['account'], symbol=data['symbol'], start_date=data['startDate'],
+                currency=data['currency'], note=data['note'], fop=data['fop']))
+            return {'book': book}
         shares_per_contract = data.get('defaultSharesPerContract')
         if shares_per_contract in (None, ''):
             if sec_type != 'STK':
@@ -546,6 +624,12 @@ async def _dispatch_store_call(store, action, data):
         )
 
     if action == 'append_cost_basis_event':
+        if 'fopPackage' in data:
+            _fop_message(data, 'AppendRequest')
+            return await asyncio.to_thread(lambda: store.append_fop_event(
+                data['bookId'], data['fopPackage'], client_token=data['clientToken'],
+                expected_ledger_version=data['expectedLedgerVersion'],
+                book_identity=data['bookIdentity']))
         return await asyncio.to_thread(
             lambda: store.append_event(
                 _required_str(data, 'bookId'),
@@ -556,6 +640,13 @@ async def _dispatch_store_call(store, action, data):
         )
 
     if action == 'void_cost_basis_event':
+        if await asyncio.to_thread(store._is_fop_book, _required_str(data, 'bookId')):
+            _fop_message(data, 'VoidRequest')
+            return await asyncio.to_thread(lambda: store.void_fop_event(
+                data['bookId'], data['eventId'], reason=data['reason'],
+                client_token=data['clientToken'],
+                expected_ledger_version=data['expectedLedgerVersion'],
+                book_identity=data['bookIdentity'], engine_version=data['engineVersion']))
         return await asyncio.to_thread(
             lambda: store.void_event(
                 _required_str(data, 'bookId'),
@@ -628,6 +719,8 @@ async def _dispatch_store_call(store, action, data):
         return plan
 
     if action == 'reset_cost_basis_book':
+        if await asyncio.to_thread(store._is_fop_book, _required_str(data, 'bookId')):
+            _fop_message(data, 'FopResetRequest')
         # The recoverable path that deletes active events. Whole-book
         # deletion is a separate, explicitly permanent operation. This
         # identity, version and phrase are rechecked in the write transaction;
@@ -640,12 +733,23 @@ async def _dispatch_store_call(store, action, data):
                 reason=data.get('reason') or '',
                 expected_ledger_version=data.get('expectedLedgerVersion'),
                 book_identity=data.get('bookIdentity'),
+                # A FOP request names its engine (FopResetRequest); a stock one
+                # has none and the stock path does not read it.
+                engine_version=data.get('engineVersion'),
             )
         )
 
     if action == 'rebuild_cost_basis_book':
         # Archive, wipe and refill in one transaction. Never expose this as
         # two calls: a failure between them would leave an empty ledger.
+        if 'fopPackage' in data:
+            _fop_message(data, 'FopRebuildRequest')
+            return await asyncio.to_thread(lambda: store.rebuild_fop_book(
+                data['bookId'], data['fopPackage'], confirmation=data['confirmation'],
+                client_token=data['clientToken'], import_batch_id=data['importBatchId'],
+                statement=data['statement'], revoke_boundaries=data['revokeBoundaries'],
+                reason=data['reason'], expected_ledger_version=data['expectedLedgerVersion'],
+                book_identity=data['bookIdentity']))
         events = data.get('events')
         if not isinstance(events, list):
             raise InvalidRequestError('events must be a list')
@@ -670,6 +774,8 @@ async def _dispatch_store_call(store, action, data):
     if action == 'restore_cost_basis_reset':
         # Put an archived ledger back. Same phrase-and-digest gate as a
         # rebuild: the live rows are archived first inside one transaction.
+        if await asyncio.to_thread(store._is_fop_book, _required_str(data, 'bookId')):
+            _fop_message(data, 'FopRestoreResetRequest')
         return await asyncio.to_thread(
             lambda: store.restore_book_reset(
                 _required_str(data, 'bookId'),
@@ -678,6 +784,7 @@ async def _dispatch_store_call(store, action, data):
                 client_token=_required_str(data, 'clientToken'),
                 expected_ledger_version=data.get('expectedLedgerVersion'),
                 book_identity=data.get('bookIdentity'),
+                engine_version=data.get('engineVersion'),
             )
         )
 
@@ -685,12 +792,14 @@ async def _dispatch_store_call(store, action, data):
         return await asyncio.to_thread(store.export_backup, _required_str(data, 'bookId'))
 
     if action == 'restore_cost_basis_backup':
+        if await asyncio.to_thread(store._is_fop_book, _required_str(data, 'bookId')):
+            _fop_message(data, 'FopRestoreBackupRequest')
         return await asyncio.to_thread(lambda: store.restore_backup(
             _required_str(data, 'bookId'), _required_object(data, 'backup'),
             confirmation=_required_str(data, 'confirmation'),
             client_token=_required_str(data, 'clientToken'),
             expected_ledger_version=data.get('expectedLedgerVersion'),
-            book_identity=data.get('bookIdentity')))
+            book_identity=data.get('bookIdentity'), engine_version=data.get('engineVersion')))
 
     if action == 'list_cost_basis_import_batches':
         batches = await asyncio.to_thread(
@@ -732,6 +841,13 @@ async def _dispatch_store_call(store, action, data):
             )
         )
         return {'snapshots': snapshots}
+
+    if action == 'commit_cost_basis_fop_metadata':
+        _fop_message(data, 'MetadataCommitRequest')
+        return await asyncio.to_thread(lambda: store.commit_fop_metadata(
+            data['bookId'], data['operation'], client_token=data['clientToken'],
+            expected_ledger_version=data['expectedLedgerVersion'],
+            book_identity=data['bookIdentity'], engine_version=data['engineVersion']))
 
     raise InvalidRequestError(f'unhandled cost basis action {action}')
 

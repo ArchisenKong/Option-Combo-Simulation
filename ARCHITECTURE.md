@@ -927,7 +927,7 @@ remain unchanged.
 
 ### Blended-cost ledger (shared by both backends)
 
-`cost_basis_store.py` is the pure SQLite store (schema v10) behind
+`cost_basis_store.py` is the pure SQLite store (schema v11) behind
 `cost_basis.html`: append-oriented money events keyed per book, one derivation
 for every event's cash amount, per-kind field validation, client-token
 idempotency, external-ref import de-duplication, voiding that replays the
@@ -960,6 +960,31 @@ only suggests a missing split (`suspectedSplitRatio`). The page no longer
 creates plain split rows. Seller expiry, What If and stress all read the
 converted positions from the replay; prices typed by hand are cleared when a
 book's split records change, because they were per share in the old unit.
+
+Schema v11 adds the standalone FOP ledger (`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`):
+the books table is rebuilt in SQLite's documented order with foreign keys off
+(a FOP book keeps no stock multiplier), plus eleven FOP tables that hold contract
+records, FOP -> FUT bindings, per-event FOP details, cycle boundaries, source
+records and their allocations, metadata operations, and a request log. Every FOP
+write checks, inside its write transaction, that this engine supports the
+ledger, the engine the request names, the identity and the reviewed ledger
+version; the request log answers a retried token with its first answer and
+refuses the token for any other request, and travels with a backup so a ledger
+restored under its own id (also into a new database) keeps answering; a FOP
+ledger's version digests its whole content, so a restore of other content
+expires every older preview; and a restore proves every relation of the graph
+before it writes, names each event's primary source record instead of
+re-deriving it, and takes the backup's history scope. The statements are the
+frozen P1 draft (`tests/fixtures/cost_basis_fop/contract/ddl_draft.sql`); a new
+file is created at v10 and migrated the same way, and an existing file is first
+copied and verified. `cost_basis_fop_store.py` (mixed into `CostBasisStore`)
+owns that graph inside the store's transactions; `cost_basis_fop_domain.py` holds
+the pure rules; `cost_basis_fop_schema.py` checks every FOP message against the
+frozen types in `cost_basis_fop_protocol.json`; `cost_basis_fop_broker.py`
+resolves option -> underlying pairs read-only through an injected contract-details
+function. FOP writes are gated by `fop_writes_enabled`, off in both servers
+until the release stage; a FUT book without FOP metadata stays export and
+delete only.
 
 Schema v9 ties statement coverage to reset archives, checks both archive digests
 on restoration, and invalidates prior coverage after historical changes.

@@ -21,6 +21,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from cost_basis_fop_test_support import strip_v11_tables  # noqa: E402
 from cost_basis_store import (
     CostBasisStore,
     DELIVERY_CASH_TOLERANCE,
@@ -2043,6 +2044,7 @@ class MigrationTests(unittest.TestCase):
 
         conn = sqlite3.connect(self.db_path, isolation_level=None)
         conn.execute('BEGIN IMMEDIATE')
+        strip_v11_tables(conn)
         for name in (
                 'idx_cost_basis_events_external', 'idx_cost_basis_events_book_seq',
                 'idx_cost_basis_events_book_date', 'idx_cost_basis_events_batch'):
@@ -2089,6 +2091,7 @@ class MigrationTests(unittest.TestCase):
         }, client_token=_token())['event']
 
         conn = sqlite3.connect(self.db_path, isolation_level=None)
+        strip_v11_tables(conn)
         conn.execute('PRAGMA user_version = 6')
         conn.close()
         migrated = CostBasisStore(self.db_path).initialize()

@@ -143,7 +143,14 @@ Do not assume a bare `python` command will work in every shell, especially on Wi
   - `portfolio_admin_ws.py` / `portfolio_archive.py` / `portfolio_maintenance.py`
     for the archive layer; every maintenance path must hold the cross-process
     guard in `portfolio_maintenance.py`
-  - `cost_basis_ws.py` / `cost_basis_store.py` for the blended-cost ledger
+  - `cost_basis_ws.py` / `cost_basis_store.py` for the blended-cost ledger, with
+    the standalone FOP ledger in `cost_basis_fop_store.py` (mixed into the
+    store), `cost_basis_fop_domain.py` (pure rules), `cost_basis_fop_schema.py`
+    (frozen message types from `cost_basis_fop_protocol.json`, which must stay
+    equal to the contract fixture) and `cost_basis_fop_broker.py` (read-only
+    contract resolution). FOP writes stay behind `fop_writes_enabled`, off in
+    both servers until the plan's release stage; the v11 migration takes a
+    verified copy of `cost_basis.db` before it changes anything
 - Both `websockets.serve` calls must share the explicit
   `[server] max_ws_message_bytes` size. The library's 1 MiB default would
   1009-close a socket that is also carrying order supervision.

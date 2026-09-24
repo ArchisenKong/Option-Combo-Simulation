@@ -917,6 +917,18 @@ event table so it can hold split groups (a stock split recorded together with
 its option adjustments); every row is copied unchanged and none joins a group.
 An older build cannot open a v10 database, so keep a backup of
 `cost_basis.db` if you may need to roll back.
+
+Schema v11 adds the standalone FOP ledger's tables and lets a book carry no
+stock multiplier (FOP ledgers keep point values in their contract records).
+Before the first step of any upgrade of an existing file, the backend writes a
+verified SQLite-consistent copy next to it, named
+`cost_basis.pre-v11-from-v10-<UTC time>-<id>.db`, and logs its path; if the
+copy cannot be taken or verified, nothing is migrated and the ledger stays
+unavailable. Stock ledgers, their events and their ledger versions are
+unchanged by the upgrade. A build older than v11 refuses a v11 file: to roll
+back, stop the backend, move `cost_basis.db` aside, rename that copy to
+`cost_basis.db`, then start the older build. FOP ledger writes stay closed in
+this release; `request_cost_basis_status` reports `features.fopLedger`.
 Import/rebuild/reset/restore clients must provide both book identity and a ledger
 version. See `CODE PLAN/COST_BASIS_IMPORT_INTEGRITY.md` for the current checks.
 If all account-bearing rows in an old book agree on one account (apart from
@@ -1777,6 +1789,7 @@ first real-sample results and limitations.
 | `cost_basis.html` / `js/cost_basis*.js` | standalone ledger, CSV import and read-only stress view |
 | `workspace_db_admin.html` | standalone workspace/archive administration |
 | `cost_basis_store.py` / `cost_basis_ws.py` | shared ledger storage and protocol |
+| `cost_basis_fop_{store,domain,schema,broker}.py` | standalone FOP ledger: relation graph, rules, contract types, read-only contract resolution |
 | `portfolio_store.py` / `portfolio_store_ws.py` | workspace persistence |
 | `portfolio_archive.py` / `portfolio_maintenance.py` / `portfolio_admin_ws.py` | archive, guarded maintenance and admin protocol |
 | `style.css` | shared workspace styles |

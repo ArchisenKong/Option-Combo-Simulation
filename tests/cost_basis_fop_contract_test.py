@@ -12,14 +12,14 @@ domain.
   every kind of cost_basis_events; write_coverage.json classifies every
   protocol action and every guarded store write.
 - contract/protocol.json and core_output.json examples pass or fail exactly as
-  stated, in this Python reader and in the independent JS reader
-  (tests/helpers/fop-contract-schema.js), and both readers agree error for error.
+  stated, in the server's Python reader (cost_basis_fop_schema.py) and in the
+  independent JS reader (tests/helpers/fop-contract-schema.js), and both
+  readers agree error for error.
 - A ledger's type is stated, never defaulted (plan §1.1).
 """
 import configparser
 import inspect
 import json
-import math
 import pathlib
 import re
 import shutil
@@ -32,10 +32,13 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+if str(REPO_ROOT / 'tests') not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / 'tests'))
 
 import cost_basis_store  # noqa: E402
 from cost_basis_store import CostBasisStore, EVENT_KINDS, SCHEMA_USER_VERSION  # noqa: E402
 from cost_basis_ws import SERVER_ACTIONS, create_store_env, handle_cost_basis_action  # noqa: E402
+from cost_basis_fop_test_support import previous_build  # noqa: E402
 
 CONTRACT = REPO_ROOT / 'tests' / 'fixtures' / 'cost_basis_fop' / 'contract'
 JS_READER = REPO_ROOT / 'tests' / 'helpers' / 'fop-contract-schema.js'
@@ -47,200 +50,11 @@ def _load(name):
 
 
 # ----------------------------------------------------------------------
-# The Python reader of the contract schema language (protocol.json,
-# "schemaLanguage"). Written independently of the JS reader on purpose.
+# The Python reader of the contract schema language is the server's own
+# (cost_basis_fop_schema.py since P2); the JS reader stays independent.
 # ----------------------------------------------------------------------
 
-def _same(left, right):
-    if isinstance(left, bool) or isinstance(right, bool):
-        return type(left) is type(right) and left == right
-    if left is None or right is None:
-        return left is right
-    return left == right
-
-
-def _is_number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-
-
-def _present(value, field):
-    return field in value and value[field] is not None
-
-
-class ContractReader:
-    def __init__(self, types):
-        self.types = types
-        self._patterns = {}
-
-    def _resolve(self, spec):
-        seen = set()
-        while 'ref' in spec:
-            name = spec['ref']
-            if name in seen or name not in self.types:
-                raise KeyError(f'unknown or circular type {name}')
-            seen.add(name)
-            spec = self.types[name]
-        return spec
-
-    def _nullable(self, spec):
-        while True:
-            if spec.get('nullable') is True:
-                return True
-            if 'ref' not in spec:
-                return False
-            spec = self.types[spec['ref']]
-
-    def _pattern(self, pattern):
-        if pattern not in self._patterns:
-            # JS '$' only matches at the very end; Python's also before a
-            # final newline. '\Z' gives the JS meaning.
-            text = pattern[:-1] + r'\Z' if pattern.endswith('$') else pattern
-            self._patterns[pattern] = re.compile(text, re.ASCII)
-        return self._patterns[pattern]
-
-    def check(self, type_name, value):
-        if type_name not in self.types:
-            raise KeyError(type_name)
-        errors = []
-        self._check({'ref': type_name}, value, '', errors)
-        return errors
-
-    def _check(self, spec, value, path, errors):
-        resolved = self._resolve(spec)
-        kind = resolved['type']
-        if kind == 'json':
-            return
-        if kind == 'const':
-            if not _same(value, resolved['value']):
-                errors.append((path, 'const'))
-            return
-        if value is None:
-            if not self._nullable(spec):
-                errors.append((path, 'null'))
-            return
-        if kind == 'string':
-            if not isinstance(value, str):
-                errors.append((path, 'type'))
-                return
-            if 'enum' in resolved and value not in resolved['enum']:
-                errors.append((path, 'enum'))
-            if 'pattern' in resolved and not self._pattern(resolved['pattern']).search(value):
-                errors.append((path, 'pattern'))
-            if 'minLength' in resolved and len(value) < resolved['minLength']:
-                errors.append((path, 'minLength'))
-            return
-        if kind in ('integer', 'number'):
-            integral = _is_number(value) and float(value).is_integer()
-            if not _is_number(value) or (kind == 'integer' and not integral):
-                errors.append((path, 'type'))
-                return
-            if 'min' in resolved and value < resolved['min']:
-                errors.append((path, 'min'))
-            if 'exclusiveMin' in resolved and value <= resolved['exclusiveMin']:
-                errors.append((path, 'min'))
-            if 'max' in resolved and value > resolved['max']:
-                errors.append((path, 'max'))
-            if resolved.get('nonzero') and value == 0:
-                errors.append((path, 'nonzero'))
-            return
-        if kind == 'boolean':
-            if not isinstance(value, bool):
-                errors.append((path, 'type'))
-            return
-        if kind == 'array':
-            if not isinstance(value, list):
-                errors.append((path, 'type'))
-                return
-            if 'minItems' in resolved and len(value) < resolved['minItems']:
-                errors.append((path, 'minItems'))
-            if 'maxItems' in resolved and len(value) > resolved['maxItems']:
-                errors.append((path, 'maxItems'))
-            for index, item in enumerate(value):
-                self._check(resolved['items'], item, f'{path}[{index}]', errors)
-            return
-        if kind == 'map':
-            if not isinstance(value, dict):
-                errors.append((path, 'type'))
-                return
-            if 'minEntries' in resolved and len(value) < resolved['minEntries']:
-                errors.append((path, 'minEntries'))
-            for key, item in value.items():
-                self._check(resolved['values'], item, self._join(path, key), errors)
-            return
-        if kind == 'variant':
-            if not isinstance(value, dict):
-                errors.append((path, 'type'))
-                return
-            key = value.get(resolved['on'])
-            case = resolved['cases'].get(key) if isinstance(key, str) else None
-            if case is None:
-                errors.append((self._join(path, resolved['on']), 'variant'))
-                return
-            self._check(case, value, path, errors)
-            return
-        if kind == 'object':
-            self._check_object(resolved, value, path, errors)
-            return
-        raise ValueError(f'unknown spec type {kind}')
-
-    @staticmethod
-    def _join(path, key):
-        return f'{path}.{key}' if path else key
-
-    def _check_object(self, spec, value, path, errors):
-        if not isinstance(value, dict):
-            errors.append((path, 'type'))
-            return
-        fields = spec['fields']
-        for key in value:
-            if key not in fields:
-                errors.append((self._join(path, key), 'additional'))
-        for key in spec.get('required', []):
-            if key not in value:
-                errors.append((self._join(path, key), 'missing'))
-        for key, field_spec in fields.items():
-            if key in value:
-                self._check(field_spec, value[key], self._join(path, key), errors)
-        for rule in spec.get('rules', []):
-            if not self._rule_holds(rule, value, spec):
-                errors.append((path, f"rule:{rule['id']}"))
-
-    def _well_formed(self, spec, value):
-        errors = []
-        self._check(spec, value, '', errors)
-        return not errors
-
-    def _rule_holds(self, rule, value, spec):
-        when = rule.get('when')
-        if when is not None:
-            if when['field'] not in value:
-                return True
-            if not any(_same(value[when['field']], option) for option in when['in']):
-                return True
-        if 'require' in rule and not all(_present(value, field) for field in rule['require']):
-            return False
-        if 'forbid' in rule and any(_present(value, field) for field in rule['forbid']):
-            return False
-        for field, sign in rule.get('sign', {}).items():
-            number = value.get(field)
-            if _is_number(number) and not (number > 0 if sign == 'positive' else number < 0):
-                return False
-        if 'exactlyOne' in rule:
-            if sum(1 for field in rule['exactlyOne'] if _present(value, field)) != 1:
-                return False
-        if 'equals' in rule:
-            left = value.get(rule['equals']['field'])
-            right = value.get(rule['equals']['negate'])
-            if _is_number(left) and _is_number(right) and abs(left + right) > 1e-9:
-                return False
-        if 'lessOrEqual' in rule:
-            first, second = rule['lessOrEqual']
-            if (_present(value, first) and _present(value, second)
-                    and self._well_formed(spec['fields'][first], value[first])
-                    and self._well_formed(spec['fields'][second], value[second])
-                    and value[first] > value[second]):
-                return False
-        return True
+from cost_basis_fop_schema import ContractReader, _present  # noqa: E402,F401
 
 
 # ----------------------------------------------------------------------
@@ -285,14 +99,16 @@ class DdlDraftTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.db_path = pathlib.Path(self._tmp.name) / 'cost_basis.db'
-        store = CostBasisStore(self.db_path).initialize()
-        book = store.create_book(account=ACCOUNT, symbol='TQQQ', start_date='2026-01-01')
-        self.stock_book_id = book['bookId']
-        store.append_event(self.stock_book_id, {
-            'kind': 'share_trade', 'tradeDate': '2026-06-01', 'account': ACCOUNT,
-            'shares': 100, 'price': 50, 'fees': 1, 'cashAmount': -5001,
-        }, client_token='tok-contract-0001')
-        store.save_snapshot(self.stock_book_id, as_of_date='2026-06-02', summary={'shares': 100})
+        # The draft is applied to a ledger as the v10 build wrote it.
+        with previous_build():
+            store = CostBasisStore(self.db_path).initialize()
+            book = store.create_book(account=ACCOUNT, symbol='TQQQ', start_date='2026-01-01')
+            self.stock_book_id = book['bookId']
+            store.append_event(self.stock_book_id, {
+                'kind': 'share_trade', 'tradeDate': '2026-06-01', 'account': ACCOUNT,
+                'shares': 100, 'price': 50, 'fees': 1, 'cashAmount': -5001,
+            }, client_token='tok-contract-0001')
+            store.save_snapshot(self.stock_book_id, as_of_date='2026-06-02', summary={'shares': 100})
         self.conn = sqlite3.connect(self.db_path, isolation_level=None)
         self.addCleanup(self.conn.close)
         self.conn.execute('PRAGMA foreign_keys = ON')
@@ -304,8 +120,8 @@ class DdlDraftTests(unittest.TestCase):
         self.assertEqual(self.conn.execute('PRAGMA foreign_keys').fetchone()[0], 1)
         self.assertEqual(self.conn.execute('PRAGMA foreign_key_check').fetchall(), [])
         self.assertEqual(self.conn.execute('PRAGMA integrity_check').fetchone()[0], 'ok')
-        # P2 assigns the schema version; the structural draft does not.
-        self.assertEqual(self.conn.execute('PRAGMA user_version').fetchone()[0], SCHEMA_USER_VERSION)
+        # The migration assigns the schema version; the structural draft does not.
+        self.assertEqual(self.conn.execute('PRAGMA user_version').fetchone()[0], 10)
         for table, rows in before.items():
             self.assertEqual(_rows(self.conn, table), rows, table)
         for child in ('cost_basis_events', 'cost_basis_snapshots'):
@@ -546,6 +362,19 @@ class CoverageTests(unittest.TestCase):
             if '_get_writable_book(' in inspect.getsource(member) and name != '_get_writable_book'
         }
         self.assertTrue(guarded <= set(writes.values()), guarded - set(writes.values()))
+        # Every store method that opens the FOP write gate is the FOP carrier
+        # of some write action (P2).
+        fop_methods = {entry['fopStoreMethod'] for entry in document['writes']
+                       if entry.get('fopStoreMethod')}
+        for method in fop_methods:
+            self.assertTrue(callable(getattr(CostBasisStore, method, None)), method)
+        gates = ('_get_fop_writable_book', '_open_fop_write')
+        fop_gated = {
+            name for name, member in inspect.getmembers(CostBasisStore, inspect.isfunction)
+            if any(f'{gate}(' in inspect.getsource(member) for gate in gates)
+            and name not in gates
+        }
+        self.assertTrue(fop_gated <= fop_methods, fop_gated - fop_methods)
         self.assertTrue({'create_book', 'delete_book'} <= set(writes.values()))
         planned = {entry['wsAction'] for entry in document['planned']}
         self.assertFalse(planned & set(SERVER_ACTIONS), 'a planned action already exists')
@@ -704,13 +533,19 @@ class ProtocolContractTests(unittest.TestCase):
                 requests[action['value']] = spec
         self.assertEqual(set(requests), {
             'create_cost_basis_book', 'append_cost_basis_event', 'import_cost_basis_events',
-            'void_cost_basis_event', 'commit_cost_basis_fop_metadata', 'save_cost_basis_snapshot'})
+            'void_cost_basis_event', 'commit_cost_basis_fop_metadata', 'save_cost_basis_snapshot',
+            'reset_cost_basis_book', 'rebuild_cost_basis_book', 'restore_cost_basis_reset',
+            'restore_cost_basis_backup'})
         idempotency = {
             'append_cost_basis_event': {'clientToken'},
             'void_cost_basis_event': {'clientToken'},
             'commit_cost_basis_fop_metadata': {'clientToken'},
             'import_cost_basis_events': {'importBatchId', 'clientTokenPrefix'},
             'save_cost_basis_snapshot': set(),
+            'reset_cost_basis_book': {'clientToken', 'confirmation'},
+            'rebuild_cost_basis_book': {'clientToken', 'confirmation', 'importBatchId'},
+            'restore_cost_basis_reset': {'clientToken', 'confirmation'},
+            'restore_cost_basis_backup': {'clientToken', 'confirmation'},
         }
         for action, spec in requests.items():
             if action == 'create_cost_basis_book':
@@ -722,6 +557,23 @@ class ProtocolContractTests(unittest.TestCase):
                 self.assertEqual(spec['fields']['bookIdentity'], {'ref': 'BookIdentity'})
                 self.assertEqual(spec['fields']['expectedLedgerVersion'], {'ref': 'LedgerVersion'})
         self.assertIn('write_guard', {rule['id'] for rule in document['domainRules']})
+        # Every FOP write names the engine it was prepared for (P2 review R6):
+        # in the request, or in the package it carries.
+        fop_writes = {name: spec for name, spec in document['types'].items()
+                      if spec.get('fields', {}).get('action', {}).get('value') in writes
+                      and 'expectedLedgerVersion' in spec.get('fields', {})}
+        self.assertTrue({'AppendRequest', 'VoidRequest', 'MetadataCommitRequest', 'FopResetRequest',
+                         'FopRebuildRequest', 'FopRestoreResetRequest',
+                         'FopRestoreBackupRequest'} <= set(fop_writes))
+        for name, spec in fop_writes.items():
+            if name == 'SnapshotRequest':
+                continue  # no FOP snapshot before P5; it records a ledger version only
+            with self.subTest(engine=name):
+                if 'fopPackage' in spec['fields']:
+                    package = document['types'][spec['fields']['fopPackage']['ref']]
+                    self.assertIn('engineVersion', package['required'])
+                else:
+                    self.assertIn('engineVersion', spec['required'])
 
     def test_order_rules_compare_only_fixed_width_text(self):
         instant = r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$'

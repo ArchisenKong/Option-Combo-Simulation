@@ -219,10 +219,16 @@ module.exports = {
             run() {
                 const common = loadCommon();
                 const core = loadBrowserScripts(['js/cost_basis_core.js']).OptionComboCostBasisCore;
-                const writes = Array.from(common.PROTOCOL_ACTIONS.filter((entry) => entry.writes)
+                // The writes a page may send are the stock page's; the FOP-only
+                // actions are listed for the backend but no page sends them yet.
+                const writes = Array.from(common.PROTOCOL_ACTIONS
+                    .filter((entry) => entry.writes && entry.pages.length)
                     .map((entry) => entry.action)).sort();
                 assert.deepEqual(writes, Array.from(core.FUTURES_FROZEN_WRITE_ACTIONS)
                     .concat(['create_cost_basis_book', 'delete_cost_basis_book']).sort());
+                assert.deepEqual(Array.from(common.PROTOCOL_ACTIONS
+                    .filter((entry) => !entry.pages.length).map((entry) => entry.action)).sort(),
+                ['commit_cost_basis_fop_metadata', 'request_cost_basis_fop_contract_details']);
                 const coverage = readJson(`${CONTRACT}/write_coverage.json`);
                 const serverWrites = new Set(coverage.writes.map((entry) => entry.wsAction));
                 const serverReads = new Set(coverage.reads);
@@ -371,6 +377,25 @@ module.exports = {
                 assert.equal(page.node('book-legacy-link').href, 'cost_basis.html?bookId=futbook0001');
                 assert.deepEqual(page.socket.sent.map((message) => message.action),
                     ['request_cost_basis_status', 'list_cost_basis_books']);
+            },
+        },
+        {
+            name: 'a FOP ledger is not described as a legacy ledger',
+            async run() {
+                const fopBook = Object.assign({}, FUT_BOOK, {
+                    symbol: 'CL', defaultSharesPerContract: null,
+                    fop: { engineVersion: 1, productRules: 'NYMEX-CL-v1', historyScope: 'full_history' },
+                });
+                const page = loadFopPage('?bookId=futbook0001');
+                await page.openWith([fopBook]);
+                assert.equal(page.node('book-state').textContent,
+                    page.context.OptionComboCostBasisFopPage.FOP_STATE);
+                assert.equal(page.node('book-legacy-link').hidden, true,
+                    'the stock page cannot show a FOP ledger');
+                const identity = page.node('book-identity').children.map((child) => child.textContent);
+                assert.ok(identity.includes('NYMEX-CL-v1 · 引擎 v1'));
+                const stock = read('js/cost_basis.js');
+                assert.match(stock, /'见合约记录' : book\.defaultSharesPerContract/);
             },
         },
         {

@@ -2,32 +2,31 @@
   "format": "cost-basis-fop-write-coverage",
   "version": 1,
   "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §13.3 P1 step 4 (每个写动作在 store 和 WS 的覆盖位置), §10.2",
-  "description": "Every WebSocket action of the cost-basis protocol, classified. Writes name the store method that carries them, what P0 did for FUT ledgers, and where the FOP path lands. The contract test fails when cost_basis_ws.SERVER_ACTIONS and this file disagree, or a store method guarded by _get_writable_book is missing here. Both backends mount the same protocol layer.",
+  "description": "Every WebSocket action of the cost-basis protocol, classified. Writes name the store method that carries them, what P0 did for FUT ledgers, and where the FOP path lands. The contract test fails when cost_basis_ws.SERVER_ACTIONS and this file disagree, or a store method guarded by _get_writable_book is missing here. Both backends mount the same protocol layer. fopStoreMethod names the store method that carries the action for a FOP ledger (null: not a FOP write yet); every store method that opens the FOP write gate must be one of them.",
   "writes": [
-    { "wsAction": "create_cost_basis_book", "storeMethod": "create_book", "p0": "FUT refused", "fop": "P2: secType FUT plus a fop section creates the cost_basis_fop_books row in the same transaction; no defaultSharesPerContract" },
-    { "wsAction": "archive_cost_basis_book", "storeMethod": "archive_book", "p0": "FUT refused", "fop": "P2: allowed for FOP ledgers" },
-    { "wsAction": "append_cost_basis_event", "storeMethod": "append_event", "p0": "FUT refused", "fop": "P2: fopPackage routed to cost_basis_fop_domain.py before any stock default" },
-    { "wsAction": "void_cost_basis_event", "storeMethod": "void_event", "p0": "FUT refused", "fop": "P2: dependent delivery sources, fee sources and boundary anchors resolved in the same transaction" },
-    { "wsAction": "append_cost_basis_split_group", "storeMethod": "append_split_group", "p0": "FUT refused", "fop": "never: stock only" },
-    { "wsAction": "void_cost_basis_split_group", "storeMethod": "void_split_group", "p0": "FUT refused", "fop": "never: stock only" },
-    { "wsAction": "import_cost_basis_events", "storeMethod": "import_events", "p0": "FUT refused", "fop": "P4: fopPackage with sources; only real_verified capability keys" },
-    { "wsAction": "reset_cost_basis_book", "storeMethod": "reset_book", "p0": "FUT refused", "fop": "P2: archives the whole FOP graph" },
-    { "wsAction": "rebuild_cost_basis_book", "storeMethod": "rebuild_book", "p0": "FUT refused", "fop": "P2/P4: whole-graph replacement with an event id mapping" },
-    { "wsAction": "restore_cost_basis_reset", "storeMethod": "restore_book_reset", "p0": "FUT refused", "fop": "P2: whole-graph restore" },
-    { "wsAction": "restore_cost_basis_backup", "storeMethod": "restore_backup", "p0": "FUT refused", "fop": "P2: backup version 2 with the whole graph" },
-    { "wsAction": "save_cost_basis_snapshot", "storeMethod": "save_snapshot", "p0": "FUT refused", "fop": "P5: keeps ledgerVersion, quoteBatchId and per-contract quotes in summary" },
-    { "wsAction": "delete_cost_basis_book", "storeMethod": "delete_book", "p0": "allowed", "fop": "P2: deletes every FOP table row of the book" }
+    { "wsAction": "create_cost_basis_book", "storeMethod": "create_book", "p0": "FUT refused", "fop": "P2: secType FUT plus a fop section creates the cost_basis_fop_books row in the same transaction; no defaultSharesPerContract", "fopStoreMethod": "create_fop_book" },
+    { "wsAction": "archive_cost_basis_book", "storeMethod": "archive_book", "p0": "FUT refused", "fop": "P2: allowed for FOP ledgers", "fopStoreMethod": "archive_book" },
+    { "wsAction": "append_cost_basis_event", "storeMethod": "append_event", "p0": "FUT refused", "fop": "P2: fopPackage routed to cost_basis_fop_domain.py before any stock default", "fopStoreMethod": "append_fop_event" },
+    { "wsAction": "void_cost_basis_event", "storeMethod": "void_event", "p0": "FUT refused", "fop": "P2: dependent delivery sources, fee sources and boundary anchors resolved in the same transaction", "fopStoreMethod": "void_fop_event" },
+    { "wsAction": "append_cost_basis_split_group", "storeMethod": "append_split_group", "p0": "FUT refused", "fop": "never: stock only", "fopStoreMethod": null },
+    { "wsAction": "void_cost_basis_split_group", "storeMethod": "void_split_group", "p0": "FUT refused", "fop": "never: stock only", "fopStoreMethod": null },
+    { "wsAction": "import_cost_basis_events", "storeMethod": "import_events", "p0": "FUT refused", "fop": "P4: fopPackage with sources; only real_verified capability keys", "fopStoreMethod": null },
+    { "wsAction": "reset_cost_basis_book", "storeMethod": "reset_book", "p0": "FUT refused", "fop": "P2: archives the whole FOP graph", "fopStoreMethod": "reset_fop_book" },
+    { "wsAction": "rebuild_cost_basis_book", "storeMethod": "rebuild_book", "p0": "FUT refused", "fop": "P2/P4: whole-graph replacement with an event id mapping", "fopStoreMethod": "rebuild_fop_book" },
+    { "wsAction": "restore_cost_basis_reset", "storeMethod": "restore_book_reset", "p0": "FUT refused", "fop": "P2: whole-graph restore", "fopStoreMethod": "restore_fop_graph" },
+    { "wsAction": "restore_cost_basis_backup", "storeMethod": "restore_backup", "p0": "FUT refused", "fop": "P2: backup version 2 with the whole graph", "fopStoreMethod": "restore_fop_graph" },
+    { "wsAction": "save_cost_basis_snapshot", "storeMethod": "save_snapshot", "p0": "FUT refused", "fop": "P5: keeps ledgerVersion, quoteBatchId and per-contract quotes in summary", "fopStoreMethod": null },
+    { "wsAction": "delete_cost_basis_book", "storeMethod": "delete_book", "p0": "allowed", "fop": "P2: deletes every FOP table row of the book", "fopStoreMethod": "delete_book" },
+    { "wsAction": "commit_cost_basis_fop_metadata", "storeMethod": "commit_fop_metadata", "p0": "did not exist", "fop": "P2: typed operations adopt_binding, correct_contract, close_cycle, revoke_cycle", "fopStoreMethod": "commit_fop_metadata" }
   ],
   "reads": [
     "list_cost_basis_books", "list_cost_basis_events", "list_cost_basis_import_batches",
     "list_cost_basis_resets", "list_cost_basis_snapshots", "export_cost_basis_backup",
     "request_cost_basis_delete_plan", "request_cost_basis_reset_plan", "request_cost_basis_status",
-    "request_cost_basis_executions", "request_cost_basis_market_price",
-    "request_cost_basis_option_scenario_inputs"
+    "request_cost_basis_executions", "request_cost_basis_market_price", "request_cost_basis_option_scenario_inputs",
+    "request_cost_basis_fop_contract_details"
   ],
   "planned": [
-    { "wsAction": "request_cost_basis_fop_contract_details", "writes": false, "stage": "P2", "role": "bounded read-only contract resolution; returns candidate evidence with an expiring server credential" },
-    { "wsAction": "request_cost_basis_fop_market_snapshot", "writes": false, "stage": "P5", "role": "one quote batch for the ledger's contracts" },
-    { "wsAction": "commit_cost_basis_fop_metadata", "writes": true, "stage": "P2", "role": "typed operations: adopt_binding, correct_contract, close_cycle, revoke_cycle" }
+    { "wsAction": "request_cost_basis_fop_market_snapshot", "writes": false, "stage": "P5", "role": "one quote batch for the ledger's contracts" }
   ]
 }

@@ -46,6 +46,11 @@
         { action: 'request_cost_basis_executions', writes: false, pages: ['equity'] },
         { action: 'request_cost_basis_market_price', writes: false, pages: ['equity'] },
         { action: 'request_cost_basis_option_scenario_inputs', writes: false, pages: ['equity'] },
+        // Standalone FOP ledger actions the backend serves since P2. No page
+        // may send them until the FOP page's writes are released (plan §13.3
+        // P5/P6); the FOP page reaches them through FOP packages only.
+        { action: 'commit_cost_basis_fop_metadata', writes: true, pages: [] },
+        { action: 'request_cost_basis_fop_contract_details', writes: false, pages: [] },
     ].map((entry) => Object.freeze(Object.assign({}, entry, {
         pages: Object.freeze(entry.pages.slice()),
     }))));

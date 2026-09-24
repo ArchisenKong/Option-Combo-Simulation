@@ -37,15 +37,30 @@ import hashlib
 import json
 import math
 import re
+import secrets
 import sqlite3
 import uuid
 from bisect import bisect_left, bisect_right
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cost_basis_fop_store import FopLedgerMixin
 from portfolio_store import default_app_data_dir
 
-SCHEMA_USER_VERSION = 10
+SCHEMA_USER_VERSION = 11
+# The last schema without the FOP tables. A fresh database is created at this
+# version and then migrated like any other, so every v11 file has one shape.
+_V10_USER_VERSION = 10
+# Tables that name a book_id without a foreign key. The v11 rebuild must not
+# leave any of them pointing at a book it lost; rows left behind by deletions
+# made before v11 cleaned these tables are kept, not deleted, and reported.
+_BOOK_COLUMNS = (
+    'book_id', 'account', 'symbol', 'sec_type', 'currency', 'default_shares_per_contract',
+    'start_date', 'note', 'created_at_utc', 'updated_at_utc', 'archived_at_utc',
+)
+_BOOK_SCOPED_TABLES_WITHOUT_FK = (
+    'cost_basis_book_resets', 'cost_basis_import_batches', 'cost_basis_reset_coverage',
+)
 
 MAX_SYMBOL_CHARS = 32
 MAX_ACCOUNT_CHARS = 32
@@ -231,6 +246,36 @@ class FuturesBookFrozenError(CostBasisStoreError):
     """A FUT/FOP ledger cannot be created or written; see FROZEN_BOOK_SEC_TYPES."""
 
     code = 'futures_book_frozen'
+
+
+class FopEngineVersionMismatchError(CostBasisStoreError):
+    """A FOP write was prepared for another engine version than the ledger's."""
+
+    code = 'fop_engine_version_mismatch'
+
+
+class FopIdentityConflictError(CostBasisStoreError):
+    """Contract terms, a conId or a reference that contradicts what is stored."""
+
+    code = 'fop_identity_conflict'
+
+
+class FopBindingEvidenceInvalidError(CostBasisStoreError):
+    """A verified binding without a valid, unexpired server credential."""
+
+    code = 'fop_binding_evidence_invalid'
+
+
+class FopCycleBoundaryViolatedError(CostBasisStoreError):
+    """A cycle boundary that no longer sits where every balance is zero."""
+
+    code = 'fop_cycle_boundary_violated'
+
+
+class FopReferenceRevisionConflictError(CostBasisStoreError):
+    """A metadata commit whose affected references do not match the ledger."""
+
+    code = 'fop_reference_revision_conflict'
 
 
 def _reject_frozen_sec_type(sec_type, action):
@@ -484,6 +529,295 @@ _EVENT_ORDER_SQL = (
 _V9_EVENT_ORDER_SQL = (
     "trade_date ASC, COALESCE(NULLIF(broker_timestamp, ''), "
     "trade_date || 'T23:59:59') ASC, seq ASC"
+)
+
+# Schema v11: the standalone FOP ledger (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md
+# §8.1, §8.2 item 7). Statement for statement the frozen P1 draft,
+# tests/fixtures/cost_basis_fop/contract/ddl_draft.sql; the contract test
+# compares the two. The first five statements rebuild the parent books table in
+# SQLite's documented order and must run with foreign keys OFF (set before
+# BEGIN); _migrate_v10_to_v11 owns that sequence. A fresh database is created
+# at v10 and migrated the same way, so every v11 database has one shape.
+_V11_STATEMENTS = (
+    """
+    CREATE TABLE cost_basis_books_new (
+        book_id                     TEXT PRIMARY KEY,
+        account                     TEXT NOT NULL,
+        symbol                      TEXT NOT NULL,
+        sec_type                    TEXT NOT NULL DEFAULT 'STK',
+        currency                    TEXT NOT NULL DEFAULT 'USD',
+        default_shares_per_contract INTEGER
+                                    CHECK (default_shares_per_contract IS NULL
+                                           OR default_shares_per_contract > 0),
+        start_date                  TEXT NOT NULL,
+        note                        TEXT NOT NULL DEFAULT '',
+        created_at_utc              TEXT NOT NULL,
+        updated_at_utc              TEXT NOT NULL,
+        archived_at_utc             TEXT,
+        CHECK (sec_type <> 'STK' OR default_shares_per_contract IS NOT NULL)
+    )
+    """,
+    """
+    INSERT INTO cost_basis_books_new (
+        book_id, account, symbol, sec_type, currency, default_shares_per_contract,
+        start_date, note, created_at_utc, updated_at_utc, archived_at_utc)
+        SELECT book_id, account, symbol, sec_type, currency, default_shares_per_contract,
+               start_date, note, created_at_utc, updated_at_utc, archived_at_utc
+        FROM cost_basis_books
+    """,
+    """
+    DROP TABLE cost_basis_books
+    """,
+    """
+    ALTER TABLE cost_basis_books_new RENAME TO cost_basis_books
+    """,
+    """
+    CREATE UNIQUE INDEX idx_cost_basis_books_account_symbol
+        ON cost_basis_books(account COLLATE NOCASE, symbol, sec_type, currency)
+        WHERE archived_at_utc IS NULL
+    """,
+    """
+    CREATE TABLE cost_basis_fop_books (
+        book_id          TEXT PRIMARY KEY REFERENCES cost_basis_books(book_id),
+        engine_version   INTEGER NOT NULL CHECK (engine_version >= 1),
+        product_rules    TEXT NOT NULL,
+        history_scope    TEXT NOT NULL CHECK (history_scope IN ('full_history', 'since_baseline')),
+        created_at_utc   TEXT NOT NULL,
+        updated_at_utc   TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE cost_basis_fop_contracts (
+        contract_id                    TEXT NOT NULL,
+        revision                       INTEGER NOT NULL CHECK (revision >= 1),
+        book_id                        TEXT NOT NULL REFERENCES cost_basis_books(book_id),
+        sec_type                       TEXT NOT NULL CHECK (sec_type IN ('FUT', 'FOP')),
+        con_id                         INTEGER CHECK (con_id IS NULL OR con_id > 0),
+        root                           TEXT NOT NULL,
+        trading_class                  TEXT,
+        local_symbol                   TEXT,
+        exchange                       TEXT NOT NULL,
+        currency                       TEXT NOT NULL,
+        future_contract_month          TEXT CHECK (future_contract_month IS NULL
+                                                   OR (length(future_contract_month) = 6
+                                                       AND future_contract_month GLOB '[0-9][0-9][0-9][0-9][0-9][0-9]')),
+        future_last_trade_date         TEXT CHECK (future_last_trade_date IS NULL
+                                                   OR future_last_trade_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        future_last_trade_as_of        TEXT CHECK (future_last_trade_as_of IS NULL
+                                                   OR future_last_trade_as_of GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]Z'),
+        future_point_value             REAL CHECK (future_point_value IS NULL OR future_point_value > 0),
+        option_right                   TEXT CHECK (option_right IS NULL OR option_right IN ('C', 'P')),
+        option_strike                  REAL CHECK (option_strike IS NULL OR option_strike > 0),
+        option_expiry                  TEXT CHECK (option_expiry IS NULL OR option_expiry GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        option_expiry_as_of            TEXT CHECK (option_expiry_as_of IS NULL
+                                                   OR option_expiry_as_of GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]Z'),
+        premium_multiplier             REAL CHECK (premium_multiplier IS NULL OR premium_multiplier > 0),
+        deliverable_futures_per_option REAL CHECK (deliverable_futures_per_option IS NULL
+                                                   OR deliverable_futures_per_option > 0),
+        settlement_type                TEXT CHECK (settlement_type IS NULL OR settlement_type IN ('physical_future')),
+        exercise_style                 TEXT CHECK (exercise_style IS NULL OR exercise_style IN ('american', 'european')),
+        rule_version                   TEXT NOT NULL,
+        evidence_status                TEXT NOT NULL CHECK (evidence_status IN (
+                                           'verified_broker', 'verified_statement', 'manual_attested',
+                                           'unresolved', 'conflict')),
+        evidence_summary               TEXT NOT NULL DEFAULT '',
+        observed_at_utc                TEXT NOT NULL CHECK (observed_at_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]Z'),
+        superseded_by_revision         INTEGER CHECK (superseded_by_revision IS NULL
+                                                      OR superseded_by_revision > revision),
+        created_at_utc                 TEXT NOT NULL,
+        PRIMARY KEY (contract_id, revision),
+        CHECK (
+            (sec_type = 'FUT'
+             AND future_contract_month IS NOT NULL AND future_point_value IS NOT NULL
+             AND option_right IS NULL AND option_strike IS NULL AND option_expiry IS NULL
+             AND option_expiry_as_of IS NULL AND premium_multiplier IS NULL
+             AND deliverable_futures_per_option IS NULL AND settlement_type IS NULL
+             AND exercise_style IS NULL)
+            OR
+            (sec_type = 'FOP'
+             AND option_right IS NOT NULL AND option_strike IS NOT NULL AND option_expiry IS NOT NULL
+             AND premium_multiplier IS NOT NULL AND deliverable_futures_per_option IS NOT NULL
+             AND settlement_type IS NOT NULL AND exercise_style IS NOT NULL
+             AND future_contract_month IS NULL AND future_last_trade_date IS NULL
+             AND future_last_trade_as_of IS NULL AND future_point_value IS NULL)
+        )
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX idx_cost_basis_fop_contracts_current_con_id
+        ON cost_basis_fop_contracts(book_id, con_id)
+        WHERE con_id IS NOT NULL AND superseded_by_revision IS NULL
+    """,
+    """
+    CREATE INDEX idx_cost_basis_fop_contracts_book
+        ON cost_basis_fop_contracts(book_id, contract_id)
+    """,
+    """
+    CREATE TABLE cost_basis_fop_bindings (
+        binding_id             TEXT NOT NULL,
+        revision               INTEGER NOT NULL CHECK (revision >= 1),
+        book_id                TEXT NOT NULL REFERENCES cost_basis_books(book_id),
+        option_contract_id     TEXT NOT NULL,
+        future_contract_id     TEXT,
+        status                 TEXT NOT NULL CHECK (status IN (
+                                   'verified_broker', 'verified_statement', 'manual_attested',
+                                   'unresolved', 'conflict')),
+        evidence_summary       TEXT NOT NULL DEFAULT '',
+        evidence_digest        TEXT,
+        observed_at_utc        TEXT NOT NULL CHECK (observed_at_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]Z'),
+        superseded_by_revision INTEGER CHECK (superseded_by_revision IS NULL
+                                              OR superseded_by_revision > revision),
+        created_at_utc         TEXT NOT NULL,
+        PRIMARY KEY (binding_id, revision),
+        CHECK ((status IN ('unresolved', 'conflict')) = (future_contract_id IS NULL)),
+        CHECK (status NOT IN ('verified_broker', 'verified_statement') OR evidence_digest IS NOT NULL)
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX idx_cost_basis_fop_bindings_current
+        ON cost_basis_fop_bindings(book_id, option_contract_id)
+        WHERE superseded_by_revision IS NULL
+    """,
+    """
+    CREATE TABLE cost_basis_fop_event_details (
+        event_id                    TEXT PRIMARY KEY REFERENCES cost_basis_events(event_id),
+        book_id                     TEXT NOT NULL REFERENCES cost_basis_books(book_id),
+        contract_id                 TEXT,
+        contract_revision           INTEGER,
+        delivered_contract_id       TEXT,
+        delivered_contract_revision INTEGER,
+        binding_id                  TEXT,
+        binding_revision            INTEGER,
+        open_close                  TEXT CHECK (open_close IS NULL OR open_close IN ('O', 'C', 'CO')),
+        fee_category                TEXT CHECK (fee_category IS NULL OR fee_category IN (
+                                        'futures', 'short_option', 'long_option', 'strategy')),
+        fee_is_refund               INTEGER NOT NULL DEFAULT 0 CHECK (fee_is_refund IN (0, 1)),
+        fee_source_event_id         TEXT REFERENCES cost_basis_events(event_id),
+        adjustment_scope            TEXT CHECK (adjustment_scope IS NULL
+                                                OR adjustment_scope IN ('strategy', 'seller_lens')),
+        baseline_kind               TEXT CHECK (baseline_kind IS NULL OR baseline_kind IN (
+                                        'trade_cost', 'reference_price', 'unknown_cost')),
+        baseline_as_of_utc          TEXT CHECK (baseline_as_of_utc IS NULL
+                                                OR baseline_as_of_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]Z'),
+        exchange_trade_date         TEXT CHECK (exchange_trade_date IS NULL
+                                                OR exchange_trade_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        executed_at_utc             TEXT CHECK (executed_at_utc IS NULL
+                                                OR executed_at_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]Z'),
+        time_range_start_utc        TEXT CHECK (time_range_start_utc IS NULL
+                                                OR time_range_start_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]Z'),
+        time_range_end_utc          TEXT CHECK (time_range_end_utc IS NULL
+                                                OR time_range_end_utc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9]Z'),
+        source_time_text            TEXT,
+        source_timezone             TEXT,
+        order_evidence              TEXT,
+        CHECK ((contract_id IS NULL) = (contract_revision IS NULL)),
+        CHECK ((delivered_contract_id IS NULL) = (delivered_contract_revision IS NULL)),
+        CHECK ((binding_id IS NULL) = (binding_revision IS NULL)),
+        CHECK ((executed_at_utc IS NULL) = (time_range_start_utc IS NOT NULL)),
+        CHECK ((time_range_start_utc IS NULL) = (time_range_end_utc IS NULL)),
+        CHECK (time_range_start_utc IS NULL OR time_range_start_utc <= time_range_end_utc)
+    )
+    """,
+    """
+    CREATE INDEX idx_cost_basis_fop_event_details_book
+        ON cost_basis_fop_event_details(book_id, contract_id)
+    """,
+    """
+    CREATE TABLE cost_basis_fop_cycles (
+        boundary_id            TEXT NOT NULL,
+        revision               INTEGER NOT NULL CHECK (revision >= 1),
+        book_id                TEXT NOT NULL REFERENCES cost_basis_books(book_id),
+        state                  TEXT NOT NULL CHECK (state IN ('closed', 'revoked')),
+        anchor_event_id        TEXT REFERENCES cost_basis_events(event_id),
+        label                  TEXT NOT NULL DEFAULT '',
+        superseded_by_revision INTEGER CHECK (superseded_by_revision IS NULL
+                                              OR superseded_by_revision > revision),
+        created_at_utc         TEXT NOT NULL,
+        PRIMARY KEY (boundary_id, revision),
+        CHECK ((state = 'closed') = (anchor_event_id IS NOT NULL))
+    )
+    """,
+    """
+    CREATE TABLE cost_basis_fop_sources (
+        source_id       TEXT PRIMARY KEY,
+        book_id         TEXT NOT NULL REFERENCES cost_basis_books(book_id),
+        account         TEXT NOT NULL,
+        namespace       TEXT NOT NULL CHECK (namespace IN (
+                            'flex_trade', 'ib_exec', 'activity_row', 'tws_exec')),
+        source_ref      TEXT NOT NULL,
+        capability_key  TEXT,
+        format          TEXT,
+        section         TEXT,
+        raw_fields_json TEXT NOT NULL,
+        stated_quantity REAL,
+        stated_fees     REAL,
+        import_batch_id TEXT,
+        created_at_utc  TEXT NOT NULL,
+        UNIQUE (book_id, account, namespace, source_ref)
+    )
+    """,
+    """
+    CREATE TABLE cost_basis_fop_source_allocations (
+        source_id      TEXT NOT NULL REFERENCES cost_basis_fop_sources(source_id),
+        event_id       TEXT NOT NULL REFERENCES cost_basis_events(event_id),
+        role           TEXT NOT NULL CHECK (role IN ('trade', 'option_leg', 'future_leg', 'fee')),
+        quantity       REAL,
+        fees           REAL CHECK (fees IS NULL OR fees >= 0),
+        created_at_utc TEXT NOT NULL,
+        PRIMARY KEY (source_id, event_id, role)
+    )
+    """,
+    """
+    CREATE INDEX idx_cost_basis_fop_source_allocations_event
+        ON cost_basis_fop_source_allocations(event_id)
+    """,
+    """
+    CREATE TABLE cost_basis_fop_operations (
+        operation_id         TEXT PRIMARY KEY,
+        book_id              TEXT NOT NULL REFERENCES cost_basis_books(book_id),
+        client_token         TEXT NOT NULL UNIQUE,
+        kind                 TEXT NOT NULL CHECK (kind IN (
+                                 'adopt_binding', 'correct_contract', 'close_cycle',
+                                 'revoke_cycle', 'rebuild')),
+        payload_digest       TEXT NOT NULL,
+        ledger_digest_before TEXT NOT NULL,
+        ledger_digest_after  TEXT NOT NULL,
+        created_at_utc       TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE cost_basis_fop_reference_revisions (
+        operation_id    TEXT NOT NULL REFERENCES cost_basis_fop_operations(operation_id),
+        event_id        TEXT NOT NULL REFERENCES cost_basis_events(event_id),
+        reference       TEXT NOT NULL CHECK (reference IN (
+                            'contract', 'delivered_contract', 'binding', 'fee_source')),
+        before_id       TEXT,
+        before_revision INTEGER,
+        after_id        TEXT,
+        after_revision  INTEGER,
+        PRIMARY KEY (operation_id, event_id, reference)
+    )
+    """,
+    """
+    CREATE TABLE cost_basis_fop_event_id_mappings (
+        operation_id TEXT NOT NULL REFERENCES cost_basis_fop_operations(operation_id),
+        old_event_id TEXT NOT NULL,
+        new_event_id TEXT NOT NULL REFERENCES cost_basis_events(event_id),
+        PRIMARY KEY (operation_id, old_event_id)
+    )
+    """,
+    """
+    CREATE TABLE cost_basis_fop_requests (
+        client_token   TEXT PRIMARY KEY,
+        book_id        TEXT NOT NULL REFERENCES cost_basis_books(book_id),
+        action         TEXT NOT NULL CHECK (action IN (
+                           'append', 'void', 'metadata', 'reset', 'restore_reset',
+                           'restore_backup', 'rebuild')),
+        request_digest TEXT NOT NULL CHECK (length(request_digest) = 64),
+        result_json    TEXT NOT NULL,
+        created_at_utc TEXT NOT NULL
+    )
+    """,
 )
 
 
@@ -1505,10 +1839,30 @@ def _validate_delivery_direction(kind, event):
         )
 
 
-class CostBasisStore:
-    def __init__(self, db_path, *, now=None):
+class CostBasisStore(FopLedgerMixin):
+    def __init__(self, db_path, *, now=None, fault_hook=None, fop_writes_enabled=False,
+                 display_timezone='America/New_York', credential_key=None):
         self._db_path = Path(db_path)
         self._now = now or (lambda: datetime.now(timezone.utc))
+        # FOP ledger writes stay closed until the release stage (plan §13.3
+        # P6); the P2 suites open them on their own temporary stores.
+        self._fop_writes_enabled = bool(fop_writes_enabled)
+        # [tws] timezone: the zone of the trade_date/broker_timestamp display
+        # projection of FOP rows (plan §8.1).
+        self._display_timezone = display_timezone
+        # Signs the expiring evidence credentials of verified bindings; a new
+        # process invalidates every outstanding one (plan §4.3).
+        self._credential_key = credential_key or secrets.token_bytes(32)
+        # Tests name a point ('migrate_v11_after_copy', ...) and raise there to
+        # prove a failure anywhere leaves every table as it was.
+        self._fault_hook = fault_hook
+        # What the last initialize() migration did: the consistent backup it
+        # took first and any pre-existing book-less rows it preserved.
+        self.last_migration = None
+
+    def _fault(self, point):
+        if self._fault_hook is not None:
+            self._fault_hook(point)
 
     @property
     def db_path(self):
@@ -1573,6 +1927,35 @@ class CostBasisStore:
             )
         if version == SCHEMA_USER_VERSION:
             return
+        if version == 0:
+            object_count = conn.execute('SELECT count(*) FROM sqlite_master').fetchone()[0]
+            if object_count > 0:
+                raise StoreUnavailableError(
+                    'database file exists with unknown contents; refusing to migrate'
+                )
+            conn.execute('PRAGMA auto_vacuum = INCREMENTAL')
+            conn.execute('PRAGMA journal_mode = WAL')
+            conn.execute('BEGIN IMMEDIATE')
+            try:
+                for statement in _SCHEMA_STATEMENTS:
+                    conn.execute(statement)
+                conn.execute(f'PRAGMA user_version = {_V10_USER_VERSION}')
+                conn.execute('COMMIT')
+            except BaseException:
+                conn.execute('ROLLBACK')
+                raise
+            version = _V10_USER_VERSION
+            backup_path = None
+        else:
+            # An existing ledger is copied, consistently, before the first
+            # step touches it: the build that wrote it cannot open the new
+            # schema, so this copy is the way back (plan §8.2, §14.3).
+            backup_path = self._backup_before_migration(conn, version)
+        self.last_migration = {
+            'fromVersion': version, 'toVersion': SCHEMA_USER_VERSION,
+            'backupPath': str(backup_path) if backup_path else None,
+            'preservedOrphans': {},
+        }
         if version == 1:
             # v1 -> v2 only ADDS a table. Existing events are untouched, so
             # the upgrade is safe to run against a live ledger.
@@ -1624,23 +2007,122 @@ class CostBasisStore:
             version = 9
         if version == 9:
             self._migrate_v9_to_v10(conn)
-            return
-        object_count = conn.execute('SELECT count(*) FROM sqlite_master').fetchone()[0]
-        if object_count > 0:
+            version = 10
+        if version == 10:
+            self._migrate_v10_to_v11(conn)
+
+    def _backup_before_migration(self, conn, version):
+        """Write a consistent copy of the ledger next to it and verify it.
+
+        SQLite's backup API copies a consistent snapshot even from a WAL
+        database. The copy is checked (integrity, schema version, row counts)
+        before any migration step runs; if it cannot be taken or does not
+        verify, nothing is migrated and the store stays unavailable.
+        """
+        stamp = self.now_utc().strftime('%Y%m%dT%H%M%SZ')
+        target = self._db_path.with_name(
+            f'{self._db_path.stem}.pre-v{SCHEMA_USER_VERSION}-from-v{version}-{stamp}-'
+            f'{uuid.uuid4().hex[:8]}{self._db_path.suffix or ".db"}')
+        if target.exists():
             raise StoreUnavailableError(
-                'database file exists with unknown contents; refusing to migrate'
-            )
-        conn.execute('PRAGMA auto_vacuum = INCREMENTAL')
-        conn.execute('PRAGMA journal_mode = WAL')
-        conn.execute('BEGIN IMMEDIATE')
+                f'a pre-migration backup named {target.name} already exists; nothing migrated')
+        counts = {}
+        for table in ('cost_basis_books', 'cost_basis_events'):
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table,)).fetchone()
+            if exists:
+                counts[table] = conn.execute(f'SELECT count(*) FROM {table}').fetchone()[0]
+        dest = None
         try:
-            for statement in _SCHEMA_STATEMENTS:
-                conn.execute(statement)
-            conn.execute(f'PRAGMA user_version = {SCHEMA_USER_VERSION}')
-            conn.execute('COMMIT')
-        except BaseException:
-            conn.execute('ROLLBACK')
-            raise
+            dest = sqlite3.connect(target)
+            conn.backup(dest)
+            self._fault('migration_backup')
+            if dest.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                raise StoreUnavailableError('the pre-migration backup failed its integrity check')
+            if dest.execute('PRAGMA user_version').fetchone()[0] != version:
+                raise StoreUnavailableError('the pre-migration backup has another schema version')
+            for table, count in counts.items():
+                if dest.execute(f'SELECT count(*) FROM {table}').fetchone()[0] != count:
+                    raise StoreUnavailableError(
+                        f'the pre-migration backup is missing rows of {table}')
+        except Exception as exc:
+            if dest is not None:
+                dest.close()
+                dest = None
+            try:
+                target.unlink()
+            except OSError:
+                pass
+            raise StoreUnavailableError(
+                f'could not take a verified backup before migrating; nothing migrated: {exc}'
+            ) from exc
+        finally:
+            if dest is not None:
+                dest.close()
+        return target
+
+    @staticmethod
+    def _book_less_rows(conn):
+        """Rows of the FK-less book tables whose book no longer exists."""
+        found = {}
+        for table in _BOOK_SCOPED_TABLES_WITHOUT_FK:
+            rows = conn.execute(
+                f'SELECT book_id, count(*) AS total FROM {table} '
+                'WHERE book_id NOT IN (SELECT book_id FROM cost_basis_books) '
+                'GROUP BY book_id ORDER BY book_id').fetchall()
+            found[table] = {row['book_id']: int(row['total']) for row in rows}
+        return found
+
+    def _migrate_v10_to_v11(self, conn):
+        """Rebuild the books table and add the FOP tables (plan §8.2 item 7).
+
+        The books table is a parent, so the rename-old-then-copy order the v10
+        events migration uses fails its DROP with foreign keys on. SQLite's
+        documented order does not: foreign keys OFF before BEGIN, build the
+        new table, copy, drop the old, rename the new, then prove
+        foreign_key_check is empty before committing. Every book row must
+        come through unchanged and no FK-less table may gain a book-less row;
+        otherwise the transaction rolls back and the file stays at v10.
+        """
+        # By name: a book table that grew by ALTER TABLE ADD COLUMN (v5 added
+        # account) keeps its columns in another order than the v11 table.
+        book_columns = ', '.join(_BOOK_COLUMNS)
+        books_before = [tuple(row) for row in conn.execute(
+            f'SELECT {book_columns} FROM cost_basis_books ORDER BY book_id')]
+        orphans_before = self._book_less_rows(conn)
+        conn.execute('PRAGMA foreign_keys = OFF')
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            try:
+                for index, statement in enumerate(_V11_STATEMENTS):
+                    conn.execute(statement)
+                    if index == 1:
+                        self._fault('migrate_v11_after_copy')
+                books_after = [tuple(row) for row in conn.execute(
+                    f'SELECT {book_columns} FROM cost_basis_books ORDER BY book_id')]
+                if books_after != books_before:
+                    raise StoreUnavailableError(
+                        'the v11 migration did not carry every ledger row unchanged; nothing changed')
+                violations = conn.execute('PRAGMA foreign_key_check').fetchall()
+                if violations:
+                    raise StoreUnavailableError(
+                        f'the v11 migration left {len(violations)} foreign key violations; '
+                        'nothing changed')
+                if self._book_less_rows(conn) != orphans_before:
+                    raise StoreUnavailableError(
+                        'the v11 migration detached rows from their ledger; nothing changed')
+                self._fault('migrate_v11_before_commit')
+                conn.execute(f'PRAGMA user_version = {SCHEMA_USER_VERSION}')
+                conn.execute('COMMIT')
+            except BaseException:
+                conn.execute('ROLLBACK')
+                raise
+        finally:
+            conn.execute('PRAGMA foreign_keys = ON')
+        if self.last_migration is not None:
+            self.last_migration['preservedOrphans'] = {
+                table: sum(rows.values()) for table, rows in orphans_before.items() if rows}
 
     @staticmethod
     def _migrate_v2_to_v4(conn):
@@ -1966,7 +2448,7 @@ class CostBasisStore:
             rows = conn.execute(sql).fetchall()
             books = []
             for row in rows:
-                book = _book_row_to_dict(row)
+                book = _book_row_to_dict(row, self._fop_book_row(conn, row['book_id']))
                 counts = conn.execute(
                     'SELECT count(*) AS total, '
                     '       sum(CASE WHEN voided_at_utc IS NULL THEN 1 ELSE 0 END) AS live, '
@@ -2012,6 +2494,13 @@ class CostBasisStore:
             if not row['voided_at_utc']:
                 live += 1
             max_seq = max(max_seq, int(row['seq']))
+        # A FOP ledger's version also covers its references, revisions,
+        # cycle boundaries and metadata operations; a stock ledger's digest is
+        # exactly what it was before v11.
+        if CostBasisStore._fop_book_row(conn, book_id) is not None:
+            hasher.update(b'fop\n')
+            for line in FopLedgerMixin._fop_digest_lines(conn, book_id):
+                hasher.update(f'{line}\n'.encode('utf-8'))
         return {
             'eventCount': len(rows),
             'liveEventCount': live,
@@ -2195,6 +2684,11 @@ class CostBasisStore:
         finally:
             conn.close()
 
+    @staticmethod
+    def _fop_book_row(conn, book_id):
+        return conn.execute(
+            'SELECT * FROM cost_basis_fop_books WHERE book_id = ?', (book_id,)).fetchone()
+
     def _get_book(self, conn, book_id):
         _require_token('bookId', book_id)
         row = conn.execute(
@@ -2202,7 +2696,7 @@ class CostBasisStore:
         ).fetchone()
         if row is None:
             raise BookNotFoundError('no ledger with that id')
-        return _book_row_to_dict(row)
+        return _book_row_to_dict(row, self._fop_book_row(conn, book_id))
 
     def _get_writable_book(self, conn, book_id, action):
         """The book, provided its type may still be written (FROZEN_BOOK_SEC_TYPES)."""
@@ -2213,15 +2707,26 @@ class CostBasisStore:
     def archive_book(self, book_id):
         conn = self._connect()
         try:
-            book = self._get_writable_book(conn, book_id, 'archiving')
-            if book['archivedAtUtc']:
-                return book
-            conn.execute(
-                'UPDATE cost_basis_books SET archived_at_utc = ?, updated_at_utc = ? '
-                'WHERE book_id = ?',
-                (self._utc_now_iso(), self._utc_now_iso(), book_id),
-            )
-            return self._get_book(conn, book_id)
+            # The gate is read in the same write transaction as the update.
+            conn.execute('BEGIN IMMEDIATE')
+            try:
+                book = self._get_book(conn, book_id)
+                if book['fop'] is not None:
+                    book = self._get_fop_writable_book(conn, book_id, 'archiving')
+                else:
+                    book = self._get_writable_book(conn, book_id, 'archiving')
+                if not book['archivedAtUtc']:
+                    conn.execute(
+                        'UPDATE cost_basis_books SET archived_at_utc = ?, updated_at_utc = ? '
+                        'WHERE book_id = ?',
+                        (self._utc_now_iso(), self._utc_now_iso(), book_id),
+                    )
+                    book = self._get_book(conn, book_id)
+                conn.execute('COMMIT')
+            except BaseException:
+                self._rollback_quietly(conn)
+                raise
+            return book
         except sqlite3.Error as exc:
             raise self._map_sqlite_error(exc) from exc
         finally:
@@ -2297,6 +2802,7 @@ class CostBasisStore:
                     'DELETE FROM cost_basis_snapshots WHERE book_id = ?',
                     (book_id,),
                 ).rowcount
+                self._delete_fop_graph(conn, book_id)
                 removed_events = conn.execute(
                     'DELETE FROM cost_basis_events WHERE book_id = ?',
                     (book_id,),
@@ -2306,6 +2812,9 @@ class CostBasisStore:
                     (book_id,),
                 ).rowcount
                 conn.execute('DELETE FROM cost_basis_reset_coverage WHERE book_id = ?', (book_id,))
+                # Before v11 a deletion left the book's import registrations
+                # behind; the whole-book deletion removes every related row.
+                conn.execute('DELETE FROM cost_basis_import_batches WHERE book_id = ?', (book_id,))
                 removed_books = conn.execute(
                     'DELETE FROM cost_basis_books WHERE book_id = ?',
                     (book_id,),
@@ -3760,7 +4269,18 @@ class CostBasisStore:
         conn = self._connect()
         try:
             conn.execute('BEGIN')
-            self._get_book(conn, book_id)
+            book = self._get_book(conn, book_id)
+            if book['fop'] is not None:
+                # A FOP ledger lists ListedFopEvent rows in its own order; the
+                # stock filters do not apply to it.
+                if account or kinds or start_date or end_date:
+                    raise InvalidRequestError(
+                        'a FOP ledger lists every event; account, kind and date filters are '
+                        'for stock ledgers')
+                total, events = self._list_fop_events(
+                    conn, book_id, include_voided=include_voided, limit=limit, offset=offset)
+                return {'bookId': book_id, 'total': total, 'limit': limit, 'offset': offset,
+                        'events': events, 'ledgerVersion': self._ledger_version(conn, book_id)}
             total = conn.execute(
                 f'SELECT count(*) AS total FROM cost_basis_events WHERE {where}',
                 params,
@@ -4072,7 +4592,7 @@ class CostBasisStore:
             conn.close()
 
     def reset_book(self, book_id, *, confirmation, client_token, reason='',
-                   expected_ledger_version=None, book_identity=None):
+                   expected_ledger_version=None, book_identity=None, engine_version=None):
         """Empty a book so it can be rebuilt from statements.
 
         The rows are archived into cost_basis_book_resets as JSON BEFORE they
@@ -4081,6 +4601,12 @@ class CostBasisStore:
         the one operation allowed to delete events, and only behind a typed,
         count-bearing phrase.
         """
+        if self._is_fop_book(book_id):
+            # engine_version is the FOP engine the request was prepared for.
+            return self.reset_fop_book(
+                book_id, confirmation=confirmation, client_token=client_token, reason=reason,
+                expected_ledger_version=expected_ledger_version, book_identity=book_identity,
+                engine_version=engine_version)
         _require_token('clientToken', client_token)
         reason = _optional_text(reason, 'reason', MAX_NOTE_CHARS)
 
@@ -4168,6 +4694,9 @@ class CostBasisStore:
         shares one transaction, so a failure anywhere leaves the original
         ledger exactly as it was.
         """
+        if self._is_fop_book(book_id):
+            raise InvalidRequestError(
+                'a FOP ledger is rebuilt from a fopPackage (rebuild_fop_book), not from stock rows')
         _require_token('clientToken', client_token)
         _require_token('importBatchId', import_batch_id)
         reason = _optional_text(reason, 'reason', MAX_NOTE_CHARS)
@@ -4289,12 +4818,27 @@ class CostBasisStore:
         finally:
             conn.close()
 
+    def _is_fop_book(self, book_id):
+        """Whether book_id is a FOP ledger (FUT with FOP metadata); False if absent."""
+        conn = self._connect()
+        try:
+            _require_token('bookId', book_id)
+            return self._fop_book_row(conn, book_id) is not None
+        finally:
+            conn.close()
+
     def export_backup(self, book_id):
-        """A consistent, checksummed, complete event snapshot for file recovery."""
+        """A consistent, checksummed, complete event snapshot for file recovery.
+
+        A FOP ledger exports backup version 2 with its whole relation graph;
+        stock and legacy FUT ledgers keep version 1.
+        """
         conn = self._connect()
         try:
             conn.execute('BEGIN')
             book = self._get_book(conn, book_id)
+            if book['fop'] is not None:
+                return self._export_fop_backup(conn, book)
             rows = [_event_row_to_dict(row) for row in conn.execute(
                 'SELECT * FROM cost_basis_events WHERE book_id = ? ORDER BY seq', (book_id,))]
             payload = {'book': book, 'events': rows, 'ledgerVersion': self._ledger_version(conn, book_id)}
@@ -4338,13 +4882,19 @@ class CostBasisStore:
         return {'events_json': events_json, 'events_sha256': hashlib.sha256(events_json.encode()).hexdigest()}
 
     def restore_backup(self, book_id, backup, *, confirmation, client_token,
-                       expected_ledger_version=None, book_identity=None):
+                       expected_ledger_version=None, book_identity=None, engine_version=None):
+        if self._is_fop_book(book_id):
+            return self.restore_fop_graph(
+                book_id, backup=backup, confirmation=confirmation, client_token=client_token,
+                expected_ledger_version=expected_ledger_version, book_identity=book_identity,
+                engine_version=engine_version)
         return self.restore_book_reset(book_id, 'file-backup', backup=backup,
             confirmation=confirmation, client_token=client_token,
             expected_ledger_version=expected_ledger_version, book_identity=book_identity)
 
     def restore_book_reset(self, book_id, reset_id, *, confirmation, client_token,
-                           expected_ledger_version=None, book_identity=None, backup=None):
+                           expected_ledger_version=None, book_identity=None, backup=None,
+                           engine_version=None):
         """Put an archived ledger back, archiving the current one first.
 
         The archive holds the rows exactly as they were, voided ones
@@ -4353,6 +4903,11 @@ class CostBasisStore:
         re-judge it. Inside one transaction: archive the live rows, delete
         them, insert the archived rows.
         """
+        if backup is None and self._is_fop_book(book_id):
+            return self.restore_fop_graph(
+                book_id, reset_id=reset_id, confirmation=confirmation, client_token=client_token,
+                expected_ledger_version=expected_ledger_version, book_identity=book_identity,
+                engine_version=engine_version)
         _require_token('clientToken', client_token)
         _require_token('resetId', reset_id)
         conn = self._connect()
@@ -4649,20 +5204,40 @@ def _delete_phrase(account, symbol, event_count, snapshot_count, reset_count):
             f'{snapshot_count} SNAPSHOTS {reset_count} RESETS')
 
 
-def _book_row_to_dict(row):
+def _book_row_to_dict(row, fop_row=None):
+    """A book as the protocol shows it.
+
+    A FOP ledger keeps no stock multiplier (NULL; point values live in its
+    contract records), so defaultSharesPerContract is None there. `fop`
+    carries the FOP ledger metadata; a FUT book without it is a legacy ledger
+    from another build: export and delete only (plan §8.2 item 3).
+    """
+    multiplier = row['default_shares_per_contract']
+    multiplier = None if multiplier is None else int(multiplier)
+    fop = None
+    if fop_row is not None:
+        fop = {
+            'engineVersion': int(fop_row['engine_version']),
+            'productRules': fop_row['product_rules'],
+            'historyScope': fop_row['history_scope'],
+            'createdAtUtc': fop_row['created_at_utc'],
+            'updatedAtUtc': fop_row['updated_at_utc'],
+        }
     return {
         'bookId': row['book_id'],
         'account': row['account'],
         'symbol': row['symbol'],
         'secType': row['sec_type'],
         'currency': row['currency'],
-        'defaultSharesPerContract': int(row['default_shares_per_contract']),
-        'defaultMultiplier': int(row['default_shares_per_contract']),
+        'defaultSharesPerContract': multiplier,
+        'defaultMultiplier': multiplier,
         'startDate': row['start_date'],
         'note': row['note'],
         'createdAtUtc': row['created_at_utc'],
         'updatedAtUtc': row['updated_at_utc'],
         'archivedAtUtc': row['archived_at_utc'],
+        'fop': fop,
+        'legacyFutures': row['sec_type'] == 'FUT' and fop is None,
     }
 
 

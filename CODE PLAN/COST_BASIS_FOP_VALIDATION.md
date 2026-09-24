@@ -260,5 +260,186 @@
 ### 未完成与后续
 
 - P1 已提交并快进合并到本地 `main`（未推送）。
-- P2 的域校验须在真实 store 上跑通 `protocol.json` 的全部 27 个 `domainCases`，并实现 `delivery_follows_binding` 与 `package_keys_resolve`。
+- 已在 P2 完成：`delivery_follows_binding`、`package_keys_resolve` 在写路径实现；重复来源规则在域模块实现并跑通全部 27 个 `domainCases`，导入（P4）接入。
 - P2 以本阶段冻结的契约为前置：原子迁移、FOP 账本元数据与写入核对、合约/绑定/来源、只读身份解析、备份新格式。正式的 FOP 写入仍然关闭。
+
+## P2 — 存储、版本、来源图和只读身份解析（2026-09-24）
+
+### 环境
+
+| 项目 | 值 |
+| --- | --- |
+| 分支 / worktree | `feat/cost-basis-fop-p2`，同一 worktree（OneDrive 之外） |
+| 基线提交 | `330cad5`（P1 已合并到 `main`） |
+| 本阶段提交 | 未提交，等待用户确认 |
+| schema | v10 → v11 |
+
+### 本阶段改动
+
+- **schema v11**（`cost_basis_store.py`）：
+  - 建表语句逐条取自 P1 冻结的 DDL 草案，测试逐条比对；
+  - 书表按 §8.2 第 7 条的顺序重建（外键在 BEGIN 前关闭）；
+  - 新建库先建成 v10 再走同一条迁移，所以任何 v11 库结构都相同。
+- **迁移前自动备份**：已有库在第一步迁移前，先用 SQLite 备份接口在旁边写一份 `cost_basis.pre-v11-from-v10-<UTC 时间>-<随机后缀>.db`，并核验完整性、版本号和行数；备份失败则不迁移，账本保持不可用。迁移中任何一步失败都整体回滚，文件保持 v10 原样。
+- **无外键的三张表**：不允许迁移新增孤儿行；更早的删除遗留的孤儿行保留并报告，不删除、不阻断升级。同时修正整本删除漏删导入登记的旧缺陷。
+- **书表序列化**：股票乘数可以为空；新增 `fop`（FOP 账本元数据）和 `legacyFutures` 两个字段。没有 FOP 元数据的 FUT 账本仍只能导出和删除。
+- **新模块**：
+  - `cost_basis_fop_domain.py`：纯规则；
+  - `cost_basis_fop_store.py`：FOP 关系图的读写，以 mixin 并入 `CostBasisStore`；
+  - `cost_basis_fop_schema.py`：运行时契约读取器，由 P1 测试中的 Python 读取器迁移而来；
+  - `cost_basis_fop_broker.py`：只读合约解析；
+  - `cost_basis_fop_protocol.json`：契约类型的运行时副本，测试保证与冻结契约完全一致。
+- **写入闸门**：所有 FOP 写入都要求 store 以 `fop_writes_enabled=True` 构造。两个服务端默认关闭，公共入口仍报 `futures_book_frozen`；股票入口永远不写 FOP 账本。
+- **写路径**：
+  - 建账：FUT，股票乘数为空，同时写 FOP 元数据；
+  - 每个写动作（追加、冲销、元数据提交、清空、两种恢复、重建）都在同一个写事务内依次核对：本引擎是否支持该账本的引擎版本和产品规则、请求声明的引擎版本、身份、已审阅的账本版本；
+  - 请求登记表按 token 记下动作、请求摘要和首次结果：同 token 同请求返回首次结果（之后的元数据修订、清空或恢复都不影响），换动作、换内容一律拒绝；被拒绝的请求不占用 token；登记表随备份导出，以同一账本 ID 恢复（包括恢复到新库）时一并带回；
+  - 共享事件表的身份列一律为空，`trade_date/broker_timestamp` 由服务端按 `[tws] timezone` 投影；
+  - 合约“一份合约一条记录”：conId 冲突、同一结构身份两条记录、在写包里夹带新修订都会被拒绝；
+  - 交割的方向、张数、价格（即行权价）按 §6.1 校验，绑定必须与交割的合约对一致（`delivery_follows_binding`）；
+  - 费用可以用已入库事件 id 或包内键引用成交（`package_keys_resolve`）；
+  - 每次写入后整本回放数量、周期锚点和费用来源；
+  - 一条来源可以分配给多个事件：来源表只存一次并负责去重，这些事件的 `external_ref` 在来源键后加上各自的事件 ID；
+  - 账本摘要覆盖整本内容：事件各列、FOP 细节与引用、合约和绑定每个修订的全部条款与证据、周期、来源原文与分配、元数据操作、引擎和产品规则（只排除写入时间戳和导入批次）；股票账本的摘要与 v10 完全相同。
+- **元数据操作**：
+  - 采纳绑定：只能是下一个版本；服务端算出受影响的事件，并核对请求的清单；已确认交割改指另一张期货属于经济更正，拒绝；
+  - 修正合约：只能补充原本为空的字段或升级证据；补充后若与另一条当前记录成为同一份合约（结构身份或 conId 相同），拒绝；
+  - 关闭、撤销周期边界；
+  - 每个操作都有操作记录和引用修订记录。
+- **整图**：
+  - v2 备份导出与恢复：写入前先校验整张关系图（`check_graph`：修订链、合约身份、每条绑定的合约类型、来源分配上限、周期锚点、每个事件指明的主来源、引用修订、重建映射和请求登记，没有事件使用的记录也要校验，所有 ID 必须在本图内）；每个事件按种类规则重验，引用必须在图内解析；写入后与普通写入同样整本回放（一个事件只能关闭一个周期）；恢复采用备份的历史范围；恢复到另一账本 ID 时整图换新 ID，请求登记不带过去；
+  - 重置存档与恢复；
+  - 重建：旧的周期边界只映射到“同一主来源且经济内容相同”的唯一新事件，映射不了必须在同一请求中撤销，否则拒绝，并记录完整的旧→新映射；
+  - 整本删除清理整张图。
+- **绑定凭据**：只读解析签发带过期时间的服务端凭据（HMAC，进程内密钥，重启即失效）。浏览器自带的状态字符串、过期或篡改的凭据都会被拒绝。
+- **只读解析**：交割月只取底层期货的 `ContractDetails.contractMonth`；限制单批 20 个、并发 4、单次超时 10 秒。`ib_server` 注入 `reqContractDetailsAsync` 包装；`historical_server` 没有注入，返回 `fop_contract_details_unavailable`。
+- **WS**：FOP 消息先按冻结类型校验整条消息；新增 `commit_cost_basis_fop_metadata`、`request_cost_basis_fop_contract_details` 两个动作；状态响应报告 `features.fopLedger`。前端公共目录登记了这两个动作，但暂时不允许任何页面发送。
+- **协议契约**：新增重置、重建、按存档恢复、按备份恢复四种 FOP 请求，以及合约解析的请求和响应；冲销、元数据提交、清空和两种恢复请求带 `engineVersion`；备份中的事件指明主来源（`primarySourceId`），备份带请求登记（`RequestRecord`）。现为 63 个类型、39 个正例、81 个反例。重复来源的比较规则在域模块实现为 `repeat_outcome`，逐个跑通 27 个算例（导入在 P4 接入）。
+- **页面**：FOP 页面区分独立 FOP 账本和旧版 FUT 账本，FOP 账本不给旧页面链接；股票页账本信息在乘数为空时显示“见合约记录”。
+- **测试**：新增 4 个 Python 套件（store 50、domain 10、ws 7、broker 5），已登记到测试清单 P2 阶段；JS 身份套件新增 1 个用例。几个旧迁移测试改为先撤掉 v11 新增的表再回退版本号。
+- **文档**：README 的升级与回滚说明、ARCHITECTURE、DEV_HANDOVER、AGENTS。
+
+### P2 中的决定
+
+- FOP 存储代码放在单独的 mixin 模块，不再扩大 4700 行的股票 store。
+- 服务端的形状校验直接使用契约类型（运行时副本），“接受全部正例、拒绝全部反例”由构造保证，并有测试。
+- 回放顺序先用“生效起点、终点、录入顺序”的简化比较；§9.2 的歧义组判定属于 P3。
+- 重建只保留能唯一映射的周期边界；费用来源由新写包自己用包内键表达。
+- 协议文件改为用脚本直接修改 JSON；P1 的临时生成脚本已退役。
+
+### 命令与结果
+
+| 标记 | 命令 | 结果 |
+| --- | --- | --- |
+| B（改动后） | `node tests/run.js` | 1238 通过，0 失败 |
+| B（改动后） | `PYTHONPATH=. <venv>/python -m unittest discover -s tests -p '*_test.py'` | 1097 个，全部通过，跳过 2（P2 新增 72 个） |
+| P2 | `node tests/run_cost_basis_fop.js --stage P2` | node 29 通过；清单另列 Python 6 个套件共 99 个用例 |
+| P2 | `PYTHONPATH=. <venv>/python -m unittest discover -s tests -p 'cost_basis_fop_*_test.py'` | 99 个，全部通过 |
+| 运行器 | `node tests/run_cost_basis_fop.js --stage P6` | 退出码 1，列出 P3–P6 没有登记用例 |
+| 资源 | `python3 scripts/stamp_asset_versions.py --check` | asset versions are current |
+
+### 守卫本身的有效性
+
+每项都在副本上撤掉修复，确认对应测试会失败：
+- 恢复到另一账本时不换 ID；
+- 重建时锚点映射不了也放行；
+- 去掉交割方向检查（篡改的备份被周期锚点检查挡下）。
+
+凡是经过 FOP 写入闸门的存储方法，都必须在写路径覆盖表中登记，由契约测试检查。
+
+### 真实账本副本上的迁移演练
+
+用 SQLite 备份接口从只读连接复制真实 `cost_basis.db` 到临时目录，只在副本上迁移，结果：
+- 5 个股票账本、478 条事件、28 份重置存档等各表逐行不变；
+- 每个账本的摘要和事件列表与迁移前完全一致；
+- 外键检查为空，完整性检查正常；
+- 迁移前备份自动生成。
+
+核对后已删除副本，真实数据目录没有任何改动。合并后实盘后端下一次重启时会在真实库上执行同样的迁移，并在旁边留下备份文件。
+
+### F 编号 → 用例 → 结果（P2 部分）
+
+| F 项（部分） | 用例 | 结果 |
+| --- | --- | --- |
+| F03、F04、F05 | 交割月取自 `contractMonth`；周期权跟随 `underConId`；conId 冲突、同一合约两条记录（新增或修正后）、多个候选都报告不猜 | 通过 |
+| F11 | 外来旧 FUT 账本只能导出和删除；v1 备份不能恢复到 FOP 账本 | 通过 |
+| F23、F24 | 每个写动作在写事务内核对支持的引擎、声明的引擎、身份、版本，逐项拒绝后整库不变；同版本并发只成功一个；同 token 不同请求拒绝、同请求返回首次结果（含之后的元数据修订）；一条来源分配给多个事件；内容不同的恢复使旧预览失效；各处注入故障后所有表不变 | 通过 |
+| F25 | 迁移前备份、迁移失败保持 v10、股票行不变、v2 备份整图往返（含历史范围、主来源、请求登记）、重置存档往返、新库恢复后原请求可重试、整本删除 | 通过 |
+| F26（P2 部分） | 两个后端共用协议；没有解析器的后端明确报错；单个请求出错按请求 ID 回复 | 通过 |
+| F34、F46 | 身份列、股票字段、白名单外种类、带数量事件排除出成本都被拒绝；服务端生成交易日投影 | 通过 |
+| F37、F45 | 书表可空乘数；迁移在开启外键的连接上完成；外键检查为空；无外键表的孤儿行处理 | 通过 |
+| F38（P2 部分） | 默认后端 FOP 写入关闭，测试 store 显式打开；引擎版本不受支持的账本只能导出和删除 | 通过 |
+| F39（P2 部分） | 恢复到另一账本整图重映射；重建的边界映射或显式撤销；悬空绑定、跨账本的锚点和分配、断开的修订链、超额分配、没有事件使用的来源都在写入前拒绝 | 通过 |
+| F40（P2 部分） | 伪造、过期、他账本、他期货的凭据拒绝；采纳新绑定只改预览列出的引用，摘要改变 | 通过 |
+
+### 审查修正（2026-09-24，P2 第一轮审查）
+
+审查意见见 `CODE PLAN/COST_BASIS_FOP_P2_REVIEW_20260924.md`（R1–R7）。7 项先用审查附带的探测脚本在本分支复现，全部成立；修复后逐项转为正式测试。
+
+| 编号 | 问题 | 修正 | 正式测试 |
+| --- | --- | --- | --- |
+| R1 | 账本摘要只含引用和修订号，内容不同的恢复版本不变 | FOP 账本摘要改为覆盖整本内容；同内容同版本，内容不同版本必变 | `GraphTests.test_the_version_is_the_whole_content_so_a_changed_restore_expires_old_previews`：点值、价格、成交时间、绑定证据、来源原文各改一项后恢复，版本改变，持旧版本的写入被拒；恢复原内容后版本复原 |
+| R2 | 恢复只校验事件用到的关系 | 新增 `check_graph`，写入前在同一事务内校验整张图 | `GraphTests.test_a_restore_proves_every_relation_before_it_writes`：9 种坏图全部拒绝，所有表、版本不变，token 未被占用，原备份随后可用同一 token 恢复 |
+| R3 | 合约修正只查 conId | 修正与新增共用“一份合约一条当前记录”的检查（结构身份和 conId） | `MetadataTests.test_a_correction_cannot_make_two_records_of_one_contract`：FUT、FOP 各一例，拒绝后无残留，正常补全仍可提交 |
+| R4 | 一条来源分给多个事件被旧唯一索引挡住 | 来源去重由来源表负责；共用主来源的事件在键后加各自事件 ID；股票账本的索引和规则不变 | `GraphTests.test_one_source_may_feed_several_events`：1 → 2 分配成功；数量或费用超额拒绝；重试不新增；来源不能再次使用；作废后来源和分配保留；中途故障整批回滚；备份往返版本不变 |
+| R5 | 恢复重试不核对请求内容 | 新增请求登记表 `cost_basis_fop_requests`（DDL 草案第 9 节）：记下动作、请求摘要和首次结果；清空、恢复、重建不删除，整本删除才删除 | `GraphTests.test_a_graph_request_token_is_bound_to_what_it_asked`：换备份、换存档、换动作、换原因、换批次都拒绝；同请求返回首次结果且不再存档；之后整图被替换仍能正确重试；被拒绝的请求不占用 token |
+| R6 | 引擎版本只在追加和重建检查 | 写入闸门在写事务内检查本引擎是否支持该账本；冲销、元数据提交、清空、两种恢复的请求增加 `engineVersion` 字段，缺失或不符都拒绝；归档也在事务内检查 | `WriteGuardTests` 两个用例：7 个写动作 × 缺版本、错版本、错身份、旧预览全部拒绝且整库不变，各动作在副本上正常执行可成功；引擎不受支持的账本 7 个写动作和归档都拒绝，仍可读取、导出、删除；WS 层 `test_every_fop_write_names_the_engine_it_was_prepared_for` |
+| R7 | 追加重试按当前关系图重验 | 由请求登记表按首次请求摘要识别重试，不再依赖之后可变的关系 | `MetadataTests.test_a_retried_request_is_the_same_request_after_later_metadata_commits`：绑定采纳后、合约补全后，原请求重试都返回首次结果且不新增事件；同 token 改包仍拒绝 |
+
+契约随之修订（P2 尚未发布）：DDL 草案加第 9 节请求登记表；协议 5 种请求加 `engineVersion`，新增 4 个反例，`write_guard` 规则写明引擎核对和请求登记；`event_columns.json` 写明 `external_ref` 在来源拆分时的形式。契约测试新增一条：每个 FOP 写请求都要带引擎版本（请求本身或它携带的写包）。
+
+撤掉修复的检查（每次只撤一处，在工作区原地修改后还原）：摘要只含引用、恢复跳过整图校验、修正只查 conId、拆分事件共用一个键、重试不比摘要、闸门不查账本引擎、缺引擎版本也放行、已登记的 token 重新校验。8 处中对应测试都失败。
+
+审查探测脚本在修复后的结果（只为已必填的调用补上 `engine_version=1`，每个场景单独运行以免前一个被拒后中断）：
+
+```text
+SOURCE SPLIT: accepted, 2 events
+DIGEST: point value 1000 -> 500, version unchanged = False
+DIGEST stale write: REFUSED LedgerChangedError
+RESTORE DANGLING: REFUSED FopIdentityConflictError binding ... names missing-future-0001, which is not a FUT contract of this ledger
+RESTORE TOKEN: REFUSED InvalidRequestError clientToken was already used for a different restore_backup request (price still 70.12)
+ENGINE: REFUSED FopEngineVersionMismatchError this ledger uses FOP engine version 2
+APPEND RETRY AFTER CORRECTION: replay = True, events = 1
+RESTORE ALLOCATION: REFUSED InvalidRequestError tws_exec:exec-review-001 allocates 99 of 1 stated contracts
+CORRECTION IDENTITY: REFUSED FopIdentityConflictError contracts fut-clz6-0001 and future-duplicate-001 are the same contract
+```
+
+### 审查修正（2026-09-24，P2 第二轮复核）
+
+复核结论写在同一份审查文档的第 7–11 节：R1–R7 通过，另提出 R8–R11 四项备份恢复问题。4 项先用复核附带的脚本在本分支复现（文件指纹与复核记录一致），全部成立；修复后原脚本不加改动重跑，4 项均符合要求，并逐项转为正式测试。
+
+| 编号 | 问题 | 修正 | 正式测试 |
+| --- | --- | --- | --- |
+| R8 | 恢复忽略备份的历史范围 | 恢复在同一事务内采用备份的 `historyScope`（范围描述的是这批事件，属于整图内容）；范围相同时不改动该行。选择“采用”而不是“拒绝”，是因为灾后在新库恢复时，账本只能先建好再恢复，拒绝会要求用户删掉重建 | `test_a_restore_takes_the_history_scope_of_its_backup`：两个方向都在新库、跨账本 ID 恢复原样备份，范围与备份一致，再导出一致；恢复前的图（含原范围）可从存档还原；同范围恢复照常 |
+| R9 | 恢复可写入两个当前 closed 周期共用一个锚点 | “一个事件只关闭一个周期”移入 `check_cycle_anchors`，每次写入和每次恢复都走这一处；只对当前且 closed 的记录检查。`close_cycle` 原有的单独 SQL 检查删去 | `test_one_event_closes_one_cycle_on_every_path`：普通入口和恢复都拒绝，拒绝后表、版本、token 不变；已撤销的旧修订与新周期共用锚点、两个锚点各一个周期的合法图可以往返 |
+| R10 | 原样往返按排序重选主来源，namespace 改变 | 备份中每个事件用 `primarySourceId` 指明主来源记录；导出从 `external_ref` 精确解析（含 namespace，去掉拆分后缀），恢复按该 ID 排在首位，不再按字母顺序推断；`check_graph` 要求它是该事件分配的来源之一，且与显示的 externalRef 一致 | `test_a_round_trip_keeps_each_events_primary_source`：同一文本在 `tws_exec`、`ib_exec` 两个 namespace 下，主来源先后两种顺序，外加其中一条来源拆给两个事件；原样往返后每个事件的 `external_ref`、全部分配和账本版本都不变 |
+| R11 | 请求登记不在备份里，新库恢复后原请求重试被拒 | 备份带请求登记（`RequestRecord`：token、动作、请求摘要、首次结果）；以同一账本 ID 恢复时并入登记表，已有同 token 的记录必须是同一请求，否则整个恢复拒绝；恢复到另一账本 ID 时不带过去（那里所有 ID 和 token 都是新的，不会把旧账本的结果交给新账本）；`check_graph` 检查 token 不重复、结果是关于本账本的 | `test_a_restored_ledger_answers_retried_requests`：新库、同账本 ID 恢复后，重建、追加、元数据提交、清空、按存档恢复、冲销六种请求原样重试都返回首次结果且整库不变，同 token 改包拒绝；跨账本 ID 恢复后新账本的登记只有这次恢复本身，旧请求按旧版本重试被拒；登记被改而未重算校验和、结果指向别的账本、token 重复，都拒绝 |
+
+请求登记的恢复语义：备份导出之前已完成的请求，在恢复后的账本上重试，得到当时的首次结果，不再执行（清空的结果里的 `resetId` 指原库的存档，重置存档不在备份范围内）；备份之后才发出的请求，恢复后的库里没有登记，按普通请求处理，旧的账本版本会使其被拒。
+
+契约随之修订：协议新增 `RequestRecord` 类型，`BackupPayloadV2` 增加 `requests`，`StoredFopEvent` 增加 `primarySourceId`，新增 2 个反例；DDL 草案第 9 节注释改为“随备份导出、同 ID 恢复时带回”（表结构不变）。
+
+撤掉修复的检查（同样每次一处、原地修改后还原）：恢复保留目标原范围、锚点可重复、主来源按排序推断、恢复不带回登记、不检查登记结果所属账本。5 处中对应测试都失败；第一轮的 8 处重跑仍全部被发现。
+
+复核脚本修复后的原样输出：
+
+```text
+NEW-DB RETRY: replay accepted
+Unmodified backup historyScope: since_baseline
+Restore success: 1 events; remapped: True
+Restored book historyScope: since_baseline
+NORMAL DUPLICATE CYCLE: FopCycleBoundaryViolatedError
+RESTORED DUPLICATE CYCLE: FopCycleBoundaryViolatedError cycle boundaries cycle-review-001 and cycle-review-002 both close a cycle at <锚点事件 ID>; one event closes one cycle
+NAMESPACE ROUND TRIP: tws_exec:shared-reference-001 -> tws_exec:shared-reference-001 same version: True
+```
+
+### 未完成与后续
+
+- P2 改动尚未提交。
+- 浏览器核对本阶段没有做：页面改动只有 FOP 账本的说明文字和股票页的空乘数显示，都由单元测试覆盖。FOP 账本在真实后端上无法创建（写入关闭），页面整体验收在 P5。
+- `ib_server` 注入的合约详情函数没有接真实 TWS 测试（测试纪律不连接 TWS），由假服务覆盖解析逻辑。
+- 留给后续阶段：
+  - §9.2 歧义组排序和完整时间线（P3）；
+  - 导入接入重复来源规则和能力清单（P4）；
+  - 股票页把 FOP 账本转到 FOP 页面，FOP 页面的流水、导出、删除和快照（P5）；
+  - 写入发布（P6）。

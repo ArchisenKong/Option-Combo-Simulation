@@ -1845,7 +1845,9 @@
         const futures = String(book.secType || 'STK').toUpperCase() === 'FUT';
         _text(node, `${book.account || '旧版未限定账户'} · ${book.symbol}`
             + ` · ${futures ? 'FOP / FUT' : '股票 / ETF'} · 起算日 ${book.startDate}`
-            + ` · ${futures ? '点值' : '每张交割股数'} ${book.defaultSharesPerContract}`
+            + ` · ${futures ? '点值' : '每张交割股数'} ${book.defaultSharesPerContract === null
+                || book.defaultSharesPerContract === undefined
+                ? '见合约记录' : book.defaultSharesPerContract}`
             + ` · ${state.eventsTotal} 条事件`
             + (book.firstEventDate ? ` · ${book.firstEventDate} 至 ${book.lastEventDate}` : '')
             + (!book.account ? ' · 兼容模式：可包含多账户历史' : '')

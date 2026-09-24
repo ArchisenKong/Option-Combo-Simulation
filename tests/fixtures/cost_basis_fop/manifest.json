@@ -69,6 +69,7 @@
         { "name": "the FOP page loads only the common layer and its own controller", "requirements": ["F27 (P1 part)"] },
         { "name": "a stock ledger opened on the FOP page is sent back before anything renders", "requirements": ["F01 (wrong page)", "F02 (P1 part)"] },
         { "name": "a FUT ledger shows only its identity and the way to the legacy view", "requirements": ["F01 (P1 part)", "F38 (P1 part)"] },
+        { "name": "a FOP ledger is not described as a legacy ledger", "requirements": ["F01 (P2 part)"] },
         { "name": "without a ledger the page lists both kinds with links to their own pages", "requirements": ["F01 (P1 part)"] },
         { "name": "a stale bookmark or an unavailable backend is reported, not guessed", "requirements": ["F01 (stale bookmark)"] },
         { "name": "the stock page opens the ledger a link names", "requirements": ["F01 (P1 part)"] },
@@ -102,6 +103,106 @@
         { "name": "ExplicitBookTypeTests.test_creating_a_ledger_without_a_type_is_refused", "requirements": ["F01 (request without a type)"] },
         { "name": "ExplicitBookTypeTests.test_only_a_stock_ledger_keeps_the_default_multiplier", "requirements": ["F01 (no FUT default)", "F37 (P1 part)"] }
       ]
+    },
+    {
+      "stage": "P2",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_store_test.py",
+      "cases": [
+        { "name": "MigrationTests.test_a_v10_ledger_migrates_with_foreign_keys_on_and_keeps_every_stock_row", "requirements": ["F45", "F25 (P2 part: stock rows unchanged)", "F37 (P2 part: stock multiplier kept)"] },
+        { "name": "MigrationTests.test_the_migration_takes_a_verified_backup_first", "requirements": ["F25 (P2 part: consistent pre-migration backup)", "P2 item 5"] },
+        { "name": "MigrationTests.test_the_migrated_schema_is_the_frozen_draft", "requirements": ["F37 (P2 part: DDL)", "P2 item 1"] },
+        { "name": "MigrationTests.test_a_fresh_database_has_the_migrated_schema", "requirements": ["P2 item 1"] },
+        { "name": "MigrationTests.test_a_failure_anywhere_leaves_the_v10_file_untouched", "requirements": ["F45 (failure injection)", "F25 (P2 part)"] },
+        { "name": "MigrationTests.test_without_a_verified_backup_nothing_is_migrated", "requirements": ["F25 (P2 part)"] },
+        { "name": "MigrationTests.test_the_previous_build_refuses_a_v11_file", "requirements": ["P2 item 5 (old build refuses the new schema)"] },
+        { "name": "MigrationTests.test_rows_left_by_older_deletions_are_kept_and_reported", "requirements": ["F45 (FK-less tables)"] },
+        { "name": "MigrationTests.test_a_legacy_futures_book_stays_export_and_delete_only", "requirements": ["F11 (P2 part)"] },
+        { "name": "MigrationTests.test_a_whole_book_deletion_removes_its_import_registrations", "requirements": ["F25 (P2 part: deletion)"] },
+        { "name": "FopWriteTests.test_fop_writes_stay_closed_until_released", "requirements": ["F38 (P2 part)"] },
+        { "name": "FopWriteTests.test_a_fop_ledger_keeps_no_stock_multiplier", "requirements": ["F37", "F01 (P2 part)"] },
+        { "name": "FopWriteTests.test_fut_fop_and_delivery_writes_read_back_their_quantities", "requirements": ["F37", "F03 (P2 part)", "F46 (P2 part: projection)", "P2 item 1"] },
+        { "name": "FopWriteTests.test_every_write_checks_identity_version_and_engine", "requirements": ["F23 (P2 part)", "F02 (P2 part)", "A8"] },
+        { "name": "FopWriteTests.test_the_same_token_replays_and_a_different_package_is_refused", "requirements": ["F24 (P2 part)", "F40 (same token, other content)"] },
+        { "name": "FopWriteTests.test_two_writes_prepared_on_one_version_land_only_once", "requirements": ["F24 (P2 part: concurrency)"] },
+        { "name": "FopWriteTests.test_identity_columns_stock_fields_and_other_kinds_are_refused", "requirements": ["F34", "F46"] },
+        { "name": "FopWriteTests.test_contracts_are_one_record_per_contract", "requirements": ["F05 (P2 part)", "F04 (P2 part)"] },
+        { "name": "FopWriteTests.test_a_verified_binding_needs_this_servers_unexpired_credential", "requirements": ["F40 (P2 part)"] },
+        { "name": "FopWriteTests.test_a_delivery_follows_its_binding_and_the_option_terms", "requirements": ["F06 (P2 part: direction and size)", "F46"] },
+        { "name": "FopWriteTests.test_a_void_re_proves_the_whole_ledger", "requirements": ["F24 (P2 part)", "F14 (P2 part)"] },
+        { "name": "FopWriteTests.test_a_failure_anywhere_leaves_every_table_as_it_was", "requirements": ["F24 (P2 part: failure injection)"] },
+        { "name": "FopWriteTests.test_a_fee_names_a_live_trade_and_keeps_it_from_being_voided", "requirements": ["F36 (P2 part)", "F39 (P2 part)"] },
+        { "name": "FopWriteTests.test_the_version_covers_references_not_only_rows", "requirements": ["F40 (P2 part: digest)", "A7"] },
+        { "name": "MetadataTests.test_adopting_a_verified_binding_moves_exactly_the_previewed_references", "requirements": ["F40 (P2 part)"] },
+        { "name": "MetadataTests.test_a_confirmed_delivery_is_not_moved_to_another_future_by_a_binding", "requirements": ["F40 (P2 part)", "F08 (P2 part)"] },
+        { "name": "MetadataTests.test_a_contract_correction_only_fills_in_what_was_unknown", "requirements": ["F05 (P2 part)", "F40 (P2 part)"] },
+        { "name": "MetadataTests.test_a_cycle_closes_only_where_every_balance_is_zero", "requirements": ["F14 (P2 part)"] },
+        { "name": "MetadataTests.test_one_token_one_operation", "requirements": ["F40 (P2 part)", "F24 (P2 part)"] },
+        { "name": "GraphTests.test_a_fop_backup_is_version_2_and_matches_the_contract", "requirements": ["F25 (P2 part: backup v2)"] },
+        { "name": "GraphTests.test_a_backup_restores_the_whole_graph_into_its_ledger", "requirements": ["F25 (P2 part: full restore)"] },
+        { "name": "GraphTests.test_a_backup_restores_into_another_ledger_id_with_every_id_remapped", "requirements": ["F39 (P2 part)", "F25 (P2 part)"] },
+        { "name": "GraphTests.test_a_restore_refuses_damaged_or_foreign_backups_and_changes_nothing", "requirements": ["F25 (P2 part: damaged digest)", "F11 (v1 refused)", "F39 (P2 part: dangling refs)"] },
+        { "name": "GraphTests.test_reset_and_restore_of_its_archive_round_trip", "requirements": ["F25 (P2 part)"] },
+        { "name": "GraphTests.test_a_failure_anywhere_in_a_graph_write_leaves_every_table", "requirements": ["F24 (P2 part: failure injection)"] },
+        { "name": "GraphTests.test_a_rebuild_carries_a_boundary_to_the_one_matching_event", "requirements": ["F39 (P2 part)"] },
+        { "name": "GraphTests.test_a_rebuild_that_cannot_map_a_boundary_is_refused_unless_it_revokes_it", "requirements": ["F39 (P2 part)", "F24 (P2 part)"] },
+        { "name": "GraphTests.test_a_whole_book_deletion_removes_the_whole_graph", "requirements": ["F25 (P2 part: deletion)"] },
+        { "name": "MetadataTests.test_a_correction_cannot_make_two_records_of_one_contract", "requirements": ["F05 (P2 part: a correction may not create a second record of one contract)"] },
+        { "name": "MetadataTests.test_a_retried_request_is_the_same_request_after_later_metadata_commits", "requirements": ["F24 (P2 part: a retry writes once, also after later metadata commits)", "F40 (P2 part: same token, other content refused)"] },
+        { "name": "GraphTests.test_the_version_is_the_whole_content_so_a_changed_restore_expires_old_previews", "requirements": ["F23 (P2 part: a changed restore expires old previews)", "F40 (P2 part: digest)"] },
+        { "name": "GraphTests.test_a_restore_proves_every_relation_before_it_writes", "requirements": ["F39 (P2 part: no dangling or cross-ledger reference)", "F25 (P2 part: full restore)"] },
+        { "name": "GraphTests.test_one_source_may_feed_several_events", "requirements": ["F24 (P2 part: one source, several events)", "F11 (P2 part: a source is consumed once)"] },
+        { "name": "GraphTests.test_a_graph_request_token_is_bound_to_what_it_asked", "requirements": ["F24 (P2 part: idempotent reset, restore and rebuild)", "F40 (P2 part: same token, other content refused)"] },
+        { "name": "WriteGuardTests.test_every_write_checks_engine_identity_and_version_and_changes_nothing", "requirements": ["F38 (P2 part: every write checks the engine)", "F23 (P2 part: stale previews refused on every write)"] },
+        { "name": "WriteGuardTests.test_a_ledger_of_another_engine_is_export_and_delete_only", "requirements": ["F38 (P2 part: an unsupported engine is export and delete only)"] },
+        { "name": "GraphTests.test_a_restore_takes_the_history_scope_of_its_backup", "requirements": ["F25 (P2 part: a restore keeps the history scope)"] },
+        { "name": "GraphTests.test_one_event_closes_one_cycle_on_every_path", "requirements": ["F39 (P2 part: one cycle per anchor after a restore)", "F14 (P2 part)"] },
+        { "name": "GraphTests.test_a_round_trip_keeps_each_events_primary_source", "requirements": ["F25 (P2 part: evidence identity survives a round trip)", "F24 (P2 part: one source, several events)"] },
+        { "name": "GraphTests.test_a_restored_ledger_answers_retried_requests", "requirements": ["F24 (P2 part: a retry writes once after a restore into a new database)", "F40 (P2 part: same token, other content refused)"] }
+      ]
+    },
+    {
+      "stage": "P2",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_domain_test.py",
+      "cases": [
+        { "name": "ContractShapeTests.test_the_runtime_protocol_is_the_frozen_contract", "requirements": ["P2 item 1 (runtime contract copy)"] },
+        { "name": "ContractShapeTests.test_the_server_accepts_every_valid_example_and_refuses_every_invalid_one", "requirements": ["F46", "F34"] },
+        { "name": "RuleTests.test_a_delivery_moves_the_future_the_way_plan_6_1_says", "requirements": ["F06 (P2 part)"] },
+        { "name": "RuleTests.test_trade_dates_are_projected_in_the_tws_timezone", "requirements": ["F22 (P2 part)", "F46 (P2 part)"] },
+        { "name": "RuleTests.test_the_replay_refuses_closes_that_overdraw", "requirements": ["F07 (P2 part)"] },
+        { "name": "RuleTests.test_a_boundary_sits_on_a_live_event_after_which_all_is_zero", "requirements": ["F14 (P2 part)"] },
+        { "name": "RepeatedSourceTests.test_every_worked_case_gets_its_stated_outcome", "requirements": ["F21 (P2 part: repeat rule in the domain)"] },
+        { "name": "RepeatedSourceTests.test_every_event_field_and_time_fact_has_one_policy", "requirements": ["F21 (P2 part)"] },
+        { "name": "RepeatedSourceTests.test_a_delivery_whose_binding_names_another_pair_is_refused", "requirements": ["F21 (P2 part)", "F40 (P2 part)"] },
+        { "name": "RuleTests.test_a_source_split_across_events_gives_each_event_its_own_key", "requirements": ["F24 (P2 part: one source, several events)"] }
+      ]
+    },
+    {
+      "stage": "P2",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_ws_test.py",
+      "cases": [
+        { "name": "FopProtocolTests.test_status_reports_the_fop_engine_and_release_state", "requirements": ["F38 (P2 part)", "A8"] },
+        { "name": "FopProtocolTests.test_a_fop_ledger_round_trips_through_the_protocol", "requirements": ["F26 (P2 part)", "F25 (P2 part)"] },
+        { "name": "FopProtocolTests.test_messages_the_contract_refuses_never_reach_the_store", "requirements": ["F34", "F46", "F26 (P2 part)"] },
+        { "name": "FopProtocolTests.test_the_default_backend_keeps_fop_writes_closed", "requirements": ["F38 (P2 part)"] },
+        { "name": "FopProtocolTests.test_contract_details_are_served_only_where_a_resolver_exists", "requirements": ["F26 (P2 part: historical backend)", "F05 (P2 part)"] },
+        { "name": "FopProtocolTests.test_one_failing_request_answers_its_own_request_id", "requirements": ["F26 (P2 part)"] },
+        { "name": "FopProtocolTests.test_every_fop_write_names_the_engine_it_was_prepared_for", "requirements": ["F38 (P2 part: every write names its engine)", "F26 (P2 part)"] }
+      ]
+    },
+    {
+      "stage": "P2",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_broker_test.py",
+      "cases": [
+        { "name": "BrokerResolutionTests.test_the_delivery_month_is_the_underlyings_contract_month", "requirements": ["F03 (P2 part)", "F40 (P2 part)"] },
+        { "name": "BrokerResolutionTests.test_a_weekly_option_follows_its_underconid_not_its_expiry_month", "requirements": ["F04 (P2 part)"] },
+        { "name": "BrokerResolutionTests.test_without_a_contract_month_the_pair_stays_unresolved", "requirements": ["F03 (P2 part)", "F05 (P2 part)"] },
+        { "name": "BrokerResolutionTests.test_conflicts_and_ambiguity_are_reported_not_guessed", "requirements": ["F05 (P2 part)"] },
+        { "name": "BrokerResolutionTests.test_resolution_is_bounded_and_writes_nothing", "requirements": ["P2 item 3 (bounded read-only resolution)", "F26 (P2 part)"] }
+      ]
     }
   ],
   "fixtures": [
@@ -113,6 +214,7 @@
     { "id": "event_kinds", "file": "tests/fixtures/cost_basis_fop/contract/event_kinds.json", "source": "synthetic", "requirements": ["F46", "F18"] },
     { "id": "write_coverage", "file": "tests/fixtures/cost_basis_fop/contract/write_coverage.json", "source": "synthetic", "requirements": ["P1 step 4"] },
     { "id": "protocol", "file": "tests/fixtures/cost_basis_fop/contract/protocol.json", "source": "synthetic", "requirements": ["P1 step 2"] },
-    { "id": "core_output", "file": "tests/fixtures/cost_basis_fop/contract/core_output.json", "source": "synthetic", "requirements": ["P1 step 3"] }
+    { "id": "core_output", "file": "tests/fixtures/cost_basis_fop/contract/core_output.json", "source": "synthetic", "requirements": ["P1 step 3"] },
+    { "id": "runtime_protocol", "file": "cost_basis_fop_protocol.json", "source": "synthetic", "requirements": ["P2 item 1"] }
   ]
 }
