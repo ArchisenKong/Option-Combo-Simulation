@@ -14,6 +14,7 @@ const PAGES = [
     'iv_term_structure.html',
     'workspace_db_admin.html',
     'cost_basis.html',
+    'cost_basis_fop.html',
 ];
 const HASH_LENGTH = 12;
 const ASSET_REFERENCE = /\b(?:src|href)="([A-Za-z0-9_./-]+\.(?:js|css))(?:\?v=([^"]*))?"/g;
@@ -78,11 +79,12 @@ module.exports = {
             run() {
                 // The standalone pages keep deliberately tiny manifests and
                 // assert their exact contents in their own page tests
-                // (workspace_db_admin_page.test.js, cost_basis_page.test.js);
-                // trading pages carry many.
+                // (workspace_db_admin_page.test.js, cost_basis_page.test.js,
+                // cost_basis_fop_identity.test.js); trading pages carry many.
                 const minimumReferences = {
                     'workspace_db_admin.html': 3,
                     'cost_basis.html': 4,
+                    'cost_basis_fop.html': 3,
                 };
                 PAGES.forEach((pageName) => {
                     const references = collectReferences(pageName);

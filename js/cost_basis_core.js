@@ -25,36 +25,14 @@
 
     // The only actions the ledger page may ever send. The page script routes
     // every outbound request through this list, so orders, market-data
-    // subscriptions, and execution actions are structurally impossible.
-    const ALLOWED_CLIENT_ACTIONS = Object.freeze([
-        'request_cost_basis_status',
-        'list_cost_basis_books',
-        'create_cost_basis_book',
-        'request_cost_basis_delete_plan',
-        'delete_cost_basis_book',
-        'list_cost_basis_events',
-        'append_cost_basis_event',
-        'void_cost_basis_event',
-        'append_cost_basis_split_group',
-        'void_cost_basis_split_group',
-        'import_cost_basis_events',
-        'save_cost_basis_snapshot',
-        'request_cost_basis_reset_plan',
-        'rebuild_cost_basis_book',
-        'list_cost_basis_resets',
-        'restore_cost_basis_reset',
-        'export_cost_basis_backup',
-        'restore_cost_basis_backup',
-        'list_cost_basis_import_batches',
-        // Read-only corroboration from the live backend. The market-price
-        // action is a one-shot TWS snapshot and leaves no live subscription.
-        'request_portfolio_positions_snapshot',
-        'request_portfolio_avg_cost_snapshot',
-        'request_managed_accounts_snapshot',
-        'request_cost_basis_executions',
-        'request_cost_basis_market_price',
-        'request_cost_basis_option_scenario_inputs',
-    ]);
+    // subscriptions, and execution actions are structurally impossible. The
+    // catalogue lives in js/cost_basis_common.js, shared with the FOP page;
+    // it must load first.
+    const common = globalScope.OptionComboCostBasisCommon;
+    if (!common) {
+        throw new Error('js/cost_basis_common.js must load before js/cost_basis_core.js');
+    }
+    const ALLOWED_CLIENT_ACTIONS = common.actionsForPage('equity');
 
     // FUT/FOP ledgers are frozen until the standalone FOP ledger ships
     // (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §2, §13 P0): this engine

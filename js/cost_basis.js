@@ -141,6 +141,9 @@
         status: null,
         books: [],
         bookId: '',
+        // The ledger a link or bookmark names. It stays pending until that
+        // ledger is listed and opened, or the user chooses a ledger.
+        linkedBookId: '',
         eventLoadGeneration: 0,
         eventSubmitPending: false,
         eventSubmitToken: '',
@@ -529,7 +532,7 @@
         }
         const scripts = [...globalScope.document.querySelectorAll('script[src]')];
         const source = scripts.find(s => /\/cost_basis_stress_worker\.js(?:\?|$)/.test(s.src));
-        const dependencies = scripts.filter(s => /\/(cost_basis_core|american_binomial|market_curves|cost_basis_stress_models|cost_basis_stress_core|cost_basis_stress_band)\.js(?:\?|$)/.test(s.src)).map(s => s.src);
+        const dependencies = scripts.filter(s => /\/(cost_basis_common|cost_basis_core|american_binomial|market_curves|cost_basis_stress_models|cost_basis_stress_core|cost_basis_stress_band)\.js(?:\?|$)/.test(s.src)).map(s => s.src);
         const generation = stressJob.generation;
         try {
             if (!source) throw new Error('worker_source_missing');
@@ -1083,6 +1086,14 @@
         _renderManagedAccounts($('new-book-account').value);
         const select = $('book-select');
         _clear(select);
+        // A link or bookmark names one ledger (plan §1.1). Opening any other
+        // while it is pending would show a different underlying, perhaps
+        // another account's, under the link the user trusted. A list without
+        // it - empty, or not yet restored - leaves the page waiting with the
+        // link intact, and the first list that has it opens it.
+        const linked = state.linkedBookId;
+        const linkedListed = Boolean(linked)
+            && state.books.some((book) => book.bookId === linked);
         if (!state.books.length) {
             const option = globalScope.document.createElement('option');
             option.value = '';
@@ -1098,8 +1109,15 @@
             state.importText = '';
             _renderSidebarBooks();
             _renderAll();
-            _showView('settings');
+            // The ledger view is where a pending link says what is missing.
+            _showView(linked ? 'ledger' : 'settings');
             return;
+        }
+        if (linked && !linkedListed) {
+            const placeholder = globalScope.document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = '— 请选择账本 —';
+            select.appendChild(placeholder);
         }
         state.books.forEach((book) => {
             const option = globalScope.document.createElement('option');
@@ -1109,7 +1127,18 @@
                 + `（${book.eventCount} 条）`;
             select.appendChild(option);
         });
-        if (!state.books.some((book) => book.bookId === state.bookId)) {
+        if (linked && !linkedListed) {
+            if (state.bookId) _beginBookSelection('');
+            select.value = '';
+            _renderSidebarBooks();
+            _renderAll();
+            return;
+        }
+        if (linkedListed) {
+            // Select it explicitly: an earlier list may have cleared bookId.
+            if (state.bookId === linked) state.linkedBookId = '';
+            else _beginBookSelection(linked);
+        } else if (!state.books.some((book) => book.bookId === state.bookId)) {
             // The selected book is gone (deleted, or renamed out from under
             // us) and we are landing on a different underlying. That is a
             // book switch, so it has to clear book-scoped state the same way
@@ -1142,7 +1171,8 @@
             .forEach((button) => button.classList.toggle(
                 'active', next === 'ledger' && button.dataset.bookId === state.bookId));
         const book = _currentBook();
-        const bookTitle = book ? `${book.account || '旧版账户'} / ${book.symbol}` : '请选择账本';
+        const bookTitle = book ? `${book.account || '旧版账户'} / ${book.symbol}`
+            : (state.linkedBookId ? '找不到账本' : '请选择账本');
         _text($('page-eyebrow'), next === 'settings'
             ? '系统管理' : (next === 'stress' ? 'What If · 多价格情景' : '综合成本账本'));
         _text($('page-title'), next === 'settings'
@@ -1408,6 +1438,9 @@
     }
 
     function _beginBookSelection(bookId) {
+        // Opening a ledger, the linked one or another the user chose, ends
+        // a pending link.
+        if (bookId) state.linkedBookId = '';
         // A stress view still open belongs to the previous book.
         if (state.stressOpen) {
             _teardownStressTest();
@@ -1798,6 +1831,12 @@
     function _renderBookMeta() {
         const book = _currentBook();
         const node = $('book-meta');
+        if (!book && state.linkedBookId) {
+            _text(node, `找不到链接指定的账本（${state.linkedBookId}）。它可能已被删除，`
+                + '或不在当前连接的后端上。请从账本列表重新选择。');
+            if (state.activeView === 'ledger') _text($('page-title'), '找不到账本');
+            return;
+        }
         if (!book) {
             _text(node, '未选择账本。');
             if (state.activeView === 'ledger') _text($('page-title'), '请选择账本');
@@ -4990,7 +5029,8 @@
         $('new-book-account').disabled = !canCreateBook;
         $('new-book-account-manual').disabled = !canCreateBook
             || $('new-book-account').value !== MANUAL_ACCOUNT_VALUE;
-        $('btn-create-book').disabled = !canCreateBook || !selectedNewBookAccount;
+        $('btn-create-book').disabled = !canCreateBook || !selectedNewBookAccount
+            || !$('new-book-type').value;
         $('btn-delete-book').disabled = !hasBook;
         Array.from($('book-sidebar-list').querySelectorAll('[data-delete-book-id]'))
             .forEach((button) => { button.disabled = !connected; });
@@ -8426,6 +8466,15 @@
 
     async function _createBook(submitEvent) {
         submitEvent.preventDefault();
+        // The type is the first choice and has no default (plan §1.1): a CL
+        // typed into a form that silently kept STK would build a stock ledger.
+        const secType = String($('new-book-type').value || '');
+        if (secType !== 'STK') {
+            globalScope.alert(secType
+                ? core.FUTURES_FROZEN_MESSAGE
+                : '请先选择账本类型。期货或期货期权不能记入股票 / ETF 账本。');
+            return;
+        }
         const account = _selectedNewBookAccount();
         if (!account) {
             globalScope.alert('请选择或输入 IB 账户。');
@@ -8438,9 +8487,7 @@
         }
         const multiplier = Number($('new-book-spc').value);
         if (!Number.isInteger(multiplier) || multiplier <= 0) {
-            globalScope.alert($('new-book-type').value === 'FUT'
-                ? '请填写该 FUT 合约的真实点值 / 乘数。'
-                : '请填写每张期权的真实交割股数。');
+            globalScope.alert('请填写每张期权的真实交割股数。');
             return;
         }
         try {
@@ -8449,15 +8496,33 @@
                 symbol: $('new-book-symbol').value.trim().toUpperCase(),
                 startDate: $('new-book-start').value,
                 defaultSharesPerContract: multiplier,
-                secType: $('new-book-type').value,
+                secType,
             });
             $('new-book-symbol').value = '';
+            _resetNewBookType();
+            state.linkedBookId = '';
             state.bookId = response.book ? response.book.bookId : state.bookId;
             await _loadBooks();
             _showView('ledger');
         } catch (error) {
             globalScope.alert(`创建账本失败：${error.message}`);
         }
+    }
+
+    function _syncNewBookType() {
+        const type = String($('new-book-type').value || '');
+        const futures = type === 'FUT';
+        _text($('new-book-spc-label'), futures ? 'FUT 点值 / 乘数' : '每张交割股数');
+        $('new-book-spc').value = type === 'STK' ? '100' : '';
+        $('new-book-spc').placeholder = futures ? '必填，例如 ES=50' : (type ? '' : '先选择账本类型');
+        _refreshControls();
+    }
+
+    // Every new ledger starts from no type, so a previous choice is never
+    // carried into the next one.
+    function _resetNewBookType() {
+        $('new-book-type').value = '';
+        _syncNewBookType();
     }
 
     // ------------------------------------------------------------------
@@ -8502,6 +8567,7 @@
         });
         $('btn-new-book').addEventListener('click', () => {
             _showView('settings');
+            _resetNewBookType();
             $('new-book-start').value = _todayIso();
             $('new-book-symbol').focus();
         });
@@ -8522,13 +8588,7 @@
             _refreshControls();
         });
         $('new-book-form').addEventListener('submit', _createBook);
-        $('new-book-type').addEventListener('change', () => {
-            const futures = $('new-book-type').value === 'FUT';
-            _text($('new-book-spc-label'), futures ? 'FUT 点值 / 乘数' : '每张交割股数');
-            $('new-book-spc').value = futures ? '' : '100';
-            $('new-book-spc').placeholder = futures
-                ? '必填，例如 ES=50' : '';
-        });
+        $('new-book-type').addEventListener('change', _syncNewBookType);
         $('btn-delete-book').addEventListener('click', () => _deleteBook());
         $('btn-refresh').addEventListener('click', () => _loadBooks());
         $('btn-refresh-positions').addEventListener('click', requestPositions);
@@ -8865,6 +8925,12 @@
     }
 
     function start() {
+        // A link from the FOP page (or a bookmark) names the ledger to open.
+        // _loadBooks opens it once the backend lists that id; until then it
+        // says the ledger is missing and opens nothing (plan §1.1).
+        state.bookId = globalScope.OptionComboCostBasisCommon.bookIdFromSearch(
+            globalScope.location && globalScope.location.search);
+        state.linkedBookId = state.bookId;
         _wire();
         _renderAll();
         connect();

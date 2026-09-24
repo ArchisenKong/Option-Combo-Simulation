@@ -1,0 +1,2451 @@
+{
+  "format": "cost-basis-fop-core-output",
+  "version": 1,
+  "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §5.2, §5.3, §9.6, §13.3 P1 step 3",
+  "description": "The output of the standalone FOP core (js/cost_basis_fop_core.js, P3) for one ledger. Every figure is a Metric: a number, or null with the reason it is unavailable; an unknown is never 0. Current positions list only non-zero contracts; realized results of closed months stay in realizedByContract. The examples are the plan §9.6 three-roll case at a D mark of 71.8, and the same ledger with D unquoted. P3 must reproduce these numbers from the events; P1 only fixes the shape. The other two examples fix only how an unknown is carried: a baseline option whose opening premium is unknown (plan §9.2), and an as-of instant inside a composite delivery's time range (plan §8.1), where even the quantity of the two delivery contracts is a Count with a reason. P3 names the final reason codes.",
+  "schemaLanguage": "Same language as protocol.json.",
+  "types": {
+    "Token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$"
+    },
+    "IsoDate": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "UtcInstant": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$"
+    },
+    "ContractMonth": {
+      "type": "string",
+      "pattern": "^\\d{6}$"
+    },
+    "Metric": {
+      "type": "object",
+      "fields": {
+        "value": {
+          "type": "number",
+          "nullable": true
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        }
+      },
+      "required": [
+        "value",
+        "reason"
+      ],
+      "rules": [
+        {
+          "id": "metric_is_a_value_or_a_reason",
+          "exactlyOne": [
+            "value",
+            "reason"
+          ]
+        }
+      ]
+    },
+    "Count": {
+      "type": "object",
+      "fields": {
+        "value": {
+          "type": "integer",
+          "nonzero": true,
+          "nullable": true
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        }
+      },
+      "required": [
+        "value",
+        "reason"
+      ],
+      "rules": [
+        {
+          "id": "count_is_a_value_or_a_reason",
+          "exactlyOne": [
+            "value",
+            "reason"
+          ]
+        }
+      ]
+    },
+    "FutureRow": {
+      "type": "object",
+      "fields": {
+        "contractId": {
+          "ref": "Token"
+        },
+        "localSymbol": {
+          "type": "string",
+          "nullable": true
+        },
+        "contractMonth": {
+          "ref": "ContractMonth"
+        },
+        "contracts": {
+          "ref": "Count"
+        },
+        "pointValue": {
+          "type": "number",
+          "exclusiveMin": 0
+        },
+        "averagePrice": {
+          "ref": "Metric"
+        },
+        "basis": {
+          "ref": "Metric"
+        },
+        "mark": {
+          "ref": "Metric"
+        },
+        "unrealized": {
+          "ref": "Metric"
+        }
+      },
+      "required": [
+        "contractId",
+        "localSymbol",
+        "contractMonth",
+        "contracts",
+        "pointValue",
+        "averagePrice",
+        "basis",
+        "mark",
+        "unrealized"
+      ]
+    },
+    "OptionRow": {
+      "type": "object",
+      "fields": {
+        "contractId": {
+          "ref": "Token"
+        },
+        "right": {
+          "type": "string",
+          "enum": [
+            "C",
+            "P"
+          ]
+        },
+        "strike": {
+          "type": "number",
+          "exclusiveMin": 0
+        },
+        "expiry": {
+          "ref": "IsoDate"
+        },
+        "contracts": {
+          "ref": "Count"
+        },
+        "premiumMultiplier": {
+          "type": "number",
+          "exclusiveMin": 0
+        },
+        "remainingNetPremium": {
+          "ref": "Metric"
+        },
+        "boundFutureContractId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "bindingStatus": {
+          "type": "string",
+          "enum": [
+            "verified_broker",
+            "verified_statement",
+            "manual_attested",
+            "unresolved",
+            "conflict"
+          ]
+        },
+        "mark": {
+          "ref": "Metric"
+        },
+        "value": {
+          "ref": "Metric"
+        }
+      },
+      "required": [
+        "contractId",
+        "right",
+        "strike",
+        "expiry",
+        "contracts",
+        "premiumMultiplier",
+        "remainingNetPremium",
+        "boundFutureContractId",
+        "bindingStatus",
+        "mark",
+        "value"
+      ]
+    },
+    "RealizedRow": {
+      "type": "object",
+      "fields": {
+        "contractId": {
+          "ref": "Token"
+        },
+        "localSymbol": {
+          "type": "string",
+          "nullable": true
+        },
+        "realized": {
+          "ref": "Metric"
+        }
+      },
+      "required": [
+        "contractId",
+        "localSymbol",
+        "realized"
+      ]
+    },
+    "Totals": {
+      "type": "object",
+      "fields": {
+        "Rf": {
+          "ref": "Metric"
+        },
+        "Uf": {
+          "ref": "Metric"
+        },
+        "Co": {
+          "ref": "Metric"
+        },
+        "Vo": {
+          "ref": "Metric"
+        },
+        "E": {
+          "ref": "Metric"
+        },
+        "J": {
+          "ref": "Metric"
+        },
+        "economicPnl": {
+          "ref": "Metric"
+        }
+      },
+      "required": [
+        "Rf",
+        "Uf",
+        "Co",
+        "Vo",
+        "E",
+        "J",
+        "economicPnl"
+      ]
+    },
+    "SellerLens": {
+      "type": "object",
+      "fields": {
+        "Rs": {
+          "ref": "Metric"
+        },
+        "Es": {
+          "ref": "Metric"
+        },
+        "Js": {
+          "ref": "Metric"
+        },
+        "breakEven": {
+          "ref": "Metric"
+        },
+        "breakEvenIfOpenShortsExpire": {
+          "ref": "Metric"
+        },
+        "longExerciseAffectsBreakEven": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "Rs",
+        "Es",
+        "Js",
+        "breakEven",
+        "breakEvenIfOpenShortsExpire",
+        "longExerciseAffectsBreakEven"
+      ]
+    },
+    "RollLeg": {
+      "type": "object",
+      "fields": {
+        "eventId": {
+          "ref": "Token"
+        },
+        "contractId": {
+          "ref": "Token"
+        },
+        "contracts": {
+          "type": "integer",
+          "nonzero": true
+        }
+      },
+      "required": [
+        "eventId",
+        "contractId",
+        "contracts"
+      ]
+    },
+    "RollGroup": {
+      "type": "object",
+      "fields": {
+        "evidence": {
+          "type": "string",
+          "enum": [
+            "order",
+            "candidate"
+          ]
+        },
+        "legs": {
+          "type": "array",
+          "items": {
+            "ref": "RollLeg"
+          },
+          "minItems": 1
+        },
+        "matchedContracts": {
+          "type": "integer",
+          "min": 0
+        }
+      },
+      "required": [
+        "evidence",
+        "legs",
+        "matchedContracts"
+      ]
+    },
+    "Cycle": {
+      "type": "object",
+      "fields": {
+        "index": {
+          "type": "integer",
+          "min": 0
+        },
+        "startsAfterBoundaryId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "closedByBoundaryId": {
+          "ref": "Token",
+          "nullable": true
+        }
+      },
+      "required": [
+        "index",
+        "startsAfterBoundaryId",
+        "closedByBoundaryId"
+      ]
+    },
+    "Gap": {
+      "type": "object",
+      "fields": {
+        "metric": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "metric",
+        "reason"
+      ]
+    },
+    "FopLedgerOutput": {
+      "type": "object",
+      "fields": {
+        "engineVersion": {
+          "type": "integer",
+          "min": 1
+        },
+        "asOf": {
+          "type": "object",
+          "fields": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "current",
+                "as_of"
+              ]
+            },
+            "utc": {
+              "ref": "UtcInstant",
+              "nullable": true
+            }
+          },
+          "required": [
+            "kind",
+            "utc"
+          ],
+          "rules": [
+            {
+              "id": "as_of_view_names_its_instant",
+              "when": {
+                "field": "kind",
+                "in": [
+                  "as_of"
+                ]
+              },
+              "require": [
+                "utc"
+              ]
+            }
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "fields": {
+            "history": {
+              "type": "string",
+              "enum": [
+                "full_history",
+                "since_baseline"
+              ]
+            },
+            "baselineAsOfUtc": {
+              "ref": "UtcInstant",
+              "nullable": true
+            },
+            "openingValue": {
+              "ref": "Metric"
+            }
+          },
+          "required": [
+            "history",
+            "baselineAsOfUtc",
+            "openingValue"
+          ],
+          "rules": [
+            {
+              "id": "baseline_scope_names_its_instant",
+              "when": {
+                "field": "history",
+                "in": [
+                  "since_baseline"
+                ]
+              },
+              "require": [
+                "baselineAsOfUtc"
+              ]
+            }
+          ]
+        },
+        "cycles": {
+          "type": "array",
+          "items": {
+            "ref": "Cycle"
+          },
+          "minItems": 1
+        },
+        "currentCycleIndex": {
+          "type": "integer",
+          "min": 0
+        },
+        "futures": {
+          "type": "array",
+          "items": {
+            "ref": "FutureRow"
+          }
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "ref": "OptionRow"
+          }
+        },
+        "realizedByContract": {
+          "type": "array",
+          "items": {
+            "ref": "RealizedRow"
+          }
+        },
+        "totals": {
+          "ref": "Totals"
+        },
+        "sellerLens": {
+          "ref": "SellerLens"
+        },
+        "roll": {
+          "type": "object",
+          "fields": {
+            "groups": {
+              "type": "array",
+              "items": {
+                "ref": "RollGroup"
+              }
+            }
+          },
+          "required": [
+            "groups"
+          ]
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "ref": "Gap"
+          }
+        }
+      },
+      "required": [
+        "engineVersion",
+        "asOf",
+        "scope",
+        "cycles",
+        "currentCycleIndex",
+        "futures",
+        "options",
+        "realizedByContract",
+        "totals",
+        "sellerLens",
+        "roll",
+        "gaps"
+      ]
+    }
+  },
+  "examples": {
+    "valid": [
+      {
+        "type": "FopLedgerOutput",
+        "name": "plan §9.6 after three rolls, D at 71.8",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "current",
+            "utc": null
+          },
+          "scope": {
+            "history": "full_history",
+            "baselineAsOfUtc": null,
+            "openingValue": {
+              "value": null,
+              "reason": "not_applicable_full_history"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [
+            {
+              "contractId": "fut-clh7-0001",
+              "localSymbol": "CLH7",
+              "contractMonth": "202703",
+              "contracts": {
+                "value": 1,
+                "reason": null
+              },
+              "pointValue": 1000,
+              "averagePrice": {
+                "value": 70.8,
+                "reason": null
+              },
+              "basis": {
+                "value": 70800,
+                "reason": null
+              },
+              "mark": {
+                "value": 71.8,
+                "reason": null
+              },
+              "unrealized": {
+                "value": 1000,
+                "reason": null
+              }
+            }
+          ],
+          "options": [],
+          "realizedByContract": [
+            {
+              "contractId": "fut-clz6-0001",
+              "localSymbol": "CLZ6",
+              "realized": {
+                "value": -2000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clf7-0001",
+              "localSymbol": "CLF7",
+              "realized": {
+                "value": 3000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clg7-0001",
+              "localSymbol": "CLG7",
+              "realized": {
+                "value": -1500,
+                "reason": null
+              }
+            }
+          ],
+          "totals": {
+            "Rf": {
+              "value": -500,
+              "reason": null
+            },
+            "Uf": {
+              "value": 1000,
+              "reason": null
+            },
+            "Co": {
+              "value": 1200,
+              "reason": null
+            },
+            "Vo": {
+              "value": 0,
+              "reason": null
+            },
+            "E": {
+              "value": 30,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": 1670,
+              "reason": null
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": 1200,
+              "reason": null
+            },
+            "Es": {
+              "value": 30,
+              "reason": null
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": 70.13,
+              "reason": null
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": 70.13,
+              "reason": null
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": [
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0001",
+                    "contractId": "fut-clz6-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0002",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0003",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0004",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0005",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0006",
+                    "contractId": "fut-clh7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              }
+            ]
+          },
+          "gaps": []
+        }
+      },
+      {
+        "type": "FopLedgerOutput",
+        "name": "plan §9.6 with D unquoted: dependent totals are null with a reason",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "current",
+            "utc": null
+          },
+          "scope": {
+            "history": "full_history",
+            "baselineAsOfUtc": null,
+            "openingValue": {
+              "value": null,
+              "reason": "not_applicable_full_history"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [
+            {
+              "contractId": "fut-clh7-0001",
+              "localSymbol": "CLH7",
+              "contractMonth": "202703",
+              "contracts": {
+                "value": 1,
+                "reason": null
+              },
+              "pointValue": 1000,
+              "averagePrice": {
+                "value": 70.8,
+                "reason": null
+              },
+              "basis": {
+                "value": 70800,
+                "reason": null
+              },
+              "mark": {
+                "value": null,
+                "reason": "no_quote"
+              },
+              "unrealized": {
+                "value": null,
+                "reason": "missing_mark"
+              }
+            }
+          ],
+          "options": [],
+          "realizedByContract": [
+            {
+              "contractId": "fut-clz6-0001",
+              "localSymbol": "CLZ6",
+              "realized": {
+                "value": -2000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clf7-0001",
+              "localSymbol": "CLF7",
+              "realized": {
+                "value": 3000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clg7-0001",
+              "localSymbol": "CLG7",
+              "realized": {
+                "value": -1500,
+                "reason": null
+              }
+            }
+          ],
+          "totals": {
+            "Rf": {
+              "value": -500,
+              "reason": null
+            },
+            "Uf": {
+              "value": null,
+              "reason": "missing_mark:fut-clh7-0001"
+            },
+            "Co": {
+              "value": 1200,
+              "reason": null
+            },
+            "Vo": {
+              "value": 0,
+              "reason": null
+            },
+            "E": {
+              "value": 30,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": null,
+              "reason": "missing_mark:fut-clh7-0001"
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": 1200,
+              "reason": null
+            },
+            "Es": {
+              "value": 30,
+              "reason": null
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": 70.13,
+              "reason": null
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": 70.13,
+              "reason": null
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": [
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0001",
+                    "contractId": "fut-clz6-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0002",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0003",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0004",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0005",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0006",
+                    "contractId": "fut-clh7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              }
+            ]
+          },
+          "gaps": [
+            {
+              "metric": "totals.Uf",
+              "reason": "missing_mark:fut-clh7-0001"
+            },
+            {
+              "metric": "totals.economicPnl",
+              "reason": "missing_mark:fut-clh7-0001"
+            }
+          ]
+        }
+      },
+      {
+        "type": "FopLedgerOutput",
+        "name": "shape: a baseline option with unknown premium keeps its quantity and value",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "current",
+            "utc": null
+          },
+          "scope": {
+            "history": "since_baseline",
+            "baselineAsOfUtc": "2026-10-01T21:00:00.000000Z",
+            "openingValue": {
+              "value": null,
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [],
+          "options": [
+            {
+              "contractId": "fop-loz6-c75-01",
+              "right": "C",
+              "strike": 75,
+              "expiry": "2026-11-17",
+              "contracts": {
+                "value": -1,
+                "reason": null
+              },
+              "premiumMultiplier": 1000,
+              "remainingNetPremium": {
+                "value": null,
+                "reason": "unknown_opening_cost:fop-loz6-c75-01"
+              },
+              "boundFutureContractId": "fut-clz6-0001",
+              "bindingStatus": "verified_statement",
+              "mark": {
+                "value": 1.4,
+                "reason": null
+              },
+              "value": {
+                "value": -1400,
+                "reason": null
+              }
+            }
+          ],
+          "realizedByContract": [],
+          "totals": {
+            "Rf": {
+              "value": 0,
+              "reason": null
+            },
+            "Uf": {
+              "value": 0,
+              "reason": null
+            },
+            "Co": {
+              "value": 0,
+              "reason": null
+            },
+            "Vo": {
+              "value": -1400,
+              "reason": null
+            },
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": null,
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": 0,
+              "reason": null
+            },
+            "Es": {
+              "value": 0,
+              "reason": null
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": null,
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": null,
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": []
+          },
+          "gaps": [
+            {
+              "metric": "scope.openingValue",
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            {
+              "metric": "options[0].remainingNetPremium",
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            {
+              "metric": "totals.economicPnl",
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            {
+              "metric": "sellerLens.breakEven",
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            {
+              "metric": "sellerLens.breakEvenIfOpenShortsExpire",
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            }
+          ]
+        }
+      },
+      {
+        "type": "FopLedgerOutput",
+        "name": "shape: an as-of instant inside a delivery range leaves both legs unknown",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "as_of",
+            "utc": "2026-11-17T20:00:00.000000Z"
+          },
+          "scope": {
+            "history": "full_history",
+            "baselineAsOfUtc": null,
+            "openingValue": {
+              "value": null,
+              "reason": "not_applicable_full_history"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [
+            {
+              "contractId": "fut-clz6-0001",
+              "localSymbol": "CLZ6",
+              "contractMonth": "202612",
+              "contracts": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              },
+              "pointValue": 1000,
+              "averagePrice": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              },
+              "basis": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              },
+              "mark": {
+                "value": 75.4,
+                "reason": null
+              },
+              "unrealized": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              }
+            }
+          ],
+          "options": [
+            {
+              "contractId": "fop-loz6-c75-01",
+              "right": "C",
+              "strike": 75,
+              "expiry": "2026-11-17",
+              "contracts": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              },
+              "premiumMultiplier": 1000,
+              "remainingNetPremium": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              },
+              "boundFutureContractId": "fut-clz6-0001",
+              "bindingStatus": "verified_statement",
+              "mark": {
+                "value": 0.45,
+                "reason": null
+              },
+              "value": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              }
+            }
+          ],
+          "realizedByContract": [],
+          "totals": {
+            "Rf": {
+              "value": 0,
+              "reason": null
+            },
+            "Uf": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "Co": {
+              "value": 1197.5,
+              "reason": null
+            },
+            "Vo": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "E": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "Es": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": []
+          },
+          "gaps": [
+            {
+              "metric": "futures[0].contracts",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "options[0].contracts",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "totals.economicPnl",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "sellerLens.breakEven",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            }
+          ]
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "type": "FopLedgerOutput",
+        "name": "a metric is a value or a reason, not both",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "current",
+            "utc": null
+          },
+          "scope": {
+            "history": "full_history",
+            "baselineAsOfUtc": null,
+            "openingValue": {
+              "value": null,
+              "reason": "not_applicable_full_history"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [
+            {
+              "contractId": "fut-clh7-0001",
+              "localSymbol": "CLH7",
+              "contractMonth": "202703",
+              "contracts": {
+                "value": 1,
+                "reason": null
+              },
+              "pointValue": 1000,
+              "averagePrice": {
+                "value": 70.8,
+                "reason": null
+              },
+              "basis": {
+                "value": 70800,
+                "reason": null
+              },
+              "mark": {
+                "value": 71.8,
+                "reason": null
+              },
+              "unrealized": {
+                "value": 1000,
+                "reason": null
+              }
+            }
+          ],
+          "options": [],
+          "realizedByContract": [
+            {
+              "contractId": "fut-clz6-0001",
+              "localSymbol": "CLZ6",
+              "realized": {
+                "value": -2000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clf7-0001",
+              "localSymbol": "CLF7",
+              "realized": {
+                "value": 3000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clg7-0001",
+              "localSymbol": "CLG7",
+              "realized": {
+                "value": -1500,
+                "reason": null
+              }
+            }
+          ],
+          "totals": {
+            "Rf": {
+              "value": -500,
+              "reason": null
+            },
+            "Uf": {
+              "value": 1000,
+              "reason": "stale"
+            },
+            "Co": {
+              "value": 1200,
+              "reason": null
+            },
+            "Vo": {
+              "value": 0,
+              "reason": null
+            },
+            "E": {
+              "value": 30,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": 1670,
+              "reason": null
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": 1200,
+              "reason": null
+            },
+            "Es": {
+              "value": 30,
+              "reason": null
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": 70.13,
+              "reason": null
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": 70.13,
+              "reason": null
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": [
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0001",
+                    "contractId": "fut-clz6-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0002",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0003",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0004",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0005",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0006",
+                    "contractId": "fut-clh7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              }
+            ]
+          },
+          "gaps": []
+        },
+        "expect": {
+          "path": "totals.Uf",
+          "code": "rule:metric_is_a_value_or_a_reason"
+        }
+      },
+      {
+        "type": "FopLedgerOutput",
+        "name": "an unknown is never silently empty",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "current",
+            "utc": null
+          },
+          "scope": {
+            "history": "full_history",
+            "baselineAsOfUtc": null,
+            "openingValue": {
+              "value": null,
+              "reason": "not_applicable_full_history"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [
+            {
+              "contractId": "fut-clh7-0001",
+              "localSymbol": "CLH7",
+              "contractMonth": "202703",
+              "contracts": {
+                "value": 1,
+                "reason": null
+              },
+              "pointValue": 1000,
+              "averagePrice": {
+                "value": 70.8,
+                "reason": null
+              },
+              "basis": {
+                "value": 70800,
+                "reason": null
+              },
+              "mark": {
+                "value": 71.8,
+                "reason": null
+              },
+              "unrealized": {
+                "value": 1000,
+                "reason": null
+              }
+            }
+          ],
+          "options": [],
+          "realizedByContract": [
+            {
+              "contractId": "fut-clz6-0001",
+              "localSymbol": "CLZ6",
+              "realized": {
+                "value": -2000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clf7-0001",
+              "localSymbol": "CLF7",
+              "realized": {
+                "value": 3000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clg7-0001",
+              "localSymbol": "CLG7",
+              "realized": {
+                "value": -1500,
+                "reason": null
+              }
+            }
+          ],
+          "totals": {
+            "Rf": {
+              "value": -500,
+              "reason": null
+            },
+            "Uf": {
+              "value": null,
+              "reason": null
+            },
+            "Co": {
+              "value": 1200,
+              "reason": null
+            },
+            "Vo": {
+              "value": 0,
+              "reason": null
+            },
+            "E": {
+              "value": 30,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": 1670,
+              "reason": null
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": 1200,
+              "reason": null
+            },
+            "Es": {
+              "value": 30,
+              "reason": null
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": 70.13,
+              "reason": null
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": 70.13,
+              "reason": null
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": [
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0001",
+                    "contractId": "fut-clz6-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0002",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0003",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0004",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0005",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0006",
+                    "contractId": "fut-clh7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              }
+            ]
+          },
+          "gaps": []
+        },
+        "expect": {
+          "path": "totals.Uf",
+          "code": "rule:metric_is_a_value_or_a_reason"
+        }
+      },
+      {
+        "type": "FopLedgerOutput",
+        "name": "contracts are whole",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "current",
+            "utc": null
+          },
+          "scope": {
+            "history": "full_history",
+            "baselineAsOfUtc": null,
+            "openingValue": {
+              "value": null,
+              "reason": "not_applicable_full_history"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [
+            {
+              "contractId": "fut-clh7-0001",
+              "localSymbol": "CLH7",
+              "contractMonth": "202703",
+              "contracts": {
+                "value": 0.5,
+                "reason": null
+              },
+              "pointValue": 1000,
+              "averagePrice": {
+                "value": 70.8,
+                "reason": null
+              },
+              "basis": {
+                "value": 70800,
+                "reason": null
+              },
+              "mark": {
+                "value": 71.8,
+                "reason": null
+              },
+              "unrealized": {
+                "value": 1000,
+                "reason": null
+              }
+            }
+          ],
+          "options": [],
+          "realizedByContract": [
+            {
+              "contractId": "fut-clz6-0001",
+              "localSymbol": "CLZ6",
+              "realized": {
+                "value": -2000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clf7-0001",
+              "localSymbol": "CLF7",
+              "realized": {
+                "value": 3000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clg7-0001",
+              "localSymbol": "CLG7",
+              "realized": {
+                "value": -1500,
+                "reason": null
+              }
+            }
+          ],
+          "totals": {
+            "Rf": {
+              "value": -500,
+              "reason": null
+            },
+            "Uf": {
+              "value": 1000,
+              "reason": null
+            },
+            "Co": {
+              "value": 1200,
+              "reason": null
+            },
+            "Vo": {
+              "value": 0,
+              "reason": null
+            },
+            "E": {
+              "value": 30,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": 1670,
+              "reason": null
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": 1200,
+              "reason": null
+            },
+            "Es": {
+              "value": 30,
+              "reason": null
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": 70.13,
+              "reason": null
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": 70.13,
+              "reason": null
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": [
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0001",
+                    "contractId": "fut-clz6-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0002",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0003",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0004",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0005",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0006",
+                    "contractId": "fut-clh7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              }
+            ]
+          },
+          "gaps": []
+        },
+        "expect": {
+          "path": "futures[0].contracts.value",
+          "code": "type"
+        }
+      },
+      {
+        "type": "FopLedgerOutput",
+        "name": "an unknown premium is a reason, never an empty figure",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "current",
+            "utc": null
+          },
+          "scope": {
+            "history": "since_baseline",
+            "baselineAsOfUtc": "2026-10-01T21:00:00.000000Z",
+            "openingValue": {
+              "value": null,
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [],
+          "options": [
+            {
+              "contractId": "fop-loz6-c75-01",
+              "right": "C",
+              "strike": 75,
+              "expiry": "2026-11-17",
+              "contracts": {
+                "value": -1,
+                "reason": null
+              },
+              "premiumMultiplier": 1000,
+              "remainingNetPremium": {
+                "value": null,
+                "reason": null
+              },
+              "boundFutureContractId": "fut-clz6-0001",
+              "bindingStatus": "verified_statement",
+              "mark": {
+                "value": 1.4,
+                "reason": null
+              },
+              "value": {
+                "value": -1400,
+                "reason": null
+              }
+            }
+          ],
+          "realizedByContract": [],
+          "totals": {
+            "Rf": {
+              "value": 0,
+              "reason": null
+            },
+            "Uf": {
+              "value": 0,
+              "reason": null
+            },
+            "Co": {
+              "value": 0,
+              "reason": null
+            },
+            "Vo": {
+              "value": -1400,
+              "reason": null
+            },
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": null,
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": 0,
+              "reason": null
+            },
+            "Es": {
+              "value": 0,
+              "reason": null
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": null,
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": null,
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": []
+          },
+          "gaps": [
+            {
+              "metric": "scope.openingValue",
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            {
+              "metric": "options[0].remainingNetPremium",
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            {
+              "metric": "totals.economicPnl",
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            {
+              "metric": "sellerLens.breakEven",
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            },
+            {
+              "metric": "sellerLens.breakEvenIfOpenShortsExpire",
+              "reason": "unknown_opening_cost:fop-loz6-c75-01"
+            }
+          ]
+        },
+        "expect": {
+          "path": "options[0].remainingNetPremium",
+          "code": "rule:metric_is_a_value_or_a_reason"
+        }
+      },
+      {
+        "type": "FopLedgerOutput",
+        "name": "a closed position is not listed with zero contracts",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "current",
+            "utc": null
+          },
+          "scope": {
+            "history": "full_history",
+            "baselineAsOfUtc": null,
+            "openingValue": {
+              "value": null,
+              "reason": "not_applicable_full_history"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [
+            {
+              "contractId": "fut-clh7-0001",
+              "localSymbol": "CLH7",
+              "contractMonth": "202703",
+              "contracts": {
+                "value": 0,
+                "reason": null
+              },
+              "pointValue": 1000,
+              "averagePrice": {
+                "value": 70.8,
+                "reason": null
+              },
+              "basis": {
+                "value": 70800,
+                "reason": null
+              },
+              "mark": {
+                "value": 71.8,
+                "reason": null
+              },
+              "unrealized": {
+                "value": 1000,
+                "reason": null
+              }
+            }
+          ],
+          "options": [],
+          "realizedByContract": [
+            {
+              "contractId": "fut-clz6-0001",
+              "localSymbol": "CLZ6",
+              "realized": {
+                "value": -2000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clf7-0001",
+              "localSymbol": "CLF7",
+              "realized": {
+                "value": 3000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clg7-0001",
+              "localSymbol": "CLG7",
+              "realized": {
+                "value": -1500,
+                "reason": null
+              }
+            }
+          ],
+          "totals": {
+            "Rf": {
+              "value": -500,
+              "reason": null
+            },
+            "Uf": {
+              "value": 1000,
+              "reason": null
+            },
+            "Co": {
+              "value": 1200,
+              "reason": null
+            },
+            "Vo": {
+              "value": 0,
+              "reason": null
+            },
+            "E": {
+              "value": 30,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": 1670,
+              "reason": null
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": 1200,
+              "reason": null
+            },
+            "Es": {
+              "value": 30,
+              "reason": null
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": 70.13,
+              "reason": null
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": 70.13,
+              "reason": null
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": [
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0001",
+                    "contractId": "fut-clz6-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0002",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0003",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0004",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0005",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0006",
+                    "contractId": "fut-clh7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              }
+            ]
+          },
+          "gaps": []
+        },
+        "expect": {
+          "path": "futures[0].contracts.value",
+          "code": "nonzero"
+        }
+      },
+      {
+        "type": "FopLedgerOutput",
+        "name": "a quantity is a Count, not a bare number",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "as_of",
+            "utc": "2026-11-17T20:00:00.000000Z"
+          },
+          "scope": {
+            "history": "full_history",
+            "baselineAsOfUtc": null,
+            "openingValue": {
+              "value": null,
+              "reason": "not_applicable_full_history"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [
+            {
+              "contractId": "fut-clz6-0001",
+              "localSymbol": "CLZ6",
+              "contractMonth": "202612",
+              "contracts": 1,
+              "pointValue": 1000,
+              "averagePrice": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              },
+              "basis": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              },
+              "mark": {
+                "value": 75.4,
+                "reason": null
+              },
+              "unrealized": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              }
+            }
+          ],
+          "options": [
+            {
+              "contractId": "fop-loz6-c75-01",
+              "right": "C",
+              "strike": 75,
+              "expiry": "2026-11-17",
+              "contracts": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              },
+              "premiumMultiplier": 1000,
+              "remainingNetPremium": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              },
+              "boundFutureContractId": "fut-clz6-0001",
+              "bindingStatus": "verified_statement",
+              "mark": {
+                "value": 0.45,
+                "reason": null
+              },
+              "value": {
+                "value": null,
+                "reason": "delivery_time_unresolved:evt-assign-00001"
+              }
+            }
+          ],
+          "realizedByContract": [],
+          "totals": {
+            "Rf": {
+              "value": 0,
+              "reason": null
+            },
+            "Uf": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "Co": {
+              "value": 1197.5,
+              "reason": null
+            },
+            "Vo": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "E": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "Es": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": null,
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": []
+          },
+          "gaps": [
+            {
+              "metric": "futures[0].contracts",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "options[0].contracts",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "totals.economicPnl",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "sellerLens.breakEven",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            }
+          ]
+        },
+        "expect": {
+          "path": "futures[0].contracts",
+          "code": "type"
+        }
+      },
+      {
+        "type": "FopLedgerOutput",
+        "name": "an as-of view names its instant",
+        "value": {
+          "engineVersion": 1,
+          "asOf": {
+            "kind": "as_of",
+            "utc": null
+          },
+          "scope": {
+            "history": "full_history",
+            "baselineAsOfUtc": null,
+            "openingValue": {
+              "value": null,
+              "reason": "not_applicable_full_history"
+            }
+          },
+          "cycles": [
+            {
+              "index": 0,
+              "startsAfterBoundaryId": null,
+              "closedByBoundaryId": null
+            }
+          ],
+          "currentCycleIndex": 0,
+          "futures": [
+            {
+              "contractId": "fut-clh7-0001",
+              "localSymbol": "CLH7",
+              "contractMonth": "202703",
+              "contracts": {
+                "value": 1,
+                "reason": null
+              },
+              "pointValue": 1000,
+              "averagePrice": {
+                "value": 70.8,
+                "reason": null
+              },
+              "basis": {
+                "value": 70800,
+                "reason": null
+              },
+              "mark": {
+                "value": 71.8,
+                "reason": null
+              },
+              "unrealized": {
+                "value": 1000,
+                "reason": null
+              }
+            }
+          ],
+          "options": [],
+          "realizedByContract": [
+            {
+              "contractId": "fut-clz6-0001",
+              "localSymbol": "CLZ6",
+              "realized": {
+                "value": -2000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clf7-0001",
+              "localSymbol": "CLF7",
+              "realized": {
+                "value": 3000,
+                "reason": null
+              }
+            },
+            {
+              "contractId": "fut-clg7-0001",
+              "localSymbol": "CLG7",
+              "realized": {
+                "value": -1500,
+                "reason": null
+              }
+            }
+          ],
+          "totals": {
+            "Rf": {
+              "value": -500,
+              "reason": null
+            },
+            "Uf": {
+              "value": 1000,
+              "reason": null
+            },
+            "Co": {
+              "value": 1200,
+              "reason": null
+            },
+            "Vo": {
+              "value": 0,
+              "reason": null
+            },
+            "E": {
+              "value": 30,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            },
+            "economicPnl": {
+              "value": 1670,
+              "reason": null
+            }
+          },
+          "sellerLens": {
+            "Rs": {
+              "value": 1200,
+              "reason": null
+            },
+            "Es": {
+              "value": 30,
+              "reason": null
+            },
+            "Js": {
+              "value": 0,
+              "reason": null
+            },
+            "breakEven": {
+              "value": 70.13,
+              "reason": null
+            },
+            "breakEvenIfOpenShortsExpire": {
+              "value": 70.13,
+              "reason": null
+            },
+            "longExerciseAffectsBreakEven": false
+          },
+          "roll": {
+            "groups": [
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0001",
+                    "contractId": "fut-clz6-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0002",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0003",
+                    "contractId": "fut-clf7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0004",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              },
+              {
+                "evidence": "candidate",
+                "legs": [
+                  {
+                    "eventId": "evt-roll-0005",
+                    "contractId": "fut-clg7-0001",
+                    "contracts": -1
+                  },
+                  {
+                    "eventId": "evt-roll-0006",
+                    "contractId": "fut-clh7-0001",
+                    "contracts": 1
+                  }
+                ],
+                "matchedContracts": 1
+              }
+            ]
+          },
+          "gaps": []
+        },
+        "expect": {
+          "path": "asOf",
+          "code": "rule:as_of_view_names_its_instant"
+        }
+      }
+    ]
+  }
+}

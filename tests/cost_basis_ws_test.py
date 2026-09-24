@@ -85,7 +85,7 @@ class CostBasisWsTestBase(unittest.IsolatedAsyncioTestCase):
     async def make_book(self, symbol='TQQQ', account='U1111111'):
         response = await self.call(
             'create_cost_basis_book', account=account, symbol=symbol,
-            startDate='2026-01-01')
+            startDate='2026-01-01', secType='STK')
         self.assertTrue(response['success'], response)
         return response['book']['bookId']
 
@@ -170,7 +170,7 @@ class RemoteAccessTests(CostBasisWsTestBase):
                 remote.sent.clear()
                 created = await self.call(
                     'create_cost_basis_book', ws=remote, account=f'U111111{index}',
-                    symbol='TQQQ', startDate='2026-01-01')
+                    symbol='TQQQ', startDate='2026-01-01', secType='STK')
                 self.assertTrue(created['success'], created)
                 remote.sent.clear()
                 books = await self.call('list_cost_basis_books', ws=remote)
@@ -410,7 +410,7 @@ class BookActionTests(CostBasisWsTestBase):
         await self.make_book()
         response = await self.call(
             'create_cost_basis_book', account='U1111111', symbol='TQQQ',
-            startDate='2026-02-01')
+            startDate='2026-02-01', secType='STK')
         self.assertFalse(response['success'])
         self.assertEqual(response['code'], 'book_exists')
 
@@ -892,7 +892,7 @@ class ImportIntegrityProtocolTests(CostBasisWsTestBase):
         await super().asyncSetUp()
         created = await self.call(
             'create_cost_basis_book', account='U1111111', symbol='TQQQ',
-            startDate='2026-01-01')
+            startDate='2026-01-01', secType='STK')
         self.book_id = created['book']['bookId']
 
     def short_put(self, **overrides):

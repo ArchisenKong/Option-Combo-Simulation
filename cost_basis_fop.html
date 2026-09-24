@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FOP 成本账本 — Option Combo Simulator</title>
+    <link rel="stylesheet" href="cost_basis_fop.css?v=c3cb225a9f4d">
+</head>
+<body>
+    <header class="fop-header">
+        <div>
+            <p class="fop-eyebrow">独立 FOP 成本账本</p>
+            <h1 id="page-title">期货 / 期货期权账本</h1>
+        </div>
+        <div class="fop-connection" id="connection" data-state="idle">
+            <span class="fop-dot" aria-hidden="true"></span>
+            <span id="connection-text">未连接</span>
+        </div>
+    </header>
+
+    <main class="fop-main">
+        <section class="fop-card fop-notice" aria-labelledby="stage-title">
+            <h2 id="stage-title">开发中</h2>
+            <p id="stage-text"></p>
+        </section>
+
+        <section class="fop-card" id="loading-view">
+            <p>正在读取账本目录…</p>
+        </section>
+
+        <section class="fop-card" id="message-view" hidden>
+            <p id="message-text"></p>
+        </section>
+
+        <section class="fop-card" id="book-view" hidden aria-labelledby="book-title">
+            <h2 id="book-title"></h2>
+            <dl class="fop-identity" id="book-identity"></dl>
+            <p class="fop-state" id="book-state"></p>
+            <p><a id="book-legacy-link" href="cost_basis.html">在旧页面查看、导出或删除</a></p>
+        </section>
+
+        <section class="fop-card" id="list-view" hidden aria-labelledby="list-title">
+            <h2 id="list-title">FOP / FUT 账本</h2>
+            <ul class="fop-book-list" id="fop-book-list"></ul>
+            <h3>股票 / ETF 账本</h3>
+            <ul class="fop-book-list" id="equity-book-list"></ul>
+        </section>
+    </main>
+
+    <footer class="fop-footer">
+        <span>后端 <span id="server-address"></span></span>
+        <a href="cost_basis.html">股票 / ETF 成本账本</a>
+    </footer>
+
+    <script src="js/cost_basis_common.js?v=af09177535ca"></script>
+    <script src="js/cost_basis_fop.js?v=bd3c1aaefd73"></script>
+</body>
+</html>

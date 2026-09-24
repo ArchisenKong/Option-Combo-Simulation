@@ -1111,8 +1111,10 @@ module.exports = {
                 const scripts = Array.from(
                     html.matchAll(/<script src="([^"?]+)/g)).map((match) => match[1]);
                 // The American pricer is a standalone, side-effect-free
-                // module (no sockets, no orders); it is the only addition.
+                // module (no sockets, no orders); the shared protocol and
+                // routing layer (no DOM, no socket of its own) loads first.
                 assert.deepEqual(scripts, [
+                    'js/cost_basis_common.js',
                     'js/cost_basis_core.js',
                     'js/american_binomial.js',
                     'js/cost_basis_import.js',
@@ -3186,7 +3188,7 @@ module.exports = {
                     'rollToPrice', 'rollGroup'].forEach((field) => {
                     assert.ok(html.includes(`data-field="${field}"`));
                 });
-                assert.match(source, /secType:\s*\$\('new-book-type'\)\.value/);
+                assert.match(source, /const secType = String\(\$\('new-book-type'\)\.value \|\| ''\);/);
                 assert.match(source, /secType:\s*book \? \(book\.secType \|\| 'STK'\)/);
                 assert.match(source, /core\.computeLedger\(state\.allEvents, \{/);
                 assert.match(source, /core\.buildReconciliation\(\{[\s\S]{0,180}secType/);

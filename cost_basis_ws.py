@@ -486,15 +486,25 @@ async def _dispatch_store_call(store, action, data):
         return {'books': books}
 
     if action == 'create_cost_basis_book':
+        # The ledger type is stated, never assumed: defaulting to STK would
+        # turn a CL request into a stock ledger for a futures root
+        # (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §1.1). Only a stock
+        # ledger keeps the conventional 100 shares per contract.
+        sec_type = _required_str(data, 'secType').strip().upper()
+        shares_per_contract = data.get('defaultSharesPerContract')
+        if shares_per_contract in (None, ''):
+            if sec_type != 'STK':
+                raise InvalidRequestError(
+                    'defaultSharesPerContract is required unless secType is STK')
+            shares_per_contract = 100
         book = await asyncio.to_thread(
             lambda: store.create_book(
                 account=_required_str(data, 'account'),
                 symbol=_required_str(data, 'symbol'),
                 start_date=_required_str(data, 'startDate'),
-                sec_type=data.get('secType') or 'STK',
+                sec_type=sec_type,
                 currency=data.get('currency') or 'USD',
-                default_shares_per_contract=(
-                    data.get('defaultSharesPerContract') or 100),
+                default_shares_per_contract=shares_per_contract,
                 note=data.get('note') or '',
             )
         )

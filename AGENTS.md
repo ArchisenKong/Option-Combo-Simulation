@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repo is a local browser app with five frontend surfaces and two optional Python backends.
+This repo is a local browser app with six frontend surfaces and two optional Python backends.
 
 Frontend surfaces:
 
@@ -10,6 +10,7 @@ Frontend surfaces:
 - `chart_lab.html` for the shared workspace plus experimental daily-bar projection
 - `iv_term_structure.html` for standalone live IV term-structure monitoring
 - `cost_basis.html` for the standalone per-underlying blended-cost ledger
+- `cost_basis_fop.html` for the standalone FOP ledger (under construction; routing only)
 - `workspace_db_admin.html` for the standalone workspace-database / archive admin page
 
 Backend entry points:
@@ -50,6 +51,23 @@ Do not assume a bare `python` command will work in every shell, especially on Wi
     `request_portfolio_positions_snapshot` /
     `request_portfolio_avg_cost_snapshot` actions and writes its own
     `cost_basis.db`; it cannot trade or subscribe to market data
+  - loads `js/cost_basis_common.js` first: the shared action catalogue and
+    ledger routing (`OptionComboCostBasisCore.ALLOWED_CLIENT_ACTIONS` is
+    derived from it). FUT/FOP ledgers are frozen here (read, export, delete
+    only) until the standalone FOP ledger ships
+
+- `cost_basis_fop.html`
+  - standalone FOP ledger, built in phases by
+    `CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`; the phase record is
+    `CODE PLAN/COST_BASIS_FOP_VALIDATION.md`
+  - loads only `js/cost_basis_common.js` and `js/cost_basis_fop.js`: never the
+    stock ledger core or the trading shell
+  - currently routes only: a stock ledger goes to `cost_basis.html`, a FUT
+    ledger shows its identity; it may send only the status and ledger-list
+    actions and writes nothing
+  - the frozen contract (DDL draft, protocol, core output) lives in
+    `tests/fixtures/cost_basis_fop/contract/`; `node tests/run_cost_basis_fop.js
+    --stage <P>` runs the phase suites
 
 - `workspace_db_admin.html`
   - standalone, loopback-only admin page for the workspace database and its

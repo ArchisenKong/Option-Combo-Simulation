@@ -110,7 +110,7 @@ class TrustedLedgerPeerTests(unittest.IsolatedAsyncioTestCase):
         env = self.environment('192.0.2.10')
         result = await self.request(env, '192.0.2.10', 'create_cost_basis_book',
                                     account='TEST-ACCOUNT', symbol='TEST',
-                                    startDate='2026-01-01')
+                                    startDate='2026-01-01', secType='STK')
         self.assertTrue(result['success'], result)
         books = await self.request(env, '192.0.2.10', 'list_cost_basis_books')
         self.assertTrue(books['success'], books)

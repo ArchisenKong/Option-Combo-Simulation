@@ -1,0 +1,80 @@
+{
+  "format": "cost-basis-fop-event-kinds",
+  "version": 1,
+  "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §5.2 (归属表), §8.1 (种类白名单与字段规则)",
+  "description": "Every kind in cost_basis_events is either allowed in a FOP ledger (with its field rules and where its cash and fees count) or rejected. The contract test fails on an undecided kind.",
+  "rules": {
+    "nonzero_integer": "An integer other than 0; buys positive, sells negative.",
+    "positive_integer": "An integer above 0 (closes a short).",
+    "negative_integer": "An integer below 0 (closes a long).",
+    "closing_integer": "A non-zero integer whose sign closes the open position.",
+    "delivery": "A non-zero integer: the FUT delta of plan §6.1, |value| = |contracts| x deliverableFuturesPerOption.",
+    "absent": "Must be null.",
+    "finite": "Any finite number, zero and negative included (plan §6.4).",
+    "nonnegative": "A finite number >= 0.",
+    "strike": "The option contract's strike (> 0 in the first release).",
+    "reference_or_null": "The baseline reference price, or null when unknown. Only a FOP baseline may be unknown; a FUT baseline needs a trade cost or a reference price (plan §9.2, protocol.json domainRules unknown_cost_only_for_options).",
+    "minus_fees": "-fees.",
+    "premium_minus_fees": "-contracts x premiumMultiplier x price - fees; a different statement cash wins and sets derived_mismatch.",
+    "zero": "0.",
+    "fee_cash": "Negative; positive only when the details mark a refund.",
+    "evidenced_amount": "A non-zero amount backed by evidence."
+  },
+  "allowed": {
+    "futures_trade": {
+      "references": { "contract": "FUT" },
+      "futureContracts": "nonzero_integer", "contracts": "absent",
+      "price": "finite", "cashAmount": "minus_fees", "fees": "nonnegative",
+      "counts": { "cash": "none: notional stays out of cash", "fees": "E", "sellerLens": "Es" }
+    },
+    "option_trade": {
+      "references": { "contract": "FOP" },
+      "contracts": "nonzero_integer", "futureContracts": "absent",
+      "price": "nonnegative", "cashAmount": "premium_minus_fees", "fees": "nonnegative",
+      "counts": { "cash": "Co", "fees": "inside Co, never E", "sellerLens": "short part: Rs when closed, open short income while open; long part: none" }
+    },
+    "option_assignment": {
+      "references": { "contract": "FOP", "delivered_contract": "FUT", "binding": "required" },
+      "contracts": "positive_integer", "futureContracts": "delivery",
+      "price": "strike", "cashAmount": "minus_fees", "fees": "nonnegative",
+      "counts": { "cash": "fees only", "fees": "E", "sellerLens": "fees in Es; the short premium moves into Rs" }
+    },
+    "option_exercise": {
+      "references": { "contract": "FOP", "delivered_contract": "FUT", "binding": "required" },
+      "contracts": "negative_integer", "futureContracts": "delivery",
+      "price": "strike", "cashAmount": "minus_fees", "fees": "nonnegative",
+      "counts": { "cash": "fees only", "fees": "E", "sellerLens": "none; the delivered FUT enters Rf (plan §5.3 path difference)" }
+    },
+    "option_expiry": {
+      "references": { "contract": "FOP" },
+      "contracts": "closing_integer", "futureContracts": "absent",
+      "price": "absent", "cashAmount": "minus_fees", "fees": "nonnegative",
+      "counts": { "cash": "fees only", "fees": "E", "sellerLens": "short: fees in Es and premium into Rs; long: none" }
+    },
+    "opening_balance": {
+      "references": { "contract": "FUT or FOP" },
+      "contracts": "nonzero_integer when FOP, else absent",
+      "futureContracts": "nonzero_integer when FUT, else absent",
+      "price": "reference_or_null", "cashAmount": "zero", "fees": "zero",
+      "counts": { "cash": "none", "fees": "none", "sellerLens": "none; O_B offsets the baseline value (plan §9.2)" }
+    },
+    "fee": {
+      "references": { "fee_source": "optional" },
+      "contracts": "absent", "futureContracts": "absent",
+      "price": "absent", "cashAmount": "fee_cash", "fees": "zero",
+      "counts": { "cash": "E (-cashAmount)", "fees": "none: the amount lives only in cashAmount", "sellerLens": "Es only when attributed to futures or short_option" }
+    },
+    "manual_adjust": {
+      "references": {},
+      "contracts": "absent", "futureContracts": "absent",
+      "price": "absent", "cashAmount": "evidenced_amount", "fees": "zero",
+      "counts": { "cash": "J", "fees": "none", "sellerLens": "Js only when adjustment_scope is seller_lens" }
+    }
+  },
+  "rejected": ["share_trade", "dividend", "split", "option_split", "futures_roll"],
+  "eSum": {
+    "feesOf": ["futures_trade", "option_assignment", "option_exercise", "option_expiry"],
+    "minusCashOf": ["fee"],
+    "never": ["option_trade", "opening_balance", "manual_adjust"]
+  }
+}

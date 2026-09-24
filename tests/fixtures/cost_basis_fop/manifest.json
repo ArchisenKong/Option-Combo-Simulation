@@ -3,7 +3,7 @@
   "version": 1,
   "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §13.3 and §14.4",
   "notes": [
-    "tests/run_cost_basis_fop.js --stage <P> runs every node suite up to that stage, and fails on a missing file, a listed case the suite lacks, a case the suite has but this manifest does not list, an unknown stage, or zero selected cases.",
+    "tests/run_cost_basis_fop.js --stage <P> runs every node suite up to that stage, and fails on a stage up to <P> with no registered case, a missing file, a listed case the suite lacks, a case the suite has but this manifest does not list, an unknown stage, or zero selected cases.",
     "Python suites are checked for their listed cases and run separately with unittest (§14.4).",
     "A requirement tag with a parenthesised qualifier covers only that part of the F item; the item is complete only when its last dependent stage passes (§14.4)."
   ],
@@ -41,11 +41,78 @@
         { "name": "FuturesLedgerFreezeWsTests.test_protocol_still_reads_exports_and_deletes_a_legacy_futures_ledger", "requirements": ["F11 (legacy FUT ledger: export and delete only)"] },
         { "name": "CapabilityDraftTests.test_capability_draft_is_well_formed_and_writes_nothing", "requirements": ["P0 gate: capability draft"] }
       ]
+    },
+    {
+      "stage": "P0",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_runner.test.js",
+      "name": "cost_basis_fop_runner",
+      "cases": [
+        { "name": "a stage with no registered case fails, and so does every later stage", "requirements": ["§14.4 (stage runner)"] },
+        { "name": "a gap before the target stage fails even when the target has cases", "requirements": ["§14.4 (stage runner)"] },
+        { "name": "an unknown stage is a usage error", "requirements": ["§14.4 (stage runner)"] },
+        { "name": "the real runner refuses a stage beyond the implemented ones", "requirements": ["§14.4 (stage runner)"] }
+      ]
+    },
+    {
+      "stage": "P1",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_identity.test.js",
+      "name": "cost_basis_fop_identity",
+      "cases": [
+        { "name": "the common catalogue keeps the stock page action list exactly", "requirements": ["F28 (stock page actions unchanged)", "F27 (P1 part)"] },
+        { "name": "the FOP page may only read the status and the ledger list", "requirements": ["F27 (P1 part)", "F38 (P1 part: no FOP writes)"] },
+        { "name": "write flags agree with the P0 freeze and with the server coverage file", "requirements": ["F38 (P1 part)"] },
+        { "name": "a ledger routes by the type the backend reports, never by the URL", "requirements": ["F01 (routing)", "F02 (P1 part: same root, separate pages)"] },
+        { "name": "a bookId is read from the URL only when it is a well-formed token", "requirements": ["F01 (bookmarks)"] },
+        { "name": "the request client enforces its allowlist and settles every request once", "requirements": ["F27 (P1 part)", "F23 (P1 part: one settlement per request)"] },
+        { "name": "the FOP page loads only the common layer and its own controller", "requirements": ["F27 (P1 part)"] },
+        { "name": "a stock ledger opened on the FOP page is sent back before anything renders", "requirements": ["F01 (wrong page)", "F02 (P1 part)"] },
+        { "name": "a FUT ledger shows only its identity and the way to the legacy view", "requirements": ["F01 (P1 part)", "F38 (P1 part)"] },
+        { "name": "without a ledger the page lists both kinds with links to their own pages", "requirements": ["F01 (P1 part)"] },
+        { "name": "a stale bookmark or an unavailable backend is reported, not guessed", "requirements": ["F01 (stale bookmark)"] },
+        { "name": "the stock page opens the ledger a link names", "requirements": ["F01 (P1 part)"] },
+        { "name": "a stock-page link to a missing ledger opens nothing and says so", "requirements": ["F01 (stale bookmark on the stock page)"] },
+        { "name": "a stock-page link survives a list without its ledger and opens it once listed", "requirements": ["F01 (bookmark while the list is empty or incomplete)"] },
+        { "name": "the create form has no default type and creates nothing without one", "requirements": ["F01 (type not chosen)", "F35 (entry)"] },
+        { "name": "the contract examples pass and fail as stated in the JS reader", "requirements": ["F37 (contract)", "F46 (contract)", "P1 step 2", "F42 (P1 part: an unknown is null with its reason)"] }
+      ]
+    },
+    {
+      "stage": "P1",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_contract_test.py",
+      "cases": [
+        { "name": "DdlDraftTests.test_draft_applies_to_a_v10_ledger_with_foreign_keys_on_and_keeps_stock_rows", "requirements": ["F37 (DDL)", "F45 (P1 part: order works with foreign keys on)", "F28 (stock rows unchanged)"] },
+        { "name": "DdlDraftTests.test_the_existing_rebuild_order_fails_on_the_parent_table", "requirements": ["F45 (P1 part: the trap)"] },
+        { "name": "DdlDraftTests.test_constraints_refuse_what_the_plan_refuses", "requirements": ["F37 (DDL)", "F15 (P1 part: zero/negative strike)", "F46 (P1 part)"] },
+        { "name": "DdlDraftTests.test_time_text_has_one_fixed_width_form", "requirements": ["F22 (P1 part: one fixed-width time form that keeps the source precision)", "F41 (P1 part: text order is time order)", "F37 (DDL)"] },
+        { "name": "CoverageTests.test_every_event_column_is_decided", "requirements": ["F46 (columns)", "F37 (P1 part)"] },
+        { "name": "CoverageTests.test_every_event_kind_is_decided", "requirements": ["F46 (kinds)", "F18 (P1 part: E excludes option commissions)"] },
+        { "name": "CoverageTests.test_write_coverage_matches_the_protocol_and_the_store", "requirements": ["P1 step 4 (write coverage)", "F38 (P1 part)"] },
+        { "name": "ProtocolContractTests.test_examples_pass_and_fail_as_stated", "requirements": ["P1 step 2", "F37 (contract)", "F46 (contract)", "F42 (P1 part: an unknown is null with its reason)"] },
+        { "name": "ProtocolContractTests.test_every_protocol_type_is_used_by_an_example", "requirements": ["P1 step 2"] },
+        { "name": "ProtocolContractTests.test_every_write_request_carries_the_write_guard", "requirements": ["F23 (P1 part: every write carries the reviewed ledger version)", "F24 (P1 part: idempotency key)"] },
+        { "name": "ProtocolContractTests.test_order_rules_compare_only_fixed_width_text", "requirements": ["F22 (P1 part)", "F41 (P1 part)"] },
+        { "name": "ProtocolContractTests.test_example_packages_keep_the_source_rules", "requirements": ["F21 (P1 part: raw source fields travel with the package)", "F44 (P1 part: capability keys)", "P1 step 2", "F36 (P1 part: a fee names a trade of the same package)"] },
+        { "name": "ProtocolContractTests.test_repeated_source_cases_agree_with_the_rule", "requirements": ["F21 (P1 part: a repeated reference is skipped only when unchanged)", "F24 (P1 part: a revised reference fails the whole import)"] },
+        { "name": "ProtocolContractTests.test_repeat_comparison_classifies_every_event_field", "requirements": ["F21 (P1 part: no unclassified repeat-comparison fields)", "P1 step 2"] },
+        { "name": "ProtocolContractTests.test_repeat_cases_isolate_each_event_semantic_change", "requirements": ["F21 (P1 part: typed economic revisions conflict)", "F36 (P1 part: fee source attribution)", "F42 (P1 part: baseline semantics)", "F40 (P1 part: a binding revision with the same delivery is not a revision)"] },
+        { "name": "ProtocolContractTests.test_the_js_reader_reports_exactly_the_same_errors", "requirements": ["P1 acceptance: both ends agree"] },
+        { "name": "ExplicitBookTypeTests.test_creating_a_ledger_without_a_type_is_refused", "requirements": ["F01 (request without a type)"] },
+        { "name": "ExplicitBookTypeTests.test_only_a_stock_ledger_keeps_the_default_multiplier", "requirements": ["F01 (no FUT default)", "F37 (P1 part)"] }
+      ]
     }
   ],
   "fixtures": [
     { "id": "capabilities", "file": "cost_basis_fop_capabilities.json", "source": "synthetic", "requirements": ["P0 gate: capability draft"] },
     { "id": "month_collision", "file": "tests/fixtures/cost_basis_fop/month_collision.json", "source": "synthetic", "requirements": ["F03", "F35"] },
-    { "id": "legacy_fut_migration_list", "file": "tests/fixtures/cost_basis_fop/legacy_fut_migration_list.json", "source": "synthetic", "requirements": ["P0 step 4"] }
+    { "id": "legacy_fut_migration_list", "file": "tests/fixtures/cost_basis_fop/legacy_fut_migration_list.json", "source": "synthetic", "requirements": ["P0 step 4"] },
+    { "id": "ddl_draft", "file": "tests/fixtures/cost_basis_fop/contract/ddl_draft.sql", "source": "synthetic", "requirements": ["F37", "F45", "P1 step 4"] },
+    { "id": "event_columns", "file": "tests/fixtures/cost_basis_fop/contract/event_columns.json", "source": "synthetic", "requirements": ["F46"] },
+    { "id": "event_kinds", "file": "tests/fixtures/cost_basis_fop/contract/event_kinds.json", "source": "synthetic", "requirements": ["F46", "F18"] },
+    { "id": "write_coverage", "file": "tests/fixtures/cost_basis_fop/contract/write_coverage.json", "source": "synthetic", "requirements": ["P1 step 4"] },
+    { "id": "protocol", "file": "tests/fixtures/cost_basis_fop/contract/protocol.json", "source": "synthetic", "requirements": ["P1 step 2"] },
+    { "id": "core_output", "file": "tests/fixtures/cost_basis_fop/contract/core_output.json", "source": "synthetic", "requirements": ["P1 step 3"] }
   ]
 }

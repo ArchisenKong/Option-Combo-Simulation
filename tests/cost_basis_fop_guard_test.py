@@ -291,7 +291,8 @@ class FuturesLedgerFreezeWsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response['code'], 'futures_book_frozen')
         self.assertEqual(_db_image(self.db_path), before)
         stock = await self.call(
-            'create_cost_basis_book', account=ACCOUNT, symbol='CL', startDate='2026-01-01')
+            'create_cost_basis_book', account=ACCOUNT, symbol='CL', startDate='2026-01-01',
+            secType='STK')
         self.assertTrue(stock['success'], stock)
 
     async def test_protocol_refuses_every_write_action_on_a_legacy_futures_ledger(self):

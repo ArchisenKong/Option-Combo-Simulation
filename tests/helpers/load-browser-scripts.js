@@ -15,6 +15,10 @@ function loadBrowserScripts(relativePaths, overrides = {}) {
                 if (!seenPaths.has(dependency)) { scriptQueue.push(dependency); seenPaths.add(dependency); }
             }
         }
+        if (relativePath === 'js/cost_basis_core.js' && !seenPaths.has('js/cost_basis_common.js')) {
+            scriptQueue.push('js/cost_basis_common.js');
+            seenPaths.add('js/cost_basis_common.js');
+        }
         if (relativePath === 'js/market_holidays.js'
             && !Object.prototype.hasOwnProperty.call(overrides, 'OptionComboOfficialExchangeCalendars')
             && !seenPaths.has('js/official_exchange_calendars.generated.js')) {

@@ -1,0 +1,198 @@
+/* Standalone FOP ledger page. Its own tokens: it shares no stylesheet with
+   the stock ledger page (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §7.1). */
+
+:root {
+    --fop-bg: #f5f6f8;
+    --fop-surface: #ffffff;
+    --fop-text: #1c2230;
+    --fop-muted: #5d6677;
+    --fop-border: #dde1e8;
+    --fop-accent: #2f5fd0;
+    --fop-notice-bg: #fff6e0;
+    --fop-notice-border: #e8c778;
+    --fop-ok: #1f8a4c;
+    --fop-warn: #b7791f;
+    --fop-bad: #c0392b;
+    color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --fop-bg: #12151b;
+        --fop-surface: #1b1f27;
+        --fop-text: #e6e9ef;
+        --fop-muted: #9aa3b2;
+        --fop-border: #2c323d;
+        --fop-accent: #7aa2ff;
+        --fop-notice-bg: #2a2416;
+        --fop-notice-border: #6b5724;
+        --fop-ok: #4cc47f;
+        --fop-warn: #e0a84a;
+        --fop-bad: #ef6b5b;
+        color-scheme: dark;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--fop-bg);
+    color: var(--fop-text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+        "Segoe UI", sans-serif;
+}
+
+a {
+    color: var(--fop-accent);
+}
+
+.fop-header,
+.fop-main,
+.fop-footer {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 0 16px;
+}
+
+.fop-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 28px;
+    padding-bottom: 16px;
+}
+
+.fop-eyebrow {
+    margin: 0;
+    color: var(--fop-muted);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+}
+
+h1 {
+    margin: 2px 0 0;
+    font-size: 24px;
+}
+
+h2 {
+    margin: 0 0 8px;
+    font-size: 17px;
+}
+
+h3 {
+    margin: 18px 0 6px;
+    font-size: 15px;
+    color: var(--fop-muted);
+}
+
+.fop-connection {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--fop-muted);
+    font-size: 13px;
+}
+
+.fop-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--fop-muted);
+}
+
+.fop-connection[data-state="connected"] .fop-dot {
+    background: var(--fop-ok);
+}
+
+.fop-connection[data-state="connecting"] .fop-dot {
+    background: var(--fop-warn);
+}
+
+.fop-connection[data-state="unavailable"] .fop-dot {
+    background: var(--fop-bad);
+}
+
+.fop-main {
+    display: grid;
+    gap: 14px;
+}
+
+.fop-card {
+    background: var(--fop-surface);
+    border: 1px solid var(--fop-border);
+    border-radius: 10px;
+    padding: 16px 18px;
+}
+
+.fop-card[hidden] {
+    display: none;
+}
+
+.fop-card p {
+    margin: 0;
+}
+
+.fop-card p + p {
+    margin-top: 10px;
+}
+
+.fop-notice {
+    background: var(--fop-notice-bg);
+    border-color: var(--fop-notice-border);
+}
+
+.fop-identity {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 16px;
+    margin: 0 0 12px;
+}
+
+.fop-identity dt {
+    color: var(--fop-muted);
+}
+
+.fop-identity dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.fop-state {
+    color: var(--fop-muted);
+}
+
+.fop-book-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fop-book-list li {
+    padding: 8px 0;
+    border-top: 1px solid var(--fop-border);
+    overflow-wrap: anywhere;
+}
+
+.fop-book-list li:first-child {
+    border-top: 0;
+}
+
+.fop-empty {
+    color: var(--fop-muted);
+}
+
+.fop-footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px;
+    padding-top: 18px;
+    padding-bottom: 28px;
+    color: var(--fop-muted);
+    font-size: 13px;
+}

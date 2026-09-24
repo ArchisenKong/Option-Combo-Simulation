@@ -10,6 +10,7 @@ The repo currently has five frontend surfaces:
 2. `chart_lab.html` - shared workspace plus experimental daily-bar projection
 3. `iv_term_structure.html` - standalone live ETF / futures-option IV term-structure monitor
 4. `cost_basis.html` - standalone per-account, per-underlying blended-cost ledger
+   - `cost_basis_fop.html` - the standalone FOP ledger, under construction (routing only for now)
 5. `workspace_db_admin.html` - standalone workspace-database and archive admin page
 
 It also has two optional Python WebSocket backends:
@@ -177,6 +178,11 @@ scripts plus DOM-free American pricing, market curves and `cost_basis_stress_*` 
 never the trading shell — and writes its own `cost_basis.db`. It cannot place
 an order or subscribe to market data. Full details in
 [Blended Cost Ledger](#blended-cost-ledger-cost_basishtml) below.
+
+`cost_basis_fop.html` is the standalone FOP ledger that will replace the frozen
+`FUT` books. It is being built in phases (`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`);
+for now it only reads the ledger list, sends a stock ledger to `cost_basis.html`
+and shows a `FUT` ledger's identity. It computes and writes nothing.
 
 ### `workspace_db_admin.html`
 
@@ -401,7 +407,10 @@ answers one question for one IB account and one underlying: **what did this
 stock or futures position actually cost this account, all in?** The active
 book identity is `account + symbol + security type + currency`, so two managed
 accounts may keep independent books for the same symbol. A book is explicitly either `STK`
-(stock/ETF plus OPT) or `FUT` (deliverable FOP plus FUT). **`FUT` books are
+(stock/ETF plus OPT) or `FUT` (deliverable FOP plus FUT); the create form
+preselects neither, and the server refuses a create request without a type. A
+link `cost_basis.html?bookId=…` opens that book, and when the book no longer
+exists the page says so instead of opening another one. **`FUT` books are
 frozen for now:** this engine keys a futures position by the first six digits
 of its date, so a CL last-trade date and another contract's delivery month can
 merge silently. New `FUT` books cannot be created, and an existing one is

@@ -39,6 +39,7 @@ PAGES = (
     'iv_term_structure.html',
     'workspace_db_admin.html',
     'cost_basis.html',
+    'cost_basis_fop.html',
 )
 
 HASH_LENGTH = 12

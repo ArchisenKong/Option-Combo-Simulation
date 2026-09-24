@@ -7,7 +7,8 @@ const root = path.resolve(__dirname, '..');
 module.exports = { name: 'stress worker', tests: [{
     name: 'the actual worker produces the same center and envelope as the synchronous pure modules',
     run() {
-        const dependencies = ['js/cost_basis_core.js', 'js/american_binomial.js', 'js/market_curves.js',
+        const dependencies = ['js/cost_basis_common.js', 'js/cost_basis_core.js',
+            'js/american_binomial.js', 'js/market_curves.js',
             'js/cost_basis_stress_models.js', 'js/cost_basis_stress_core.js', 'js/cost_basis_stress_band.js'];
         const normal = loadBrowserScripts(dependencies);
         const options = { centerPrice: 100, asOfInstant: '2026-09-08T16:00:00Z',

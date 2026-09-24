@@ -4,11 +4,14 @@
 //   node tests/run_cost_basis_fop.js --stage P0
 //
 // Runs every node suite in tests/fixtures/cost_basis_fop/manifest.json up to
-// the given stage. It exits non-zero on an unknown stage, a missing suite or
+// the given stage. It exits non-zero on an unknown stage, a stage up to the
+// target that has no registered case (a stage that is not implemented yet
+// cannot pass on the strength of the earlier ones), a missing suite or
 // fixture file, a listed case the suite lacks, a case the suite has that the
 // manifest does not list, a node suite not registered in tests/run.js, zero
 // selected cases, or any failure. Python suites are checked for their listed
 // cases here and run with unittest (see the command printed at the end).
+// tests/cost_basis_fop_runner.test.js covers the selection rules.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -80,18 +83,46 @@ function manifestProblems(manifest, selected) {
     return problems;
 }
 
+// The suites a stage runs, or the reasons it cannot run. Every stage from the
+// first through the target must have at least one registered case: running
+// "--stage P6" while P2..P6 have none would otherwise pass on P0 and P1 alone.
+function selectSuites(manifest, stage) {
+    const limit = manifest.stages.indexOf(stage);
+    if (limit < 0) {
+        return { selected: [], usage: true,
+            errors: [`unknown stage ${stage}; expected one of ${manifest.stages.join(', ')}`] };
+    }
+    const errors = [];
+    manifest.suites.forEach((suite) => {
+        if (manifest.stages.indexOf(suite.stage) < 0) {
+            errors.push(`${suite.file}: unknown stage ${suite.stage}`);
+        }
+    });
+    const selected = manifest.suites.filter((suite) => {
+        const index = manifest.stages.indexOf(suite.stage);
+        return index >= 0 && index <= limit;
+    });
+    manifest.stages.slice(0, limit + 1).forEach((required) => {
+        const cases = selected.filter((suite) => suite.stage === required)
+            .reduce((count, suite) => count + (Array.isArray(suite.cases) ? suite.cases.length : 0), 0);
+        if (cases === 0) {
+            errors.push(`stage ${required} has no registered case, so ${stage} cannot pass;`
+                + ` register ${required}'s suites in ${MANIFEST} first`);
+        }
+    });
+    return { selected, usage: false, errors };
+}
+
 async function main() {
     const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, MANIFEST), 'utf8'));
     const stage = stageArgument(process.argv.slice(2));
     if (!stage) fail('usage: node tests/run_cost_basis_fop.js --stage <P0..P6>', 2);
-    const limit = manifest.stages.indexOf(stage);
-    if (limit < 0) fail(`unknown stage ${stage}; expected one of ${manifest.stages.join(', ')}`, 2);
-
-    const selected = manifest.suites.filter((suite) => {
-        const index = manifest.stages.indexOf(suite.stage);
-        if (index < 0) fail(`${suite.file}: unknown stage ${suite.stage}`);
-        return index <= limit;
-    });
+    const selection = selectSuites(manifest, stage);
+    if (selection.errors.length) {
+        selection.errors.forEach((problem) => console.log(`error: ${problem}`));
+        process.exit(selection.usage ? 2 : 1);
+    }
+    const { selected } = selection;
     const problems = manifestProblems(manifest, selected);
     if (problems.length) {
         problems.forEach((problem) => console.log(`error: ${problem}`));
@@ -129,7 +160,11 @@ async function main() {
     if (failed > 0) process.exitCode = 1;
 }
 
-main().catch((error) => {
-    console.log(error.stack);
-    process.exitCode = 1;
-});
+module.exports = { selectSuites, MANIFEST };
+
+if (require.main === module) {
+    main().catch((error) => {
+        console.log(error.stack);
+        process.exitCode = 1;
+    });
+}
