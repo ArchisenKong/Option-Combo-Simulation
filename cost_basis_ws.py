@@ -73,6 +73,7 @@ SERVER_ACTIONS = {
     # Standalone FOP ledger (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §10.2).
     'commit_cost_basis_fop_metadata': 'cost_basis_fop_metadata_committed',
     'request_cost_basis_fop_contract_details': 'cost_basis_fop_contract_details',
+    'request_cost_basis_fop_statement_bindings': 'cost_basis_fop_statement_bindings',
 }
 
 COST_BASIS_CLIENT_ACTIONS = frozenset(SERVER_ACTIONS)
@@ -362,6 +363,9 @@ async def build_cost_basis_response(store_env, websocket, data, *,
                     'productRules': sorted(cost_basis_fop_domain.SUPPORTED_PRODUCT_RULES),
                     'writesReleased': bool(getattr(store, '_fop_writes_enabled', False)),
                     'contractDetails': callable(store_env.get('fetch_fop_contract_details')),
+                    # The statement row types and their mapping (plan §9.7):
+                    # the page hands this document to the FOP importer.
+                    'importCapabilities': store._fop_capability_list().document,
                 },
             }
         return response
@@ -372,6 +376,19 @@ async def build_cost_basis_response(store_env, websocket, data, *,
             store_env.get('reason') or 'store_unavailable',
             'the cost basis ledger is unavailable',
         )
+
+    if action == 'request_cost_basis_fop_statement_bindings':
+        try:
+            _fop_message(data, 'StatementBindingRequest')
+            results = await asyncio.to_thread(
+                store.issue_statement_binding_credentials, data['bookId'], data['bindings'])
+        except CostBasisStoreError as exc:
+            _log_result(action, request_id, data, started, error=exc.code)
+            return _error_response(server_action, request_id, exc.code, str(exc))
+        response = {'action': server_action, 'requestId': request_id, 'success': True,
+                    'bookId': data['bookId'], 'results': results}
+        _log_result(action, request_id, data, started, result={'results': len(results)})
+        return response
 
     if action == 'request_cost_basis_fop_contract_details':
         fetcher = store_env.get('fetch_fop_contract_details')
@@ -682,6 +699,14 @@ async def _dispatch_store_call(store, action, data):
         )
 
     if action == 'import_cost_basis_events':
+        if 'fopPackage' in data:
+            _fop_message(data, 'ImportRequest')
+            return await asyncio.to_thread(lambda: store.import_fop_events(
+                data['bookId'], data['fopPackage'], statement=data['statement'],
+                import_batch_id=data['importBatchId'], client_token_prefix=data['clientTokenPrefix'],
+                supersede_tws_event_ids=data['supersedeTwsEventIds'],
+                expected_ledger_version=data['expectedLedgerVersion'],
+                book_identity=data['bookIdentity']))
         events = data.get('events')
         supersede_tws_event_ids = data.get('supersedeTwsEventIds', [])
         supersede_prior_stub_event_ids = data.get('supersedePriorStubEventIds', [])

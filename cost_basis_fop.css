@@ -196,3 +196,67 @@ h3 {
     color: var(--fop-muted);
     font-size: 13px;
 }
+
+.fop-form {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 8px 12px;
+    align-items: center;
+    margin: 12px 0;
+}
+
+.fop-form input,
+.fop-form select {
+    min-width: 0;
+    max-width: 100%;
+    font: inherit;
+    color: inherit;
+}
+
+.fop-form input[type="text"],
+.fop-form select {
+    padding: 4px 8px;
+    background: var(--fop-surface);
+    border: 1px solid var(--fop-border);
+    border-radius: 6px;
+}
+
+.fop-issues {
+    margin: 0;
+    padding-left: 20px;
+    overflow-wrap: anywhere;
+}
+
+.fop-table-wrap {
+    overflow-x: auto;
+}
+
+.fop-table-wrap > div + div {
+    margin-top: 10px;
+}
+
+.fop-table {
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 100%;
+}
+
+.fop-table th,
+.fop-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--fop-border);
+    text-align: left;
+    vertical-align: top;
+}
+
+.fop-table th {
+    color: var(--fop-muted);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+    .fop-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

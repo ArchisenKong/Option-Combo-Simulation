@@ -2,18 +2,89 @@
   "format": "cost-basis-fop-capabilities",
   "version": 1,
   "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §9.7",
-  "stage": "P0 draft",
-  "importMappingVersion": null,
+  "stage": "P4",
+  "importMappingVersion": "fop-csv-1",
   "notes": [
-    "P0 draft. No FOP importer exists yet and FUT/FOP ledgers are frozen, so nothing here is consumed at runtime. P4 wires the importer and the store to this file.",
+    "One file for the JS importer (js/cost_basis_fop_import.js, handed this document by the page) and the server (cost_basis_fop_statement.py). Changing a status or an alias is a code change, never a runtime switch.",
     "A key is format/section/asset/event. The asset may carry a qualifier (FOP.cash_settled) for rows whose format is ordinary but whose product is outside the first release.",
-    "Section slugs are placeholders until P4 maps them to the real Activity Statement and Flex section names."
+    "The aliases come from the plan and from the stock importer's verified Activity and Flex exports. No FOP or FUT row has a de-identified real sample yet, so every economic key stays synthetic_only (plan §9.7). The layouts the synthetic fixtures assume are listed in tests/fixtures/cost_basis_fop/statements/README.md.",
+    "Rows of the instrument and open-position sections are evidence (contract terms, delivery months, bindings, quantity proof), never events, so as rows they are out_of_scope. A Flex export is read as one flat Trades table.",
+    "discriminators names the Trades rows the importer knows: an order, its executions, and detail rows (closed lots) that repeat a trade. A row with any other DataDiscriminator is an unread economic row and blocks its batch (plan §9.4).",
+    "orderId links an order-level row to its executions across files; without it, rows of different granularity are never assumed to be the same fill."
   ],
   "statusDefinitions": {
     "real_verified": "Accepted from a de-identified real statement: needs at least one evidence entry of kind deidentified_real with verifiedOn and mappingVersion. Only these keys may be written.",
-    "synthetic_only": "No real-statement acceptance. Preview only. A synthetic evidence entry, when present, records that the synthetic fixture passed; it never makes the key writable.",
-    "out_of_scope": "Recognised and deliberately not imported (daily settlement and cash sections, plan §6.3). Neither blocks nor writes.",
+    "synthetic_only": "No real-statement acceptance. Preview only; a matching manual event may claim the row (plan §9.7). A synthetic evidence entry, when present, records that the synthetic fixture passed; it never makes the key writable.",
+    "out_of_scope": "Recognised and deliberately not imported (daily settlement and cash sections, plan §6.3; evidence sections). Neither blocks nor writes.",
     "unsupported": "A recognised economic row the first release does not support (plan §1.2). Blocks its batch and cannot be claimed by a manual event."
+  },
+  "mapping": {
+    "sections": {
+      "statement": ["statement", "报表"],
+      "accountInformation": ["account information", "账户信息"],
+      "trades": ["trades", "交易"],
+      "instruments": ["financial instrument information", "金融产品信息"],
+      "openPositions": ["open positions", "未平仓持仓"],
+      "cashReport": ["cash report"],
+      "markToMarket": ["mark-to-market performance summary"],
+      "statementOfFunds": ["statement of funds"]
+    },
+    "sectionSlugs": {
+      "trades": "trades",
+      "instruments": "financial_instrument_information",
+      "openPositions": "open_positions",
+      "cashReport": "cash_report",
+      "markToMarket": "mark_to_market",
+      "statementOfFunds": "statement_of_funds"
+    },
+    "columns": {
+      "account": ["clientaccountid", "account", "accountid", "account id", "账户"],
+      "underlyingSymbol": ["underlyingsymbol", "underlying symbol", "underlying", "底层"],
+      "underlyingConId": ["underlyingconid", "underlying conid"],
+      "symbol": ["symbol", "代码"],
+      "assetClass": ["assetclass", "asset class", "asset category", "assetcategory", "资产分类"],
+      "currency": ["currencyprimary", "currency", "货币"],
+      "dateTime": ["datetime", "date/time", "日期/时间"],
+      "tradeDate": ["tradedate", "trade date"],
+      "quantity": ["quantity", "qty", "数量"],
+      "price": ["tradeprice", "trade price", "t. price", "交易价格"],
+      "proceeds": ["proceeds", "收益"],
+      "commission": ["ibcommission", "comm/fee", "commission", "佣金/税", "佣金"],
+      "right": ["putcall", "put/call", "right", "type", "看跌/看涨"],
+      "strike": ["strike", "执行"],
+      "expiry": ["expiry", "expiration", "到期"],
+      "deliveryMonth": ["deliverymonth", "delivery month", "contractmonth", "contract month"],
+      "multiplier": ["multiplier", "乘数", "合约乘数"],
+      "conId": ["conid", "con id", "合约编号"],
+      "tradeId": ["tradeid", "trade id", "交易编号"],
+      "execId": ["ibexecid", "execid", "exec id"],
+      "orderId": ["iborderid", "ib order id", "orderid", "order id"],
+      "exchange": ["listingexchange", "listing exch", "listing exchange", "exchange"],
+      "tradingClass": ["tradingclass", "trading class"],
+      "settlement": ["settlementtype", "settlement type", "deliverytype", "delivery type"],
+      "codes": ["notes/codes", "notes", "code", "codes", "代码", "备注/代码"],
+      "discriminator": ["datadiscriminator", "data discriminator"],
+      "description": ["description", "描述"],
+      "costPrice": ["costprice", "cost price"],
+      "realizedPnl": ["fifopnlrealized", "realized p/l", "realizedpnl", "已实现的损益"]
+    },
+    "assetClasses": {
+      "FUT": ["fut", "future", "futures", "期货"],
+      "FOP": ["fop", "futures options", "futures option", "options on futures", "期货期权"]
+    },
+    "codes": {
+      "assignment": "A",
+      "exercise": "EX",
+      "expiry": "EP",
+      "open": "O",
+      "close": "C"
+    },
+    "cashSettlement": ["cash", "cash_settled", "cash settled"],
+    "discriminators": {
+      "order": ["order"],
+      "execution": ["trade"],
+      "detail": ["closedlot", "closed lot"]
+    }
   },
   "keys": [
     { "key": "activity/trades/FUT/trade", "status": "synthetic_only", "evidence": [] },
@@ -28,10 +99,13 @@
     { "key": "flex/trades/FOP/exercise", "status": "synthetic_only", "evidence": [] },
     { "key": "flex/trades/FOP/expiry", "status": "synthetic_only", "evidence": [] },
     { "key": "flex/trades/FUT/delivery_leg", "status": "synthetic_only", "evidence": [] },
+    { "key": "activity/financial_instrument_information/FUT/reference", "status": "out_of_scope", "evidence": [] },
+    { "key": "activity/financial_instrument_information/FOP/reference", "status": "out_of_scope", "evidence": [] },
+    { "key": "activity/open_positions/FUT/position", "status": "out_of_scope", "evidence": [] },
+    { "key": "activity/open_positions/FOP/position", "status": "out_of_scope", "evidence": [] },
     { "key": "activity/cash_report/ALL/cash", "status": "out_of_scope", "evidence": [] },
     { "key": "activity/mark_to_market/ALL/summary", "status": "out_of_scope", "evidence": [] },
-    { "key": "flex/cash_report/ALL/cash", "status": "out_of_scope", "evidence": [] },
-    { "key": "flex/statement_of_funds/ALL/cash", "status": "out_of_scope", "evidence": [] },
+    { "key": "activity/statement_of_funds/ALL/cash", "status": "out_of_scope", "evidence": [] },
     { "key": "activity/trades/FOP.cash_settled/any", "status": "unsupported", "evidence": [] },
     { "key": "flex/trades/FOP.cash_settled/any", "status": "unsupported", "evidence": [] },
     { "key": "activity/trades/FOP.nonpositive_strike/any", "status": "unsupported", "evidence": [] },

@@ -47,10 +47,13 @@ from pathlib import Path
 from cost_basis_fop_store import FopLedgerMixin
 from portfolio_store import default_app_data_dir
 
-SCHEMA_USER_VERSION = 11
+SCHEMA_USER_VERSION = 12
 # The last schema without the FOP tables. A fresh database is created at this
-# version and then migrated like any other, so every v11 file has one shape.
+# version and then migrated like any other, so every current file has one shape.
 _V10_USER_VERSION = 10
+# v11 (the P2 and P3 builds) is v12 without imports in the FOP request log:
+# v10 goes straight to v12, and a v11 file only rebuilds that one table.
+_V11_USER_VERSION = 11
 # Tables that name a book_id without a foreign key. The v11 rebuild must not
 # leave any of them pointing at a book it lost; rows left behind by deletions
 # made before v11 cleaned these tables are kept, not deleted, and reported.
@@ -282,6 +285,18 @@ class FopOrderingAmbiguousError(CostBasisStoreError):
     """Events whose order changes a result and that no evidence orders (plan §9.2)."""
 
     code = 'fop_ordering_ambiguous'
+
+
+class FopCapabilityNotVerifiedError(CostBasisStoreError):
+    """A statement row whose row type has no real-statement acceptance (plan §9.7)."""
+
+    code = 'fop_capability_not_verified'
+
+
+class FopUnsupportedRowError(CostBasisStoreError):
+    """A statement row of a product the first release does not support (plan §1.2)."""
+
+    code = 'fop_unsupported_row'
 
 
 def _reject_frozen_sec_type(sec_type, action):
@@ -818,13 +833,14 @@ _V11_STATEMENTS = (
         book_id        TEXT NOT NULL REFERENCES cost_basis_books(book_id),
         action         TEXT NOT NULL CHECK (action IN (
                            'append', 'void', 'metadata', 'reset', 'restore_reset',
-                           'restore_backup', 'rebuild')),
+                           'restore_backup', 'rebuild', 'import')),
         request_digest TEXT NOT NULL CHECK (length(request_digest) = 64),
         result_json    TEXT NOT NULL,
         created_at_utc TEXT NOT NULL
     )
     """,
 )
+_FOP_REQUESTS_STATEMENT = _V11_STATEMENTS[-1]
 
 
 def resolve_db_path(config=None, env=None, platform=None):
@@ -1847,7 +1863,7 @@ def _validate_delivery_direction(kind, event):
 
 class CostBasisStore(FopLedgerMixin):
     def __init__(self, db_path, *, now=None, fault_hook=None, fop_writes_enabled=False,
-                 display_timezone='America/New_York', credential_key=None):
+                 display_timezone='America/New_York', credential_key=None, fop_capabilities=None):
         self._db_path = Path(db_path)
         self._now = now or (lambda: datetime.now(timezone.utc))
         # FOP ledger writes stay closed until the release stage (plan §13.3
@@ -1859,6 +1875,10 @@ class CostBasisStore(FopLedgerMixin):
         # Signs the expiring evidence credentials of verified bindings; a new
         # process invalidates every outstanding one (plan §4.3).
         self._credential_key = credential_key or secrets.token_bytes(32)
+        # The statement row types this store accepts (plan §9.7): the shipped
+        # cost_basis_fop_capabilities.json unless a test stands in for a real
+        # acceptance with its own cost_basis_fop_statement.Capabilities.
+        self._fop_capabilities = fop_capabilities
         # Tests name a point ('migrate_v11_after_copy', ...) and raise there to
         # prove a failure anywhere leaves every table as it was.
         self._fault_hook = fault_hook
@@ -2016,6 +2036,8 @@ class CostBasisStore(FopLedgerMixin):
             version = 10
         if version == 10:
             self._migrate_v10_to_v11(conn)
+        elif version == _V11_USER_VERSION:
+            self._migrate_v11_to_v12(conn)
 
     def _backup_before_migration(self, conn, version):
         """Write a consistent copy of the ledger next to it and verify it.
@@ -2129,6 +2151,42 @@ class CostBasisStore(FopLedgerMixin):
         if self.last_migration is not None:
             self.last_migration['preservedOrphans'] = {
                 table: sum(rows.values()) for table, rows in orphans_before.items() if rows}
+
+    def _migrate_v11_to_v12(self, conn):
+        """Let the FOP request log hold imports (plan §9.1, P4).
+
+        A v11 file (written by the P2 and P3 builds) differs from v12 only in
+        the action CHECK of cost_basis_fop_requests, which SQLite cannot alter:
+        the table is renamed, created again from the current statement, copied
+        row by row and the old copy dropped. Nothing references the table, so
+        foreign keys stay on. Every logged request must come through; otherwise
+        the transaction rolls back and the file stays at v11.
+        """
+        conn.execute('BEGIN IMMEDIATE')
+        try:
+            before = [tuple(row) for row in conn.execute(
+                'SELECT * FROM cost_basis_fop_requests ORDER BY client_token')]
+            conn.execute('ALTER TABLE cost_basis_fop_requests RENAME TO cost_basis_fop_requests_v11')
+            conn.execute(_FOP_REQUESTS_STATEMENT)
+            conn.execute('INSERT INTO cost_basis_fop_requests (client_token, book_id, action, '
+                         'request_digest, result_json, created_at_utc) SELECT client_token, book_id, '
+                         'action, request_digest, result_json, created_at_utc '
+                         'FROM cost_basis_fop_requests_v11')
+            self._fault('migrate_v12_after_copy')
+            conn.execute('DROP TABLE cost_basis_fop_requests_v11')
+            after = [tuple(row) for row in conn.execute(
+                'SELECT * FROM cost_basis_fop_requests ORDER BY client_token')]
+            if after != before:
+                raise StoreUnavailableError(
+                    'the v12 migration did not carry every logged request unchanged; nothing changed')
+            if conn.execute('PRAGMA foreign_key_check').fetchall():
+                raise StoreUnavailableError('the v12 migration left foreign key violations; nothing changed')
+            self._fault('migrate_v12_before_commit')
+            conn.execute(f'PRAGMA user_version = {SCHEMA_USER_VERSION}')
+            conn.execute('COMMIT')
+        except BaseException:
+            conn.execute('ROLLBACK')
+            raise
 
     @staticmethod
     def _migrate_v2_to_v4(conn):

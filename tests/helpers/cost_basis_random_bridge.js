@@ -4,7 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const readline = require('node:readline');
 const { loadBrowserScripts } = require('./load-browser-scripts');
-const c = loadBrowserScripts(['js/cost_basis_core.js', 'js/cost_basis_import.js', 'js/cost_basis.js']);
+const c = loadBrowserScripts(['js/cost_basis_core.js', 'js/cost_basis_import_common.js', 'js/cost_basis_import.js', 'js/cost_basis.js']);
 const root = path.resolve(__dirname, '../..');
 vm.runInContext(fs.readFileSync(path.join(root, 'js/cost_basis.js'), 'utf8').replace(
     'globalScope.OptionComboCostBasisPage = {',

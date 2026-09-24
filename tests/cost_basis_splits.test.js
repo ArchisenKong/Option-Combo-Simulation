@@ -20,14 +20,14 @@ function loadCore() {
 }
 
 function loadImport() {
-    return loadBrowserScripts(['js/cost_basis_import.js']).OptionComboCostBasisImport;
+    return loadBrowserScripts(['js/cost_basis_import_common.js', 'js/cost_basis_import.js']).OptionComboCostBasisImport;
 }
 
 function loadPage() {
     return loadBrowserScripts([
         'js/cost_basis_core.js',
         'js/american_binomial.js',
-        'js/cost_basis_import.js',
+        'js/cost_basis_import_common.js', 'js/cost_basis_import.js',
         'js/cost_basis.js',
     ]).OptionComboCostBasisPage;
 }
@@ -870,7 +870,7 @@ module.exports = {
             name: 'batch TWS reconciliation accepts a close of the converted series',
             run() {
                 const context = loadBrowserScripts(['js/cost_basis_core.js',
-                    'js/american_binomial.js', 'js/cost_basis_import.js', 'js/cost_basis.js']);
+                    'js/american_binomial.js', 'js/cost_basis_import_common.js', 'js/cost_basis_import.js', 'js/cost_basis.js']);
                 const core = context.OptionComboCostBasisCore;
                 const page = context.OptionComboCostBasisPage;
                 sequence = 0;

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>FOP 成本账本 — Option Combo Simulator</title>
-    <link rel="stylesheet" href="cost_basis_fop.css?v=c3cb225a9f4d">
+    <link rel="stylesheet" href="cost_basis_fop.css?v=297831611007">
 </head>
 <body>
     <header class="fop-header">
@@ -45,6 +45,49 @@
             <h3>股票 / ETF 账本</h3>
             <ul class="fop-book-list" id="equity-book-list"></ul>
         </section>
+
+        <section class="fop-card" id="preview-view" aria-labelledby="preview-title">
+            <h2 id="preview-title">CSV 只读预览</h2>
+            <p class="fop-state">选择一份 IBKR Activity Statement 或 Flex 成交导出，查看每一行如何识别、会产生哪些事件、哪些问题会阻断导入。
+                预览只在浏览器里进行：不建账、不写入，也不向后端发送任何写请求。</p>
+            <div class="fop-form">
+                <label for="preview-file">报表 CSV</label>
+                <input type="file" id="preview-file" accept=".csv,text/csv" disabled>
+                <label for="preview-zone">账户时区</label>
+                <input type="text" id="preview-zone" list="preview-zones" autocomplete="off" spellcheck="false"
+                    placeholder="留空则用报表自带时区">
+                <datalist id="preview-zones">
+                    <option value="America/New_York"></option>
+                    <option value="America/Chicago"></option>
+                    <option value="Asia/Shanghai"></option>
+                    <option value="Asia/Hong_Kong"></option>
+                    <option value="Europe/London"></option>
+                    <option value="Etc/UTC"></option>
+                </datalist>
+                <label for="preview-scope">账本范围</label>
+                <select id="preview-scope">
+                    <option value="full_history">完整历史</option>
+                    <option value="since_baseline">自基线起</option>
+                </select>
+            </div>
+            <p class="fop-state" id="preview-status" role="status">连接后端、取得报表行类型清单后可用。</p>
+            <div id="preview-result" hidden>
+                <dl class="fop-identity" id="preview-summary"></dl>
+                <h3>阻断问题</h3>
+                <ul class="fop-issues" id="preview-problems"></ul>
+                <h3>提示</h3>
+                <ul class="fop-issues" id="preview-warnings"></ul>
+                <h3>演算结果</h3>
+                <p class="fop-state" id="preview-results-note"></p>
+                <div class="fop-table-wrap" id="preview-results"></div>
+                <h3>事件</h3>
+                <div class="fop-table-wrap" id="preview-events"></div>
+                <h3>数量证明</h3>
+                <div class="fop-table-wrap" id="preview-proof"></div>
+                <h3>逐行识别</h3>
+                <div class="fop-table-wrap" id="preview-rows"></div>
+            </div>
+        </section>
     </main>
 
     <footer class="fop-footer">
@@ -52,7 +95,10 @@
         <a href="cost_basis.html">股票 / ETF 成本账本</a>
     </footer>
 
-    <script src="js/cost_basis_common.js?v=ba13b97879a0"></script>
-    <script src="js/cost_basis_fop.js?v=f0066c03c2ed"></script>
+    <script src="js/cost_basis_common.js?v=ad7210faa465"></script>
+    <script src="js/cost_basis_import_common.js?v=68181c7c6bc1"></script>
+    <script src="js/cost_basis_fop_core.js?v=fe44fc4f6c5d"></script>
+    <script src="js/cost_basis_fop_import.js?v=1dcb5b528ab7"></script>
+    <script src="js/cost_basis_fop.js?v=b1306a4cebaa"></script>
 </body>
 </html>

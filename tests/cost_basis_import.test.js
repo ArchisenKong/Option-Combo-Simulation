@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { loadBrowserScripts } = require('./helpers/load-browser-scripts');
 
 function loadImport() {
-    const context = loadBrowserScripts(['js/cost_basis_import.js']);
+    const context = loadBrowserScripts(['js/cost_basis_import_common.js', 'js/cost_basis_import.js']);
     return context.OptionComboCostBasisImport;
 }
 

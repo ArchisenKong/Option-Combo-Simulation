@@ -10,7 +10,7 @@
     { "wsAction": "void_cost_basis_event", "storeMethod": "void_event", "p0": "FUT refused", "fop": "P2: dependent delivery sources, fee sources and boundary anchors resolved in the same transaction", "fopStoreMethod": "void_fop_event" },
     { "wsAction": "append_cost_basis_split_group", "storeMethod": "append_split_group", "p0": "FUT refused", "fop": "never: stock only", "fopStoreMethod": null },
     { "wsAction": "void_cost_basis_split_group", "storeMethod": "void_split_group", "p0": "FUT refused", "fop": "never: stock only", "fopStoreMethod": null },
-    { "wsAction": "import_cost_basis_events", "storeMethod": "import_events", "p0": "FUT refused", "fop": "P4: fopPackage with sources; only real_verified capability keys", "fopStoreMethod": null },
+    { "wsAction": "import_cost_basis_events", "storeMethod": "import_events", "p0": "FUT refused", "fop": "P4: fopPackage with sources; repeated references compared, only real_verified capability keys or matching manual claims, superseded TWS executions voided", "fopStoreMethod": "import_fop_events" },
     { "wsAction": "reset_cost_basis_book", "storeMethod": "reset_book", "p0": "FUT refused", "fop": "P2: archives the whole FOP graph", "fopStoreMethod": "reset_fop_book" },
     { "wsAction": "rebuild_cost_basis_book", "storeMethod": "rebuild_book", "p0": "FUT refused", "fop": "P2/P4: whole-graph replacement with an event id mapping", "fopStoreMethod": "rebuild_fop_book" },
     { "wsAction": "restore_cost_basis_reset", "storeMethod": "restore_book_reset", "p0": "FUT refused", "fop": "P2: whole-graph restore", "fopStoreMethod": "restore_fop_graph" },
@@ -24,7 +24,7 @@
     "list_cost_basis_resets", "list_cost_basis_snapshots", "export_cost_basis_backup",
     "request_cost_basis_delete_plan", "request_cost_basis_reset_plan", "request_cost_basis_status",
     "request_cost_basis_executions", "request_cost_basis_market_price", "request_cost_basis_option_scenario_inputs",
-    "request_cost_basis_fop_contract_details"
+    "request_cost_basis_fop_contract_details", "request_cost_basis_fop_statement_bindings"
   ],
   "planned": [
     { "wsAction": "request_cost_basis_fop_market_snapshot", "writes": false, "stage": "P5", "role": "one quote batch for the ledger's contracts" }

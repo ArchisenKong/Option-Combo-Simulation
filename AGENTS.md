@@ -60,19 +60,31 @@ Do not assume a bare `python` command will work in every shell, especially on Wi
   - standalone FOP ledger, built in phases by
     `CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`; the phase record is
     `CODE PLAN/COST_BASIS_FOP_VALIDATION.md`
-  - loads only `js/cost_basis_common.js` and `js/cost_basis_fop.js`: never the
-    stock ledger core or the trading shell
-  - currently routes only: a stock ledger goes to `cost_basis.html`, a FUT
-    ledger shows its identity; it may send only the status and ledger-list
-    actions and writes nothing
+  - loads `js/cost_basis_common.js`, the FOP statement importer
+    (`js/cost_basis_import_common.js`, `js/cost_basis_fop_import.js`), the FOP
+    core `js/cost_basis_fop_core.js` and its controller `js/cost_basis_fop.js`:
+    never the stock ledger core or the trading shell
+  - routes ledgers (a stock ledger goes to `cost_basis.html`, a FUT ledger
+    shows its identity) and previews a statement CSV without a ledger, in the
+    browser, against the row-type list the status response carries; it may
+    send only the status and ledger-list actions and writes nothing
   - the frozen contract (DDL draft, protocol, core output) lives in
     `tests/fixtures/cost_basis_fop/contract/`; `node tests/run_cost_basis_fop.js
     --stage <P>` runs the phase suites
-  - its economic core is `js/cost_basis_fop_core.js` (DOM-free, not loaded by
-    the page until the page stage): it replays the exported ledger graph and
+  - its economic core is `js/cost_basis_fop_core.js` (DOM-free; the page uses
+    it only for the read-only preview so far): it replays the exported ledger graph and
     must keep reproducing `tests/fixtures/cost_basis_fop/core_vectors.json`,
     whose numbers come from the plan and the independent rational model
     `tests/helpers/cost_basis_fop_model.py`, never from production code
+  - its statement importer is `js/cost_basis_fop_import.js` (DOM-free, not
+    loaded by the page until the page stage): it reads Activity and Flex CSVs
+    through the shared lexical layer `js/cost_basis_import_common.js` (also
+    used by the stock importer; only lexical tools belong there) and builds
+    the exact import request the store checks. Row types and their status
+    live in `cost_basis_fop_capabilities.json`; every economic row type is
+    `synthetic_only` until a de-identified real statement accepts it (plan
+    §9.7), so tests that write statement rows stand in with
+    `cost_basis_fop_test_support.verified_capabilities()`
 
 - `workspace_db_admin.html`
   - standalone, loopback-only admin page for the workspace database and its
@@ -152,10 +164,12 @@ Do not assume a bare `python` command will work in every shell, especially on Wi
     the standalone FOP ledger in `cost_basis_fop_store.py` (mixed into the
     store), `cost_basis_fop_domain.py` (pure rules), `cost_basis_fop_schema.py`
     (frozen message types from `cost_basis_fop_protocol.json`, which must stay
-    equal to the contract fixture) and `cost_basis_fop_broker.py` (read-only
-    contract resolution). FOP writes stay behind `fop_writes_enabled`, off in
-    both servers until the plan's release stage; the v11 migration takes a
-    verified copy of `cost_basis.db` before it changes anything
+    equal to the contract fixture), `cost_basis_fop_broker.py` (read-only
+    contract resolution) and `cost_basis_fop_statement.py` (the server's own
+    reading of statement rows for capabilities, manual claims and statement
+    binding credentials). FOP writes stay behind `fop_writes_enabled`, off in
+    both servers until the plan's release stage; the schema migration (v12)
+    takes a verified copy of `cost_basis.db` before it changes anything
 - Both `websockets.serve` calls must share the explicit
   `[server] max_ws_message_bytes` size. The library's 1 MiB default would
   1009-close a socket that is also carrying order supervision.

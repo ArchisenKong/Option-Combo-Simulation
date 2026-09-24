@@ -51,6 +51,7 @@
         // P5/P6); the FOP page reaches them through FOP packages only.
         { action: 'commit_cost_basis_fop_metadata', writes: true, pages: [] },
         { action: 'request_cost_basis_fop_contract_details', writes: false, pages: [] },
+        { action: 'request_cost_basis_fop_statement_bindings', writes: false, pages: [] },
     ].map((entry) => Object.freeze(Object.assign({}, entry, {
         pages: Object.freeze(entry.pages.slice()),
     }))));

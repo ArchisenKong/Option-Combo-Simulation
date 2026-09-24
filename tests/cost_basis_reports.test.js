@@ -24,7 +24,7 @@ function findReport(suffix) {
 
 function loadRuntime() {
     const context = loadBrowserScripts([
-        'js/cost_basis_import.js', 'js/cost_basis_core.js',
+        'js/cost_basis_import_common.js', 'js/cost_basis_import.js', 'js/cost_basis_core.js',
     ]);
     return {
         importer: context.OptionComboCostBasisImport,

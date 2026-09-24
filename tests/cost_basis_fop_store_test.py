@@ -29,7 +29,7 @@ from cost_basis_fop_store import FOP_GRAPH_TABLES, FOP_TABLES  # noqa: E402
 import cost_basis_fop_schema as schema  # noqa: E402
 from cost_basis_fop_test_support import (  # noqa: E402
     CLZ6, FOP_META, IDENTITY, LOZ6, MANUAL_BINDING, FopLedger, at, example_event, in_range,
-    package, previous_build, token,
+    package, previous_build, token, verified_capabilities,
 )
 from cost_basis_store import (  # noqa: E402
     SCHEMA_USER_VERSION, BookExistsError, CostBasisStore, EventAlreadyVoidedError,
@@ -155,7 +155,7 @@ class MigrationTests(unittest.TestCase):
         self.schema_before = _schema(self.db_path)
 
     def backups(self):
-        return sorted(self.dir.glob('cost_basis.pre-v11-*.db'))
+        return sorted(self.dir.glob('cost_basis.pre-v12-*.db'))
 
     def assert_untouched_v10(self):
         self.assertEqual(_pragma(self.db_path, 'PRAGMA user_version')[0][0], 10)
@@ -301,6 +301,62 @@ class MigrationTests(unittest.TestCase):
         for table in ('cost_basis_import_batches', 'cost_basis_book_resets', 'cost_basis_reset_coverage'):
             self.assertEqual(_pragma(self.db_path, f"SELECT * FROM {table} WHERE book_id = '{self.stock_book}'"),
                              [], table)
+
+    def _as_v11(self):
+        """The file as the P2 and P3 builds left it: v12 without imports in the request log."""
+        old = cost_basis_store._FOP_REQUESTS_STATEMENT.replace("'rebuild', 'import'", "'rebuild'")
+        self.assertNotEqual(old, cost_basis_store._FOP_REQUESTS_STATEMENT)
+        conn = _raw(self.db_path)
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            conn.execute('ALTER TABLE cost_basis_fop_requests RENAME TO requests_v12')
+            conn.execute(old)
+            conn.execute('INSERT INTO cost_basis_fop_requests SELECT * FROM requests_v12')
+            conn.execute('DROP TABLE requests_v12')
+            conn.execute('PRAGMA user_version = 11')
+            conn.execute('COMMIT')
+        finally:
+            conn.close()
+
+    def test_a_v11_ledger_rebuilds_only_its_request_log(self):
+        # P4: the request log holds imports (plan §9.1). A v11 file written by
+        # the P2 and P3 builds rebuilds that one table behind a verified backup.
+        ledger = FopLedger(self.db_path)
+        ledger.append(at(example_event('FUT trade: cash is minus fees, notional stays out'), T_FUT),
+                      contracts=[CLZ6])
+        for backup in self.backups():
+            backup.unlink()
+        self._as_v11()
+        requests = _rows(self.db_path, 'cost_basis_fop_requests')
+        self.assertEqual(len(requests), 1)
+        others = {table: _rows(self.db_path, table) for table in _all_tables(self.db_path)
+                  if table != 'cost_basis_fop_requests'}
+        store = CostBasisStore(self.db_path).initialize()
+        self.assertEqual(store.last_migration['fromVersion'], 11)
+        self.assertEqual(_pragma(self.db_path, 'PRAGMA user_version')[0][0], SCHEMA_USER_VERSION)
+        self.assertEqual(_rows(self.db_path, 'cost_basis_fop_requests'), requests)
+        for table, rows in others.items():
+            self.assertEqual(_rows(self.db_path, table), rows, table)
+        [backup] = self.backups()
+        self.assertIn('-from-v11-', backup.name)
+        self.assertEqual(_pragma(backup, 'PRAGMA user_version')[0][0], 11)
+        fresh = self.dir / 'fresh.db'
+        CostBasisStore(fresh).initialize()
+        self.assertEqual(_schema(self.db_path), _schema(fresh))
+        self.assertEqual(_pragma(self.db_path, 'PRAGMA foreign_key_check'), [])
+
+    def test_a_failed_v12_step_leaves_the_v11_file(self):
+        FopLedger(self.db_path)
+        self._as_v11()
+        schema = _schema(self.db_path)
+        for point in ('migrate_v12_after_copy', 'migrate_v12_before_commit'):
+            with self.subTest(point=point):
+                with self.assertRaises(InjectedFault):
+                    CostBasisStore(self.db_path, fault_hook=_fault_at(point)).initialize()
+                self.assertEqual(_pragma(self.db_path, 'PRAGMA user_version')[0][0], 11)
+                self.assertEqual(_schema(self.db_path), schema)
+        CostBasisStore(self.db_path).initialize()
+        self.assertEqual(_pragma(self.db_path, 'PRAGMA user_version')[0][0], SCHEMA_USER_VERSION)
 
 
 T_FUT = '2026-10-01T14:30:05.000000Z'
@@ -1391,8 +1447,14 @@ class GraphTests(unittest.TestCase):
                      'periodThrough': '2026-10-01', 'checks': {}, 'confirmedDuplicates': 0}
         event, tws_record = tws(fut_trade(), 'shared-reference-001', 1, 2.02)
         tws_record.update(statedQuantity=2, statedFees=4.04)
+        # The server reads a statement row's type from its own fields (P4 review).
         ib_record = dict(tws_record, namespace='ib_exec', format='flex_csv', section='Trades',
-                         statedQuantity=1, statedFees=2.02)
+                         capabilityKey='flex/trades/FUT/trade', statedQuantity=1, statedFees=2.02,
+                         rawFields={'AssetClass': 'FUT', 'Symbol': 'CLZ6', 'IBExecID': 'shared-reference-001',
+                                    'Quantity': '1', 'TradePrice': '70', 'IBCommission': '-2.02',
+                                    'Notes/Codes': 'O'})
+        # A statement row writes only once its row type is verified (plan §9.7, P4).
+        self.store._fop_capabilities = verified_capabilities()
         tws_source = event['sources'][0]
         ib_source = dict(tws_source, namespace='ib_exec')
         for order in ('tws first', 'ib first'):

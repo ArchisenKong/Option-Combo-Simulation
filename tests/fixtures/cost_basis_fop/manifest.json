@@ -66,7 +66,7 @@
         { "name": "a ledger routes by the type the backend reports, never by the URL", "requirements": ["F01 (routing)", "F02 (P1 part: same root, separate pages)"] },
         { "name": "a bookId is read from the URL only when it is a well-formed token", "requirements": ["F01 (bookmarks)"] },
         { "name": "the request client enforces its allowlist and settles every request once", "requirements": ["F27 (P1 part)", "F23 (P1 part: one settlement per request)"] },
-        { "name": "the FOP page loads only the common layer and its own controller", "requirements": ["F27 (P1 part)"] },
+        { "name": "the FOP page loads the common layer, the FOP importer and core, and its own controller", "requirements": ["F27 (P1 part)", "P4 step 6 (the read-only preview loads the importer and core)"] },
         { "name": "a stock ledger opened on the FOP page is sent back before anything renders", "requirements": ["F01 (wrong page)", "F02 (P1 part)"] },
         { "name": "a FUT ledger shows only its identity and the way to the legacy view", "requirements": ["F01 (P1 part)", "F38 (P1 part)"] },
         { "name": "a FOP ledger is not described as a legacy ledger", "requirements": ["F01 (P2 part)"] },
@@ -158,7 +158,9 @@
         { "name": "GraphTests.test_a_restore_takes_the_history_scope_of_its_backup", "requirements": ["F25 (P2 part: a restore keeps the history scope)"] },
         { "name": "GraphTests.test_one_event_closes_one_cycle_on_every_path", "requirements": ["F39 (P2 part: one cycle per anchor after a restore)", "F14 (P2 part)"] },
         { "name": "GraphTests.test_a_round_trip_keeps_each_events_primary_source", "requirements": ["F25 (P2 part: evidence identity survives a round trip)", "F24 (P2 part: one source, several events)"] },
-        { "name": "GraphTests.test_a_restored_ledger_answers_retried_requests", "requirements": ["F24 (P2 part: a retry writes once after a restore into a new database)", "F40 (P2 part: same token, other content refused)"] }
+        { "name": "GraphTests.test_a_restored_ledger_answers_retried_requests", "requirements": ["F24 (P2 part: a retry writes once after a restore into a new database)", "F40 (P2 part: same token, other content refused)"] },
+        { "name": "MigrationTests.test_a_v11_ledger_rebuilds_only_its_request_log", "requirements": ["P4: schema v12", "F45 (P4 part)"] },
+        { "name": "MigrationTests.test_a_failed_v12_step_leaves_the_v11_file", "requirements": ["P4: schema v12", "F45 (P4 part)"] }
       ]
     },
     {
@@ -189,7 +191,8 @@
         { "name": "FopProtocolTests.test_the_default_backend_keeps_fop_writes_closed", "requirements": ["F38 (P2 part)"] },
         { "name": "FopProtocolTests.test_contract_details_are_served_only_where_a_resolver_exists", "requirements": ["F26 (P2 part: historical backend)", "F05 (P2 part)"] },
         { "name": "FopProtocolTests.test_one_failing_request_answers_its_own_request_id", "requirements": ["F26 (P2 part)"] },
-        { "name": "FopProtocolTests.test_every_fop_write_names_the_engine_it_was_prepared_for", "requirements": ["F38 (P2 part: every write names its engine)", "F26 (P2 part)"] }
+        { "name": "FopProtocolTests.test_every_fop_write_names_the_engine_it_was_prepared_for", "requirements": ["F38 (P2 part: every write names its engine)", "F26 (P2 part)"] },
+        { "name": "FopProtocolTests.test_a_statement_import_and_its_bindings_go_through_the_protocol", "requirements": ["F26 (P4 part)", "F44", "P4 step 2"] }
       ]
     },
     {
@@ -241,10 +244,133 @@
         { "name": "RandomHistoryTests.test_random_as_of_views_are_sound", "requirements": ["F46 (P3 part)", "F22 (P3 part)", "F36 (P3 part)"] },
         { "name": "RandomHistoryTests.test_random_histories_through_the_store_agree_with_the_model", "requirements": ["P3 step 2"] }
       ]
+    },
+    {
+      "stage": "P4",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_import.test.js",
+      "name": "cost_basis_fop_import",
+      "cases": [
+        { "name": "an Activity Statement gives its account, period, timezone and a key per row", "requirements": ["F44 (P4 part: keys and statuses)", "F17"] },
+        { "name": "a Flex export is one flat table whose period is what its rows span", "requirements": ["F21", "F22"] },
+        { "name": "Chinese headers, a byte order mark and the two 代码 columns read like English", "requirements": ["F21"] },
+        { "name": "rows of another root or asset class belong to another ledger", "requirements": ["plan §9.2 root filter"] },
+        { "name": "a delivery month comes from a delivery-month field or the local symbol, never an expiry", "requirements": ["F03 (P4 part)", "F04 (P4 part)"] },
+        { "name": "account-local times become instants or ranges in one named zone", "requirements": ["F22"] },
+        { "name": "an order row is read through its executions, which must add up to it", "requirements": ["F21", "P4 step 1"] },
+        { "name": "a masked account needs a confirmation for this file", "requirements": ["plan §9.1"] },
+        { "name": "identical statement rows stay two fills with stable references", "requirements": ["F21", "F31"] },
+        { "name": "rows of one second carry no order: an order that changes the result blocks", "requirements": ["F41 (P4 part)", "plan §9.2", "P4 review 2"] },
+        { "name": "a Trades row of an unknown kind blocks; a closed lot is listed and left out", "requirements": ["plan §9.4", "P4 step 1", "P4 review 6"] },
+        { "name": "a stored contract is held to every term a row states", "requirements": ["plan §9.1 (every FOP field takes part)", "F05 (P4 part)", "P4 review 3"] },
+        { "name": "a preview without a ledger reads the statement account and builds no request", "requirements": ["P4 step 6 (read-only preview)", "plan §9.1 (masked account)"] },
+        { "name": "a product outside the first release is keyed as unsupported and blocks", "requirements": ["F44", "F15 (P4 part)"] },
+        { "name": "a claimed row becomes a manual event that still names its row", "requirements": ["F44"] }
+      ]
+    },
+    {
+      "stage": "P4",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_import_pipeline.test.js",
+      "name": "cost_basis_fop_import_pipeline",
+      "cases": [
+        { "name": "the page builds a request the frozen contract accepts", "requirements": ["P4 step 2"] },
+        { "name": "a preview with a blocking problem yields no request", "requirements": ["P4 step 2", "F22"] },
+        { "name": "a statement without trades builds a request that only registers its period", "requirements": ["F20 (P4 part)", "plan §9.5 item 5", "P4 review 7"] },
+        { "name": "a statement over the event limit splits into requests the contract accepts", "requirements": ["F32 (P4 part)", "P4 step 5"] }
+      ]
+    },
+    {
+      "stage": "P4",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_preview.test.js",
+      "name": "cost_basis_fop_preview",
+      "cases": [
+        { "name": "a statement previews without a ledger: rows, events, proof and the replayed result", "requirements": ["P4 step 6 (read-only preview)", "F44 (P4 part: keys shown)", "§9.6"] },
+        { "name": "a blocked statement lists its problems and replays nothing", "requirements": ["P4 step 6 (read-only preview)", "plan §9.4"] },
+        { "name": "the page previews a chosen file and sends nothing but its two reads", "requirements": ["P4 step 6 (read-only preview)", "F38 (P4 part: no FOP writes)", "F27 (P4 part)"] },
+        { "name": "without the backend row-type list the preview stays off", "requirements": ["P4 step 6 (read-only preview)", "F44"] }
+      ]
+    },
+    {
+      "stage": "P4",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_import_pipeline_test.py",
+      "cases": [
+        { "name": "FullHistoryPathTests.test_the_three_rolls_from_one_statement", "requirements": ["F29 (P4 part)", "F30 (P4 part)", "F31", "§9.6"] },
+        { "name": "FullHistoryPathTests.test_monthly_statements_across_the_year_end", "requirements": ["F29 (P4 part)", "F30 (P4 part)", "F31", "§9.6"] },
+        { "name": "FullHistoryPathTests.test_overlapping_statements_count_each_fill_once", "requirements": ["F29 (P4 part)", "F30 (P4 part)", "F31", "§9.6"] },
+        { "name": "FullHistoryPathTests.test_a_flex_export_of_the_same_history_gives_the_same_ledger", "requirements": ["F29 (P4 part)", "F30 (P4 part)", "F31", "§9.6"] },
+        { "name": "CrossFormatTests.test_flex_then_activity_and_back_add_nothing_twice", "requirements": ["F21", "F22", "F11 (P4 part)", "F20"] },
+        { "name": "CrossFormatTests.test_chinese_headers_and_a_byte_order_mark_read_the_same", "requirements": ["F21", "F22", "F11 (P4 part)", "F20"] },
+        { "name": "CrossFormatTests.test_an_order_and_its_executions_without_an_order_reference_are_not_taken_for_each_other", "requirements": ["F21 (P4 part: order and executions)", "plan §9.1", "P4 review 1"] },
+        { "name": "CrossFormatTests.test_an_order_and_its_executions_count_once_through_their_order_reference", "requirements": ["F21 (P4 part: order and executions)", "P4 step 4 (summary and executions)", "P4 review 1", "P4 review 3"] },
+        { "name": "CrossFormatTests.test_a_separate_fill_of_a_stored_day_is_never_dropped_as_a_duplicate", "requirements": ["F21", "P4 review 1"] },
+        { "name": "CrossFormatTests.test_the_same_fill_with_other_fees_or_another_underlying_future_is_a_conflict", "requirements": ["F21", "F22", "plan §9.1 (every FOP field takes part)", "P4 review 3"] },
+        { "name": "CrossFormatTests.test_order_rows_must_add_up_to_their_executions", "requirements": ["F21", "F22", "F11 (P4 part)", "F20"] },
+        { "name": "CrossFormatTests.test_a_statement_supersedes_the_tws_leg_it_repeats", "requirements": ["F21", "F22", "F11 (P4 part)", "F20"] },
+        { "name": "CrossFormatTests.test_a_flex_execution_id_supersedes_the_same_tws_execution", "requirements": ["F21", "F22", "F11 (P4 part)", "F20"] },
+        { "name": "CrossFormatTests.test_a_statement_period_without_a_tws_fill_is_not_covered", "requirements": ["F21", "F22", "F11 (P4 part)", "F20"] },
+        { "name": "CrossFormatTests.test_times_are_read_in_the_statement_zone", "requirements": ["F21", "F22", "F11 (P4 part)", "F20"] },
+        { "name": "CrossFormatTests.test_a_night_session_keeps_its_exchange_trade_date", "requirements": ["F21", "F22", "F11 (P4 part)", "F20"] },
+        { "name": "CapabilityTests.test_every_row_shows_its_key_and_status_and_a_synthetic_row_does_not_write", "requirements": ["F44", "F17"] },
+        { "name": "CapabilityTests.test_a_matching_manual_claim_covers_a_synthetic_row", "requirements": ["F44", "F17"] },
+        { "name": "CapabilityTests.test_a_claim_that_differs_from_its_row_is_refused", "requirements": ["F44", "F17"] },
+        { "name": "CapabilityTests.test_a_claim_is_held_to_the_row_type_its_own_fields_read_as", "requirements": ["F44", "plan §9.7", "P4 review 4"] },
+        { "name": "CapabilityTests.test_a_claim_of_a_dated_row_is_held_to_the_range_the_server_works_out", "requirements": ["F44", "plan §9.2 (date-only range)", "P4 review 5"] },
+        { "name": "CapabilityTests.test_an_unsupported_row_blocks_and_cannot_be_claimed", "requirements": ["F44", "F17"] },
+        { "name": "CapabilityTests.test_cash_and_daily_settlement_sections_change_nothing", "requirements": ["F44", "F17"] },
+        { "name": "BaselineTests.test_a_full_history_ledger_needs_the_earlier_history", "requirements": ["F19 (P4 part)", "F42 (P4 part)"] },
+        { "name": "BaselineTests.test_a_baseline_ledger_starts_from_the_statement_and_the_history_replaces_it", "requirements": ["F19 (P4 part)", "F42 (P4 part)"] },
+        { "name": "BaselineTests.test_the_baseline_statement_imports_again_as_a_repeat", "requirements": ["F19 (P4 part)", "F21", "P4 review 8"] },
+        { "name": "BaselineTests.test_an_option_without_its_cost_opens_as_a_quantity_stub", "requirements": ["F19 (P4 part)", "F42 (P4 part)"] },
+        { "name": "BaselineTests.test_a_traded_future_needs_its_baseline_price", "requirements": ["F19 (P4 part)", "F42 (P4 part)"] },
+        { "name": "FailureTests.test_a_failure_part_way_leaves_every_table_and_the_coverage_as_they_were", "requirements": ["F24 (P4 part)", "F40 (P4 part)"] },
+        { "name": "FailureTests.test_a_revised_row_refuses_the_whole_import", "requirements": ["F24 (P4 part)", "F40 (P4 part)"] },
+        { "name": "FailureTests.test_a_binding_without_a_valid_credential_refuses_the_import", "requirements": ["F24 (P4 part)", "F40 (P4 part)"] },
+        { "name": "LimitTests.test_an_import_over_the_limit_is_refused_and_splits_into_periods", "requirements": ["F32 (P4 part)", "P4 step 5"] },
+        { "name": "LimitTests.test_a_rebuild_over_the_limit_is_refused_before_the_ledger_is_emptied", "requirements": ["F32 (P4 part)", "P4 step 5"] },
+        { "name": "LimitTests.test_a_missing_month_is_a_history_gap", "requirements": ["F32 (P4 part)", "P4 step 5"] },
+        { "name": "CoverageTests.test_a_month_missing_between_flat_statements_is_a_gap_until_its_statement_registers", "requirements": ["F20 (P4 part)", "plan §9.5 item 5", "P4 step 4 (period without trades)", "P4 review 7"] },
+        { "name": "CoverageTests.test_another_accounts_empty_statement_cannot_fill_a_coverage_gap", "requirements": ["F20 (P4 part)", "F24 (P4 part)", "plan §9.1 (account identity)", "P4 review 7 (coverage-only account guard)"] },
+        { "name": "CoverageTests.test_events_before_the_first_statement_are_uncovered_history", "requirements": ["plan §9.5 item 5", "P4 review 7"] },
+        { "name": "CoverageTests.test_an_import_without_events_names_its_statement_and_supersedes_nothing", "requirements": ["F24 (P4 part)", "plan §9.5 item 5", "P4 review 7"] },
+        { "name": "CycleTests.test_a_late_fee_stays_with_its_trade_and_a_repeat_changes_nothing", "requirements": ["F36 (P4 part)", "F39 (P4 part)", "F14 (P4 part)"] },
+        { "name": "CycleTests.test_a_backfilled_fill_that_reopens_a_closed_cycle_is_refused", "requirements": ["F36 (P4 part)", "F39 (P4 part)", "F14 (P4 part)"] },
+        { "name": "CycleTests.test_a_rebuild_from_statements_keeps_the_boundary_on_the_same_fill", "requirements": ["F36 (P4 part)", "F39 (P4 part)", "F14 (P4 part)"] },
+        { "name": "OrderTests.test_the_row_order_of_one_second_is_no_evidence_and_an_order_that_matters_blocks", "requirements": ["F41 (P4 part)", "plan §9.2", "P4 review 2"] },
+        { "name": "OrderTests.test_another_contract_in_the_same_second_changes_no_stored_row", "requirements": ["F21", "F41 (P4 part)", "P4 review 2"] },
+        { "name": "OrderTests.test_fills_with_only_a_trade_date_and_opposite_sides_are_refused_everywhere", "requirements": ["F41 (P4 part)"] },
+        { "name": "OrderTests.test_simultaneous_adds_need_no_order", "requirements": ["F41 (P4 part)"] },
+        { "name": "DeliveryTests.test_an_assignment_and_an_exercise_arrive_as_one_event_each", "requirements": ["F06 (P4 part)", "F07 (P4 part)"] },
+        { "name": "DeliveryTests.test_a_delivery_without_its_other_row_blocks", "requirements": ["F06 (P4 part)", "F07 (P4 part)"] },
+        { "name": "ReadOnlyPreviewTests.test_a_statement_previews_without_a_ledger", "requirements": ["P4 step 6"] },
+        { "name": "ReadOnlyPreviewTests.test_a_preview_over_a_ledger_writes_nothing", "requirements": ["P4 step 6"] }
+      ]
+    },
+    {
+      "stage": "P4",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_statement_test.py",
+      "cases": [
+        { "name": "CapabilityListTests.test_the_shipped_list_writes_nothing_until_a_real_acceptance", "requirements": ["F44"] },
+        { "name": "CapabilityListTests.test_each_status_decides_a_statement_row", "requirements": ["F44"] },
+        { "name": "ClaimTests.test_a_matching_manual_event_claims_its_row", "requirements": ["F44"] },
+        { "name": "ClaimTests.test_every_field_a_claim_states_is_checked", "requirements": ["F44"] },
+        { "name": "BindingEvidenceTests.test_rows_that_name_the_option_its_future_and_the_month_prove_the_binding", "requirements": ["plan §4.3", "F40 (P4 part)"] },
+        { "name": "BindingEvidenceTests.test_anything_short_of_that_is_no_proof", "requirements": ["plan §4.3", "F40 (P4 part)"] },
+        { "name": "ReadingParityTests.test_a_chinese_row_maps_its_two_code_columns_the_same_way", "requirements": ["F21", "F22"] },
+        { "name": "ReadingParityTests.test_local_times_convert_alike", "requirements": ["F21", "F22"] },
+        { "name": "RowTypeTests.test_every_row_the_importer_keys_reads_as_the_same_key_on_the_server", "requirements": ["F44", "P4 review 4"] },
+        { "name": "RowTypeTests.test_a_row_sent_under_another_key_is_refused", "requirements": ["F44", "P4 review 4"] },
+        { "name": "DatedClaimTests.test_the_range_of_an_exchange_trade_date_is_the_servers_own", "requirements": ["F44", "plan §9.2", "P4 review 5"] },
+        { "name": "DatedClaimTests.test_an_activity_date_covers_its_own_day_in_the_stated_zone", "requirements": ["F44", "plan §9.2", "P4 review 5"] },
+        { "name": "DatedClaimTests.test_day_ranges_match_the_browser", "requirements": ["plan §9.2", "P4 review 5"] }
+      ]
     }
   ],
   "fixtures": [
-    { "id": "capabilities", "file": "cost_basis_fop_capabilities.json", "source": "synthetic", "requirements": ["P0 gate: capability draft"] },
+    { "id": "capabilities", "file": "cost_basis_fop_capabilities.json", "source": "synthetic", "requirements": ["P0 gate: capability draft", "P4 step 6", "F44"] },
     { "id": "month_collision", "file": "tests/fixtures/cost_basis_fop/month_collision.json", "source": "synthetic", "requirements": ["F03", "F35"] },
     { "id": "legacy_fut_migration_list", "file": "tests/fixtures/cost_basis_fop/legacy_fut_migration_list.json", "source": "synthetic", "requirements": ["P0 step 4"] },
     { "id": "ddl_draft", "file": "tests/fixtures/cost_basis_fop/contract/ddl_draft.sql", "source": "synthetic", "requirements": ["F37", "F45", "P1 step 4"] },
@@ -254,6 +380,7 @@
     { "id": "protocol", "file": "tests/fixtures/cost_basis_fop/contract/protocol.json", "source": "synthetic", "requirements": ["P1 step 2"] },
     { "id": "core_output", "file": "tests/fixtures/cost_basis_fop/contract/core_output.json", "source": "synthetic", "requirements": ["P1 step 3"] },
     { "id": "runtime_protocol", "file": "cost_basis_fop_protocol.json", "source": "synthetic", "requirements": ["P2 item 1"] },
-    { "id": "core_vectors", "file": "tests/fixtures/cost_basis_fop/core_vectors.json", "source": "synthetic", "requirements": ["P3 step 1", "§5.4", "§9.6"] }
+    { "id": "core_vectors", "file": "tests/fixtures/cost_basis_fop/core_vectors.json", "source": "synthetic", "requirements": ["P3 step 1", "§5.4", "§9.6"] },
+    { "id": "statements", "file": "tests/fixtures/cost_basis_fop/statements/README.md", "source": "synthetic", "requirements": ["P4 step 1", "F21", "F22"] }
   ]
 }

@@ -2,6 +2,7 @@
 import contextlib
 from unittest import mock
 
+import cost_basis_fop_statement
 import cost_basis_store
 from cost_basis_fop_store import FOP_TABLES
 from cost_basis_store import CostBasisStore
@@ -27,6 +28,15 @@ def previous_build():
             CostBasisStore, '_delete_fop_graph',
             staticmethod(lambda conn, book_id, keep_book_row=False: {})))
         yield
+
+
+def verified_capabilities():
+    """The shipped capability list with every synthetic_only row type promoted
+    to real_verified: what a store would accept once real statements verified
+    them (plan §9.7). Only tests that write statement rows use it."""
+    shipped = cost_basis_fop_statement.default_capabilities()
+    return shipped.with_statuses({entry['key']: 'real_verified' for entry in shipped.document['keys']
+                                  if entry['status'] == 'synthetic_only'})
 
 
 def strip_v11_tables(conn):

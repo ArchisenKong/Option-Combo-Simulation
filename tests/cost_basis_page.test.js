@@ -21,7 +21,7 @@ function loadPage() {
     const context = loadBrowserScripts([
         'js/cost_basis_core.js',
         'js/american_binomial.js',
-        'js/cost_basis_import.js',
+        'js/cost_basis_import_common.js', 'js/cost_basis_import.js',
         'js/cost_basis.js',
     ]);
     return context;
@@ -1117,7 +1117,7 @@ module.exports = {
                     'js/cost_basis_common.js',
                     'js/cost_basis_core.js',
                     'js/american_binomial.js',
-                    'js/cost_basis_import.js',
+                    'js/cost_basis_import_common.js', 'js/cost_basis_import.js',
                     'js/market_curves.js',
                     'js/cost_basis_stress_models.js',
                     'js/cost_basis_stress_core.js',

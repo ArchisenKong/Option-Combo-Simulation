@@ -44,7 +44,7 @@ function loadGuardHarness() {
     const context = loadBrowserScripts([
         'js/cost_basis_core.js',
         'js/american_binomial.js',
-        'js/cost_basis_import.js',
+        'js/cost_basis_import_common.js', 'js/cost_basis_import.js',
         'js/cost_basis.js',
     ]);
     vm.runInContext(read('js/cost_basis.js').replace(

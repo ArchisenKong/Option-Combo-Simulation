@@ -1734,7 +1734,8 @@
           }
         },
         "fopPackage": {
-          "ref": "FopPackage"
+          "ref": "FopPackage",
+          "nullable": true
         }
       },
       "required": [
@@ -1748,6 +1749,20 @@
         "statement",
         "supersedeTwsEventIds",
         "fopPackage"
+      ],
+      "rules": [
+        {
+          "id": "coverage_only_import_names_its_statement",
+          "when": {
+            "field": "fopPackage",
+            "in": [
+              null
+            ]
+          },
+          "require": [
+            "statement"
+          ]
+        }
       ]
     },
     "VoidRequest": {
@@ -3768,7 +3783,8 @@
             "reset",
             "restore_reset",
             "restore_backup",
-            "rebuild"
+            "rebuild",
+            "import"
           ]
         },
         "requestDigest": {
@@ -3788,6 +3804,200 @@
         "requestDigest",
         "resultJson",
         "createdAtUtc"
+      ]
+    },
+    "StatementEvidenceRow": {
+      "type": "object",
+      "fields": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "option",
+            "option_instrument",
+            "future",
+            "future_instrument"
+          ]
+        },
+        "section": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rawFields": {
+          "type": "map",
+          "values": {
+            "type": "string"
+          },
+          "minEntries": 1
+        }
+      },
+      "required": [
+        "role",
+        "section",
+        "rawFields"
+      ]
+    },
+    "StatementBindingCandidate": {
+      "type": "object",
+      "fields": {
+        "bindingId": {
+          "ref": "Token"
+        },
+        "option": {
+          "ref": "ContractRecord"
+        },
+        "future": {
+          "ref": "ContractRecord"
+        },
+        "evidence": {
+          "type": "object",
+          "fields": {
+            "format": {
+              "type": "string",
+              "enum": [
+                "flex_csv",
+                "activity_csv"
+              ]
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "ref": "StatementEvidenceRow"
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "format",
+            "rows"
+          ]
+        }
+      },
+      "required": [
+        "bindingId",
+        "option",
+        "future",
+        "evidence"
+      ]
+    },
+    "StatementBindingRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "request_cost_basis_fop_statement_bindings"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "ref": "StatementBindingCandidate"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId",
+        "bindings"
+      ]
+    },
+    "StatementBindingResult": {
+      "type": "object",
+      "fields": {
+        "bindingId": {
+          "ref": "Token"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "verified_statement",
+            "unresolved"
+          ]
+        },
+        "evidenceCredential": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "bindingId",
+        "status",
+        "evidenceCredential",
+        "problems"
+      ],
+      "rules": [
+        {
+          "id": "verified_statement_result_carries_its_credential",
+          "when": {
+            "field": "status",
+            "in": [
+              "verified_statement"
+            ]
+          },
+          "require": [
+            "evidenceCredential"
+          ]
+        },
+        {
+          "id": "unresolved_statement_result_carries_no_credential",
+          "when": {
+            "field": "status",
+            "in": [
+              "unresolved"
+            ]
+          },
+          "forbid": [
+            "evidenceCredential"
+          ]
+        }
+      ]
+    },
+    "StatementBindingResponse": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "cost_basis_fop_statement_bindings"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "const",
+          "value": true
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "ref": "StatementBindingResult"
+          }
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "success",
+        "bookId",
+        "results"
       ]
     }
   }

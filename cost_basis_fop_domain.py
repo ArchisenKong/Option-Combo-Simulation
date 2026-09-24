@@ -31,8 +31,11 @@ import cost_basis_fop_schema as schema
 
 FOP_ENGINE_VERSION = 1
 # Products the first release accepts, by the productRules name a ledger keeps.
+# exchangeTimeZone is where an exchange trade date without a time is read
+# (plan §9.2); js/cost_basis_fop_import.js PRODUCT_RULES says the same.
 SUPPORTED_PRODUCT_RULES = {
-    'NYMEX-CL-v1': {'root': 'CL', 'exchange': 'NYMEX', 'currency': 'USD'},
+    'NYMEX-CL-v1': {'root': 'CL', 'exchange': 'NYMEX', 'currency': 'USD',
+                    'exchangeTimeZone': 'America/Chicago'},
 }
 FOP_EVENT_KINDS = (
     'futures_trade', 'option_trade', 'option_assignment', 'option_exercise',
@@ -497,8 +500,36 @@ def listed_external_ref(external_ref, event_id):
     return shown[:-len(suffix)] if shown.endswith(suffix) else shown
 
 
+_MASKED_ACCOUNT = re.compile(r'^([A-Z]+\d*)\*+(\d{4,})$')
+
+
+def statement_account_matches(statement_account, book_account):
+    """Whether a statement's account can be this ledger's (plan §9.1).
+
+    An exact account must be the ledger's. A masked one (U****1111) is
+    confirmed per file in the page; the server cannot see that confirmation,
+    but it can see what the mask shows: the prefix and the last digits must be
+    the ledger account's, the same test js/cost_basis_import_common.js
+    matchStatementAccount applies before it offers the confirmation.
+    """
+    if '*' not in statement_account:
+        return statement_account == book_account
+    mask = _MASKED_ACCOUNT.match(statement_account.upper())
+    target = (book_account or '').upper()
+    return bool(mask and re.match(r'^[A-Z]+\d+$', target) and target.startswith(mask.group(1))
+                and target.endswith(mask.group(2))
+                and len(target) > len(mask.group(1)) + len(mask.group(2)))
+
+
+def check_statement_account(statement, *, book):
+    """A registered statement belongs to this ledger, even without economic rows."""
+    if statement is not None and not statement_account_matches(statement['account'], book['account']):
+        _refuse(f'the statement is for {statement["account"]}, not {book["account"]}')
+
+
 def check_source_records(package, *, book, kind, statement):
     """The protocol's source rules for one package (domainRules)."""
+    check_statement_account(statement, book=book)
     records = {}
     for record in package['sourceRecords']:
         key = (record['namespace'], record['sourceRef'])
@@ -533,8 +564,6 @@ def check_source_records(package, *, book, kind, statement):
         if formats != {statement['format']}:
             _refuse(f'one file per import: rows in {sorted(formats)}, statement is '
                     f'{statement["format"]}')
-        if statement['account'] != book['account'] and '*' not in statement['account']:
-            _refuse(f'the statement is for {statement["account"]}, not {book["account"]}')
     return records
 
 

@@ -49,9 +49,11 @@ function loadCommon() {
 
 function fakeNode(id) {
     return {
-        id, textContent: '', hidden: false, href: '', className: '', dataset: {}, children: [],
+        id, textContent: '', hidden: false, href: '', className: '', dataset: {}, children: [], value: '',
+        disabled: false, listeners: {},
         appendChild(child) { this.children.push(child); return child; },
         removeChild(child) { this.children.splice(this.children.indexOf(child), 1); },
+        addEventListener(type, handler) { (this.listeners[type] = this.listeners[type] || []).push(handler); },
         get firstChild() { return this.children[0]; },
     };
 }
@@ -110,7 +112,7 @@ function loadFopPage(search) {
  */
 function loadStockPage(books) {
     const context = loadBrowserScripts([
-        'js/cost_basis_core.js', 'js/american_binomial.js', 'js/cost_basis_import.js',
+        'js/cost_basis_core.js', 'js/american_binomial.js', 'js/cost_basis_import_common.js', 'js/cost_basis_import.js',
         'js/cost_basis.js',
     ]);
     vm.runInContext(read('js/cost_basis.js').replace('globalScope.OptionComboCostBasisPage = {', `
@@ -228,7 +230,8 @@ module.exports = {
                     .concat(['create_cost_basis_book', 'delete_cost_basis_book']).sort());
                 assert.deepEqual(Array.from(common.PROTOCOL_ACTIONS
                     .filter((entry) => !entry.pages.length).map((entry) => entry.action)).sort(),
-                ['commit_cost_basis_fop_metadata', 'request_cost_basis_fop_contract_details']);
+                ['commit_cost_basis_fop_metadata', 'request_cost_basis_fop_contract_details',
+                    'request_cost_basis_fop_statement_bindings']);
                 const coverage = readJson(`${CONTRACT}/write_coverage.json`);
                 const serverWrites = new Set(coverage.writes.map((entry) => entry.wsAction));
                 const serverReads = new Set(coverage.reads);
@@ -331,11 +334,15 @@ module.exports = {
             },
         },
         {
-            name: 'the FOP page loads only the common layer and its own controller',
+            name: 'the FOP page loads the common layer, the FOP importer and core, and its own controller',
             run() {
                 const html = read('cost_basis_fop.html');
                 const scripts = Array.from(html.matchAll(/<script src="([^"?]+)/g)).map((match) => match[1]);
-                assert.deepEqual(scripts, ['js/cost_basis_common.js', 'js/cost_basis_fop.js']);
+                // P4: the read-only preview reads statements with the FOP
+                // importer and replays them with the FOP core; never the
+                // stock ledger core or the trading shell.
+                assert.deepEqual(scripts, ['js/cost_basis_common.js', 'js/cost_basis_import_common.js',
+                    'js/cost_basis_fop_core.js', 'js/cost_basis_fop_import.js', 'js/cost_basis_fop.js']);
                 const styles = Array.from(html.matchAll(/<link rel="stylesheet" href="([^"?]+)/g))
                     .map((match) => match[1]);
                 assert.deepEqual(styles, ['cost_basis_fop.css']);

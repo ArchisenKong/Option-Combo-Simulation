@@ -181,10 +181,13 @@ an order or subscribe to market data. Full details in
 
 `cost_basis_fop.html` is the standalone FOP ledger that will replace the frozen
 `FUT` books. It is being built in phases (`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`);
-for now it only reads the ledger list, sends a stock ledger to `cost_basis.html`
-and shows a `FUT` ledger's identity. It computes and writes nothing yet; its
-economic core (`js/cost_basis_fop_core.js`) is built and tested but not wired
-into the page.
+for now it reads the ledger list, sends a stock ledger to `cost_basis.html`,
+shows a `FUT` ledger's identity, and previews an IBKR statement CSV without a
+ledger: each row's type and status, the events it would add, the problems that
+would block it, the quantity proof and the result the core replays from it,
+all in the browser. It writes nothing yet; importing into a ledger is wired in
+a later stage. Statement rows can only be previewed until a real statement
+accepts each row type (`cost_basis_fop_capabilities.json`).
 
 ### `workspace_db_admin.html`
 
@@ -921,13 +924,14 @@ An older build cannot open a v10 database, so keep a backup of
 `cost_basis.db` if you may need to roll back.
 
 Schema v11 adds the standalone FOP ledger's tables and lets a book carry no
-stock multiplier (FOP ledgers keep point values in their contract records).
-Before the first step of any upgrade of an existing file, the backend writes a
-verified SQLite-consistent copy next to it, named
-`cost_basis.pre-v11-from-v10-<UTC time>-<id>.db`, and logs its path; if the
+stock multiplier (FOP ledgers keep point values in their contract records);
+schema v12 lets the FOP request log record statement imports. A v10 file goes
+straight to v12. Before the first step of any upgrade of an existing file, the
+backend writes a verified SQLite-consistent copy next to it, named
+`cost_basis.pre-v12-from-v10-<UTC time>-<id>.db`, and logs its path; if the
 copy cannot be taken or verified, nothing is migrated and the ledger stays
 unavailable. Stock ledgers, their events and their ledger versions are
-unchanged by the upgrade. A build older than v11 refuses a v11 file: to roll
+unchanged by the upgrade. A build older than v12 refuses a v12 file: to roll
 back, stop the backend, move `cost_basis.db` aside, rename that copy to
 `cost_basis.db`, then start the older build. FOP ledger writes stay closed in
 this release; `request_cost_basis_status` reports `features.fopLedger`.

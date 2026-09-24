@@ -302,7 +302,7 @@ CREATE TABLE cost_basis_fop_requests (
     book_id        TEXT NOT NULL REFERENCES cost_basis_books(book_id),
     action         TEXT NOT NULL CHECK (action IN (
                        'append', 'void', 'metadata', 'reset', 'restore_reset',
-                       'restore_backup', 'rebuild')),
+                       'restore_backup', 'rebuild', 'import')),
     request_digest TEXT NOT NULL CHECK (length(request_digest) = 64),
     result_json    TEXT NOT NULL,
     created_at_utc TEXT NOT NULL

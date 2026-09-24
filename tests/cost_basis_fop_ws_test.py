@@ -19,7 +19,7 @@ for path in (REPO_ROOT, REPO_ROOT / 'tests'):
 
 import cost_basis_fop_schema as schema  # noqa: E402
 from cost_basis_fop_test_support import (  # noqa: E402
-    CLZ6, EXAMPLES, FOP_META, IDENTITY, LOZ6, at, example_event, package, token,
+    CLZ6, EXAMPLES, FOP_META, IDENTITY, LOZ6, at, example_event, package, token, verified_capabilities,
 )
 from cost_basis_store import CostBasisStore  # noqa: E402
 from cost_basis_ws import create_store_env, handle_cost_basis_action  # noqa: E402
@@ -85,12 +85,56 @@ class FopProtocolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_status_reports_the_fop_engine_and_release_state(self):
         status = await self.call('request_cost_basis_status')
-        self.assertEqual(status['features']['fopLedger'], {
+        fop = dict(status['features']['fopLedger'])
+        capabilities = fop.pop('importCapabilities')
+        self.assertEqual(fop, {
             'engineVersion': 1, 'productRules': ['NYMEX-CL-v1'], 'writesReleased': True,
             'contractDetails': False})
+        # The page hands the statement row types to the importer (plan §9.7, P4).
+        self.assertEqual(capabilities, json.loads(
+            (REPO_ROOT / 'cost_basis_fop_capabilities.json').read_text(encoding='utf-8')))
         closed = await self.call('request_cost_basis_status',
                                  env=self.make_env(fop_writes_enabled=False))
         self.assertFalse(closed['features']['fopLedger']['writesReleased'])
+
+    async def test_a_statement_import_and_its_bindings_go_through_the_protocol(self):
+        # P4: a statement binding is asked for with the rows it rests on; an
+        # import carries the whole statement and is held to the row types.
+        created = await self.create()
+        book_id = created['book']['bookId']
+        asked = copy.deepcopy(EXAMPLES['a statement binding rests on the statement rows'])
+        asked.update(bookId=book_id)
+        answered = await self.call('request_cost_basis_fop_statement_bindings', **{
+            key: value for key, value in asked.items() if key not in ('action', 'requestId')})
+        self.assertTrue(answered['success'], answered)
+        self.assertEqual(schema.check('StatementBindingResponse', answered), [])
+        self.assertEqual([result['status'] for result in answered['results']], ['verified_statement'])
+        example = copy.deepcopy(EXAMPLES['statement import: two rows with their raw fields and the file '
+                                         'registration'])
+        fields = {key: value for key, value in example.items() if key not in ('action', 'requestId')}
+        fields.update(bookId=book_id, bookIdentity=dict(IDENTITY), expectedLedgerVersion=await self.version(book_id))
+        refused = await self.call('import_cost_basis_events', **fields)
+        self.assertEqual(refused['code'], 'fop_capability_not_verified', refused)
+        self.env['store']._fop_capabilities = verified_capabilities()
+        imported = await self.call('import_cost_basis_events', **fields)
+        self.assertTrue(imported['success'], imported)
+        self.assertEqual(imported['inserted'], 2)
+        fields.update(importBatchId=token('batch'), expectedLedgerVersion=imported['ledgerVersion'])
+        again = await self.call('import_cost_basis_events', **fields)
+        self.assertEqual((again['inserted'], len(again['duplicates'])), (0, 2))
+        # A statement without trades registers its period with no package;
+        # without its statement the contract refuses it before the store.
+        bare = copy.deepcopy(EXAMPLES['a statement without trades registers its period and carries no package'])
+        fields = {key: value for key, value in bare.items() if key not in ('action', 'requestId')}
+        fields.update(bookId=book_id, bookIdentity=dict(IDENTITY), expectedLedgerVersion=again['ledgerVersion'],
+                      importBatchId=token('batch'))
+        refused = await self.call('import_cost_basis_events', **dict(fields, statement=None))
+        self.assertEqual(refused['code'], 'invalid_request', refused)
+        registered = await self.call('import_cost_basis_events', **fields)
+        self.assertTrue(registered['success'], registered)
+        self.assertEqual((registered['inserted'], registered['ledgerVersion']), (0, again['ledgerVersion']))
+        self.assertIn('2026-11-01', [batch['periodFrom'] for batch in
+                                     self.env['store'].list_import_batches(book_id)])
 
     async def test_a_fop_ledger_round_trips_through_the_protocol(self):
         created = await self.create()

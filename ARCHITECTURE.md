@@ -927,7 +927,7 @@ remain unchanged.
 
 ### Blended-cost ledger (shared by both backends)
 
-`cost_basis_store.py` is the pure SQLite store (schema v11) behind
+`cost_basis_store.py` is the pure SQLite store (schema v12) behind
 `cost_basis.html`: append-oriented money events keyed per book, one derivation
 for every event's cash amount, per-kind field validation, client-token
 idempotency, external-ref import de-duplication, voiding that replays the
@@ -984,7 +984,44 @@ frozen types in `cost_basis_fop_protocol.json`; `cost_basis_fop_broker.py`
 resolves option -> underlying pairs read-only through an injected contract-details
 function. FOP writes are gated by `fop_writes_enabled`, off in both servers
 until the release stage; a FUT book without FOP metadata stays export and
-delete only.
+delete only. Schema v12 only lets the FOP request log hold statement imports; a
+v10 file goes straight to v12, and a v11 file (the P2 and P3 builds) rebuilds
+that one table behind the same verified backup.
+
+Statements reach a FOP ledger through `js/cost_basis_fop_import.js`, a DOM-free
+importer that reads Activity and Flex CSVs with the shared lexical layer
+`js/cost_basis_import_common.js` (the stock importer uses the same layer; no
+row interpretation is shared). It keys every row as `format/section/asset/event`
+and gives it its status from `cost_basis_fop_capabilities.json`, which also holds
+the column and section aliases both sides read. It resolves real contracts (a
+delivery month from a delivery-month field or the local symbol, never an expiry
+date; another root such as MCL is another ledger), reads account-local times in
+one stated or statement-evidenced timezone (a repeated local time becomes a
+range, a date without a time a range), pairs each assignment or exercise with
+the future row it delivered, and proves opening quantities against the Open
+Positions section. A Trades row of a kind it does not know blocks, never
+dropped. Rows that share a second carry no order evidence: a statement's row
+order is not proof, so the core refuses such rows when their order changes the
+result. It matches the same fill in another format or a TWS execution one to
+one, and a matched fill must then agree in fees, cash, intent, trade date and
+the option's binding or the batch blocks; an order and its executions at
+another granularity are the same fill only through the broker order reference
+both rows name, and a stored fill of the same day that nothing proves the same
+or another also blocks. It checks which periods the ledger's statements cover
+(a month flat on both sides still needs its statement) and lets a statement
+without new events register its period with no package. Then it builds the
+ImportRequest; the core previews the result without writing, and the FOP page
+shows that preview for a statement without a ledger. The store's
+`import_fop_events` compares a repeated reference by its content (an equal one
+is reported and left out, a different one refuses the batch), holds every
+statement row through `cost_basis_fop_statement.py` to the row type its own raw
+fields read as (only `real_verified` writes; a `synthetic_only` row only as a
+manual event that matches it, a date-only row to the range the server works
+out), voids the TWS executions a statement repeats, registers the statement's
+coverage, and answers a retried batch from the request log. A statement binding
+credential is issued only for option -> future pairs the server itself reads in
+the statement rows. Every economic row type is `synthetic_only` until real
+statements accept it.
 
 The FOP economics live in `js/cost_basis_fop_core.js`, a DOM-free core that
 replays the ledger graph exactly as the server exports it (the version 2 backup

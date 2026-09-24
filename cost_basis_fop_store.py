@@ -28,6 +28,7 @@ import sqlite3
 import uuid
 
 import cost_basis_fop_domain as domain
+import cost_basis_fop_statement as statement_rows
 
 # Children before parents, so a whole-graph delete never trips a foreign key.
 FOP_GRAPH_TABLES = (
@@ -83,6 +84,9 @@ _SOURCE_FIELDS = (
     ('statedQuantity', 'stated_quantity'), ('statedFees', 'stated_fees'),
 )
 CREDENTIAL_TTL_SECONDS = 15 * 60
+# One import or rebuild package, as canonical JSON: below the shared WebSocket
+# message limit, so a large history is split into periods (plan §9.5 item 7).
+MAX_FOP_PACKAGE_BYTES = 6 * 1024 * 1024
 
 
 def delete_fop_graph(conn, book_id, *, keep_book_row=False):
@@ -143,6 +147,8 @@ def raise_store_error(exc):
         'fop_cycle_boundary_violated': base.FopCycleBoundaryViolatedError,
         'fop_reference_revision_conflict': base.FopReferenceRevisionConflictError,
         'fop_ordering_ambiguous': base.FopOrderingAmbiguousError,
+        'fop_capability_not_verified': base.FopCapabilityNotVerifiedError,
+        'fop_unsupported_row': base.FopUnsupportedRowError,
     }
     raise by_code.get(exc.code, base.InvalidRequestError)(str(exc)) from exc
 
@@ -563,6 +569,12 @@ class FopLedgerMixin:
             return _binding_record_from_row(row)
 
         records = domain.check_source_records(package, book=book, kind=mode, statement=statement)
+        if mode == 'import':
+            # plan §9.7: only real_verified row types write; a synthetic_only
+            # row only as the source of manual events that match it.
+            zone = domain.SUPPORTED_PRODUCT_RULES[book['fop']['productRules']]['exchangeTimeZone']
+            statement_rows.check_statement_rows(package, self._fop_capability_list(),
+                                                contract_for=contract_for, exchange_zone=zone)
         new_sources = []
         for (namespace, source_ref), record in records.items():
             stored = graph.source(record['account'], namespace, source_ref)
@@ -1667,9 +1679,9 @@ class FopLedgerMixin:
                 domain.require_shape('StatementRegistration', statement, 'statement')
         except domain.FopDomainError as exc:
             raise_store_error(exc)
-        if len(package['events']) > base.MAX_IMPORT_EVENTS:
-            raise base.InvalidRequestError(
-                f'a rebuild is limited to {base.MAX_IMPORT_EVENTS} events')
+        # Refused before the transaction: an oversized history never empties
+        # the ledger first (plan §9.5 item 7).
+        self._check_package_size(package, 'a rebuild')
         payload_digest = self._request_digest('rebuild', book_id, {
             'package': package, 'statement': statement, 'revokeBoundaries': sorted(revoke),
             'importBatchId': import_batch_id, 'reason': reason})
@@ -1702,6 +1714,15 @@ class FopLedgerMixin:
                 reset_id, removed = self._archive_fop_graph(
                     conn, book, client_token, reason or 'rebuild from statement')
                 self._empty_fop_graph(conn, book_id)
+                # The history scope describes the events (review R8): a history
+                # with opening balances is kept since its baseline, one without
+                # them is the full history, so replacing a baseline by the
+                # earlier history is one archived rebuild (plan §9.2, F42).
+                scope = ('since_baseline' if any(event['kind'] == 'opening_balance'
+                                                 for event in package['events']) else 'full_history')
+                conn.execute('UPDATE cost_basis_fop_books SET history_scope = ?, updated_at_utc = ? '
+                             'WHERE book_id = ? AND history_scope <> ?',
+                             (scope, self._utc_now_iso(), book_id, scope))
                 try:
                     plan = self._prepare_fop_package(conn, book, package, mode='import',
                                                      statement=statement)
@@ -1774,6 +1795,383 @@ class FopLedgerMixin:
             raise self._map_sqlite_error(exc) from exc
         finally:
             conn.close()
+
+    # ------------------------------------------------------------------
+    # Statement imports (plan §9, §13.3 P4)
+    # ------------------------------------------------------------------
+
+    def _fop_capability_list(self):
+        """The statement row types this store writes (cost_basis_fop_capabilities.json)."""
+        return getattr(self, '_fop_capabilities', None) or statement_rows.default_capabilities()
+
+    @staticmethod
+    def _check_package_size(package, what):
+        base = _store_errors()
+        if len(package['events']) > base.MAX_IMPORT_EVENTS:
+            raise base.InvalidRequestError(
+                f'{what} is limited to {base.MAX_IMPORT_EVENTS} events; split the statement into '
+                'consecutive periods and import each one (plan §9.5)')
+        size = len(domain.canonical_json(package).encode('utf-8'))
+        if size > MAX_FOP_PACKAGE_BYTES:
+            raise base.InvalidRequestError(
+                f'{what} is {size} bytes, over the limit of {MAX_FOP_PACKAGE_BYTES}; split the '
+                'statement into consecutive periods and import each one (plan §9.5)')
+
+    def import_fop_events(self, book_id, package, *, statement, import_batch_id, client_token_prefix,
+                          supersede_tws_event_ids=(), expected_ledger_version=None,
+                          book_identity=None):
+        """Import one statement into a FOP ledger (ImportRequest), all or nothing.
+
+        Inside the write lock: the gate, identity, the engine, the request log
+        (the same importBatchId with the same request gets its first answer;
+        with another request it is refused) and the reviewed version. Then,
+        against the stored graph:
+
+        - a reference already stored is compared by its economic content
+          (repeated_source_matches_or_conflicts): an equal one is reported and
+          left out, any difference refuses the whole import (plan §9.1);
+        - every remaining statement row is held to its row type (plan §9.7);
+        - each superseded TWS execution must be repeated by one event of the
+          statement and is voided, so a fill never counts twice (plan §9.3);
+        - the rows are written and the whole ledger is proven again;
+        - later coverage is invalidated and this statement's registered.
+
+        A statement that adds no event (a period without trades, or rows all
+        stored under other references) comes without a package and only
+        registers its period (plan §9.5 item 5): it needs its statement and
+        supersedes nothing.
+        """
+        base = _store_errors()
+        base._require_token('importBatchId', import_batch_id)
+        base._require_token('clientTokenPrefix', client_token_prefix)
+        try:
+            if package is not None:
+                domain.require_shape('FopPackage', package, 'fopPackage')
+            if statement is not None:
+                domain.require_shape('StatementRegistration', statement, 'statement')
+        except domain.FopDomainError as exc:
+            raise_store_error(exc)
+        supersede = list(supersede_tws_event_ids or ())
+        if package is None and statement is None:
+            raise base.InvalidRequestError('an import without events registers a statement; it names none')
+        if package is None and supersede:
+            raise base.InvalidRequestError('an import without events supersedes no TWS execution')
+        for event_id in supersede:
+            base._require_token('supersedeTwsEventIds', event_id)
+        if len(set(supersede)) != len(supersede):
+            raise base.InvalidRequestError('supersedeTwsEventIds names an execution twice')
+        if package is not None:
+            self._check_package_size(package, 'an import')
+        digest = self._request_digest('import', book_id, {
+            'package': package, 'statement': statement, 'clientTokenPrefix': client_token_prefix,
+            'supersedeTwsEventIds': sorted(supersede)})
+        conn = self._connect()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            try:
+                book = self._open_fop_write(conn, book_id, 'importing a statement',
+                                            book_identity=book_identity,
+                                            engine_version=(package['engineVersion'] if package is not None
+                                                            else domain.FOP_ENGINE_VERSION))
+                replay = self._replayed_request(conn, book_id, 'import', import_batch_id, digest)
+                if replay is not None:
+                    conn.execute('ROLLBACK')
+                    return replay
+                self._require_ledger_version(conn, book_id, expected_ledger_version)
+                try:
+                    # Coverage belongs to the account even when there are no rows to import.
+                    domain.check_statement_account(statement, book=book)
+                    kept, duplicates, superseded = {'events': []}, [], []
+                    if package is not None:
+                        domain.check_source_records(package, book=book, kind='import', statement=statement)
+                        kept, duplicates = self._without_repeats(conn, book, package)
+                        superseded = self._supersede_tws_events(conn, book, kept, supersede,
+                                                                import_batch_id)
+                    event_ids = []
+                    if kept['events']:
+                        plan = self._prepare_fop_package(conn, book, kept, mode='import',
+                                                         statement=statement)
+                        event_ids = self._apply_fop_plan(
+                            conn, book, plan,
+                            tokens=lambda index: f'{client_token_prefix}-{index:05d}',
+                            import_batch_id=import_batch_id)
+                    self._validate_fop_ledger(conn, book_id)
+                except domain.FopDomainError as exc:
+                    raise_store_error(exc)
+                changed = event_ids + superseded
+                if changed:
+                    marks = ', '.join('?' for _ in changed)
+                    earliest = conn.execute(
+                        f'SELECT min(trade_date) FROM cost_basis_events WHERE event_id IN ({marks})',
+                        changed).fetchone()[0]
+                    self._invalidate_coverage(conn, book_id, earliest)
+                    conn.execute('UPDATE cost_basis_books SET updated_at_utc = ? WHERE book_id = ?',
+                                 (self._utc_now_iso(), book_id))
+                if statement is not None:
+                    self._register_batch(conn, book_id, import_batch_id, 'import',
+                                         self._statement_registration(statement),
+                                         inserted=len(event_ids), skipped=len(duplicates))
+                result = {'bookId': book_id, 'importBatchId': import_batch_id,
+                          'inserted': len(event_ids), 'eventIds': event_ids,
+                          'duplicates': duplicates, 'superseded': superseded,
+                          'ledgerVersion': self._ledger_version(conn, book_id),
+                          'idempotentReplay': False}
+                self._record_request(conn, book_id, 'import', import_batch_id, digest, result)
+                self._fault('fop_before_commit')
+                conn.execute('COMMIT')
+            except BaseException:
+                self._rollback_quietly(conn)
+                raise
+            return result
+        except sqlite3.IntegrityError as exc:
+            raise self._map_integrity_error(exc) from exc
+        except sqlite3.Error as exc:
+            raise self._map_sqlite_error(exc) from exc
+        finally:
+            conn.close()
+
+    def _without_repeats(self, conn, book, package):
+        """(the package without repeated sources, their references), plan §9.1.
+
+        A source record already stored for this account, namespace and
+        reference is the same reference: domain.repeat_outcome compares its
+        economic content with the stored one. Equal content is a duplicate and
+        leaves the package with every event it feeds; a fee of the package
+        whose source was such an event names the stored event instead. Any
+        difference refuses the import, naming every differing field. An event
+        that repeats some of its sources but not all is a revision too.
+        """
+        book_id = book['bookId']
+        stored = {(row['account'], row['namespace'], row['source_ref']): row
+                  for row in conn.execute('SELECT * FROM cost_basis_fop_sources WHERE book_id = ?',
+                                          (book_id,))}
+        repeated = [record for record in package['sourceRecords']
+                    if (record['account'], record['namespace'], record['sourceRef']) in stored]
+        if not repeated:
+            return package, []
+        graph = self._fop_graph_payload(conn, book)
+        contracts = [item['record'] for item in graph['contracts']]
+        bindings = [{field: item[field] for field in _BINDING_RECORD_FIELDS}
+                    for item in graph['bindings']]
+        events_by_id = {item['row']['eventId']: item for item in graph['events']}
+        sources_by_id = {source['sourceId']: source for source in graph['sources']}
+        allocated = {}
+        by_source = {}
+        for allocation in graph['allocations']:
+            source = sources_by_id[allocation['sourceId']]
+            allocated.setdefault(allocation['eventId'], []).append(
+                {**allocation, 'namespace': source['namespace'], 'sourceRef': source['sourceRef']})
+            by_source.setdefault(allocation['sourceId'], []).append(allocation['eventId'])
+        matched = {}
+        for event in package['events']:
+            if not event['sources'] or event.get('packageKey') is None:
+                continue
+            primary = event['sources'][0]
+            row = stored.get((event['account'], primary['namespace'], primary['sourceRef']))
+            if row is not None and len(by_source.get(row['source_id'], [])) == 1:
+                matched[event['packageKey']] = by_source[row['source_id']][0]
+        with_stored_contracts = package['contracts'] + [
+            record for record in contracts
+            if (record['contractId'], record['revision']) not in
+            {(c['contractId'], c['revision']) for c in package['contracts']}]
+        with_stored_bindings = package['bindings'] + [
+            record for record in bindings
+            if (record['bindingId'], record['revision']) not in
+            {(b['bindingId'], b['revision']) for b in package['bindings']}]
+        duplicates = set()
+        for record in repeated:
+            row = stored[(record['account'], record['namespace'], record['sourceRef'])]
+            stored_record = {field: row[column] for field, column in _SOURCE_FIELDS}
+            stored_record['rawFields'] = json.loads(row['raw_fields_json'])
+            stored_events = [self._request_from_stored_event(events_by_id[event_id],
+                                                             allocated.get(event_id, []))
+                             for event_id in by_source.get(row['source_id'], [])]
+            outcome = domain.repeat_outcome(
+                {'record': stored_record, 'events': stored_events, 'contracts': contracts,
+                 'bindings': bindings},
+                {'record': record, 'events': package['events'], 'contracts': with_stored_contracts,
+                 'bindings': with_stored_bindings, 'matchedPackageKeys': matched})
+            if outcome['outcome'] == 'conflict':
+                raise domain.FopDomainError(
+                    'import_revision_conflict',
+                    f'{record["namespace"]}:{record["sourceRef"]} is stored with other economic '
+                    f'content ({", ".join(outcome["fields"])}); correct it by a void or an archived '
+                    'rebuild, never by importing a changed row (plan §9.4)')
+            duplicates.add((record['namespace'], record['sourceRef']))
+        kept = []
+        dropped = {}
+        for event in package['events']:
+            keys = {(source['namespace'], source['sourceRef']) for source in event['sources']}
+            repeats = keys & duplicates
+            if repeats and repeats != keys:
+                raise domain.FopDomainError(
+                    'import_revision_conflict',
+                    f'a {event["kind"]} repeats {sorted(repeats)} but adds '
+                    f'{sorted(keys - repeats)}; a source arrives with every event it feeds')
+            if keys and repeats == keys:
+                if event.get('packageKey') is not None:
+                    dropped[event['packageKey']] = matched.get(event['packageKey'])
+                continue
+            kept.append(event)
+        for index, event in enumerate(kept):
+            source = event.get('feeSource')
+            if source and source.get('packageKey') in dropped:
+                stored_id = dropped[source['packageKey']]
+                if stored_id is None:
+                    raise domain.FopDomainError(
+                        'import_revision_conflict',
+                        f'a fee names {source["packageKey"]}, a repeated row that feeds several '
+                        'stored events; name the stored event')
+                kept[index] = {**event, 'feeSource': {'eventId': stored_id, 'packageKey': None}}
+        used = {(source['namespace'], source['sourceRef']) for event in kept
+                for source in event['sources']}
+        contract_ids = {event[ref]['contractId'] for event in kept
+                        for ref in ('contractRef', 'deliveredContractRef') if event.get(ref)}
+        binding_ids = {event['bindingRef']['bindingId'] for event in kept if event.get('bindingRef')}
+        kept_bindings = [record for record in package['bindings']
+                         if record['bindingId'] in binding_ids
+                         or record['optionContractId'] in contract_ids]
+        for record in kept_bindings:
+            contract_ids.add(record['optionContractId'])
+            if record['futureContractId']:
+                contract_ids.add(record['futureContractId'])
+        return ({**package, 'events': kept,
+                 'sourceRecords': [record for record in package['sourceRecords']
+                                   if (record['namespace'], record['sourceRef']) in used],
+                 'contracts': [record for record in package['contracts']
+                               if record['contractId'] in contract_ids],
+                 'bindings': kept_bindings},
+                sorted(f'{namespace}:{reference}' for namespace, reference in duplicates))
+
+    def _supersede_tws_events(self, conn, book, package, event_ids, import_batch_id):
+        """Void the TWS executions a statement repeats (plan §9.3); their ids.
+
+        Each named event must be a live TWS execution of this ledger that no
+        cycle boundary and no live fee depends on, and must be repeated, one
+        to one, by an event of the package: the same kind, contract terms,
+        quantity and price at the same second (or the same time range).
+        """
+        if not event_ids:
+            return []
+        book_id = book['bookId']
+        stored_contracts = {
+            (row['contract_id'], row['revision']): domain.contract_record_from_row(row)
+            for row in conn.execute('SELECT * FROM cost_basis_fop_contracts WHERE book_id = ?',
+                                    (book_id,))}
+        package_contracts = {(record['contractId'], record['revision']): record
+                             for record in package['contracts']}
+
+        def identity(contract_id, revision):
+            record = package_contracts.get((contract_id, revision)) \
+                or stored_contracts.get((contract_id, revision))
+            return domain.contract_identity_key(record) if record else None
+
+        anchors = {row['anchor_event_id'] for row in conn.execute(
+            "SELECT anchor_event_id FROM cost_basis_fop_cycles WHERE book_id = ? AND state = 'closed' "
+            'AND superseded_by_revision IS NULL', (book_id,))}
+        used = set()
+        for event_id in event_ids:
+            row = conn.execute(
+                f'{self._FOP_TIMELINE_SELECT} WHERE e.book_id = ? AND e.event_id = ?',
+                (book_id, event_id)).fetchone()
+            if row is None or row['voided_at_utc'] is not None:
+                raise domain.FopDomainError(
+                    'invalid_request', f'{event_id} is not a live event of this ledger')
+            namespaces = {item[0] for item in conn.execute(
+                'SELECT s.namespace FROM cost_basis_fop_source_allocations a JOIN cost_basis_fop_sources s '
+                'ON s.source_id = a.source_id WHERE a.event_id = ?', (event_id,))}
+            if namespaces != {'tws_exec'}:
+                raise domain.FopDomainError(
+                    'invalid_request', f'{event_id} is not a TWS execution; a statement supersedes '
+                    'only those')
+            if event_id in anchors:
+                raise domain.FopDomainError(
+                    'fop_cycle_boundary_violated', f'{event_id} anchors a cycle boundary; move the '
+                    'boundary before the statement replaces it')
+            if conn.execute(
+                    'SELECT 1 FROM cost_basis_fop_event_details d JOIN cost_basis_events e ON '
+                    'e.event_id = d.event_id WHERE d.book_id = ? AND d.fee_source_event_id = ? '
+                    'AND e.voided_at_utc IS NULL', (book_id, event_id)).fetchone():
+                raise domain.FopDomainError(
+                    'fop_reference_revision_conflict', f'a live fee names {event_id} as its source; '
+                    'void or re-enter the fee first')
+            key = identity(row['contract_id'], row['contract_revision'])
+            quantity = row['future_contracts'] if row['kind'] == 'futures_trade' else row['contracts']
+            second = (row['executed_at_utc'] or '')[:19]
+            match = None
+            for index, event in enumerate(package['events']):
+                if index in used or event['kind'] != row['kind'] or not event.get('contractRef'):
+                    continue
+                if identity(event['contractRef']['contractId'], event['contractRef']['revision']) != key:
+                    continue
+                stated = event.get('futureContracts') if row['kind'] == 'futures_trade' \
+                    else event.get('contracts')
+                if stated is None or abs(float(stated) - float(quantity)) > 1e-9:
+                    continue
+                price = event.get('price')
+                if (price is None) != (row['price'] is None) or (
+                        price is not None and abs(float(price) - float(row['price'])) > 1e-6):
+                    continue
+                time = event['time']
+                if second:
+                    if (time.get('executedAtUtc') or '')[:19] != second:
+                        continue
+                elif time.get('timeRange') != {'startUtc': row['time_range_start_utc'],
+                                               'endUtc': row['time_range_end_utc']}:
+                    continue
+                match = index
+                break
+            if match is None:
+                raise domain.FopDomainError(
+                    'invalid_request', f'TWS execution {event_id} is not repeated by any row of the '
+                    'statement; it can only be superseded by its own statement row')
+            used.add(match)
+            conn.execute(
+                'UPDATE cost_basis_events SET voided_at_utc = ?, voided_by_event_id = ?, '
+                'void_reason = ? WHERE event_id = ?',
+                (self._utc_now_iso(), import_batch_id,
+                 f'superseded by statement import {import_batch_id}', event_id))
+        return list(event_ids)
+
+    def issue_statement_binding_credentials(self, book_id, bindings):
+        """Credentials for the option -> future pairs a statement proves (plan §4.3).
+
+        bindings: StatementBindingCandidate items. The server reads the
+        statement rows itself (cost_basis_fop_statement.binding_evidence_problems)
+        and signs a verified_statement credential only for a pair they prove;
+        the others come back unresolved with the reasons. Writes nothing.
+        """
+        book = self.get_book(book_id)
+        if book.get('fop') is None:
+            raise _store_errors().InvalidRequestError('statement bindings are for FOP ledgers only')
+        mapping = self._fop_capability_list().mapping
+        results = []
+        for item in bindings:
+            try:
+                domain.require_shape('StatementBindingCandidate', item, 'binding')
+            except domain.FopDomainError as exc:
+                raise_store_error(exc)
+            option, future = item['option'], item['future']
+            problems = []
+            for record in (option, future):
+                try:
+                    domain.check_contract_against_book(record, book=book,
+                                                       product_rules=book['fop']['productRules'])
+                except domain.FopDomainError as exc:
+                    problems.append(str(exc))
+            problems.extend(statement_rows.binding_evidence_problems(item['evidence'], option, future,
+                                                                     mapping))
+            if problems:
+                results.append({'bindingId': item['bindingId'], 'status': 'unresolved',
+                                'evidenceCredential': None, 'problems': problems})
+                continue
+            results.append({
+                'bindingId': item['bindingId'], 'status': 'verified_statement',
+                'evidenceCredential': self.issue_binding_credential(
+                    book_id, status='verified_statement', option=option, future=future,
+                    evidence=item['evidence']),
+                'problems': []})
+        return results
 
     # ------------------------------------------------------------------
     # Reading

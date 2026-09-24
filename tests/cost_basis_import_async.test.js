@@ -2,7 +2,7 @@
 const fs=require('fs'),vm=require('vm'),path=require('path'),assert=require('node:assert/strict');
 const ROOT=path.resolve(__dirname,'..');
 const {loadBrowserScripts}=require(path.join(ROOT,'tests/helpers/load-browser-scripts'));
-const c=loadBrowserScripts(['js/cost_basis_core.js','js/cost_basis_import.js','js/cost_basis.js']);
+const c=loadBrowserScripts(['js/cost_basis_core.js','js/cost_basis_import_common.js', 'js/cost_basis_import.js','js/cost_basis.js']);
 vm.runInContext(fs.readFileSync(path.join(ROOT,'js/cost_basis.js'),'utf8').replace('globalScope.OptionComboCostBasisPage = {',`
 globalScope.auditHarness={state,fetch:_fetchTwsExecutions,commit:_commitImport,readFile:_handleImportFile,load:_loadEvents,
 plan:_refreshResetPlan,changeMode:_handleImportReplaceChange,parse:_parseImportText,newRows:_importNewRows,
