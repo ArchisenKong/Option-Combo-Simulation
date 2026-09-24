@@ -1,0 +1,4246 @@
+{
+ "format": "cost-basis-fop-core-vectors",
+ "version": 1,
+ "source": "synthetic",
+ "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §5.4, §6.1, §9.2, §9.6, §13.2, §14.1, §14.2",
+ "description": "Hand-worked economic vectors of the standalone FOP ledger. Every expected number is worked from the plan, not produced by code. tests/helpers/cost_basis_fop_model.py (an exact rational model) must reproduce them; js/cost_basis_fop_core.js and the server timeline in cost_basis_fop_domain.py run the same inputs. A vector lists contracts by alias (catalogue), events in a compact form, optional cycle boundaries, marks and an as-of instant. Expected values: a number, a \"p/q\" string for an exact fraction, or null for an unknown figure; \"reasons\" pins the reason of an unknown in the core output (a dotted path; cycles.0.totals.E is the first cycle's E); \"ambiguous\" names contracts whose order no evidence fixes (the server refuses such a ledger); \"model\": false marks a vector the rational model does not replay.",
+ "eventFields": {
+  "id": "event id",
+  "at": "instant (…Z)",
+  "range": "[start, end] instead of at",
+  "kind": "FOP event kind",
+  "contract": "catalogue alias",
+  "q": "contracts (FUT: futureContracts)",
+  "price": "fill price, premium, or baseline price",
+  "fees": "fees (default 0)",
+  "cash": "cashAmount of a fee or an adjustment",
+  "category": "feeCategory",
+  "refund": "feeIsRefund",
+  "feeSource": "the event id a fee belongs to",
+  "scope": "adjustmentScope",
+  "includeInCost": "default true",
+  "baseline": "baselineKind",
+  "baselineAsOf": "baselineAsOfUtc",
+  "evidence": "time.orderEvidence",
+  "src": "primary source record {ns, ref, stated:[quantity, fees]}"
+ },
+ "catalogue": {
+  "Z6": {
+   "secType": "FUT",
+   "contractId": "fut-clz6-0001",
+   "localSymbol": "CLZ6",
+   "month": "202612",
+   "lastTrade": "2026-11-19",
+   "conId": 555
+  },
+  "F7": {
+   "secType": "FUT",
+   "contractId": "fut-clf7-0001",
+   "localSymbol": "CLF7",
+   "month": "202701",
+   "lastTrade": "2026-12-17",
+   "conId": 556
+  },
+  "G7": {
+   "secType": "FUT",
+   "contractId": "fut-clg7-0001",
+   "localSymbol": "CLG7",
+   "month": "202702",
+   "lastTrade": "2027-01-20",
+   "conId": 557
+  },
+  "H7": {
+   "secType": "FUT",
+   "contractId": "fut-clh7-0001",
+   "localSymbol": "CLH7",
+   "month": "202703",
+   "lastTrade": "2027-02-19",
+   "conId": 558
+  },
+  "C75": {
+   "secType": "FOP",
+   "contractId": "fop-loz6-c75-01",
+   "localSymbol": "LOZ6 C7500",
+   "right": "C",
+   "strike": 75,
+   "expiry": "2026-11-17",
+   "future": "Z6",
+   "conId": 9001
+  },
+  "P65": {
+   "secType": "FOP",
+   "contractId": "fop-loz6-p65-01",
+   "localSymbol": "LOZ6 P6500",
+   "right": "P",
+   "strike": 65,
+   "expiry": "2026-11-17",
+   "future": "Z6",
+   "conId": 9002
+  }
+ },
+ "vectors": [
+  {
+   "name": "§5.4 complete long roll",
+   "plan": "§5.4 row 1",
+   "requirements": [
+    "F12",
+    "F29",
+    "F30"
+   ],
+   "marks": {
+    "F7": 69
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    },
+    {
+     "id": "e3",
+     "kind": "option_expiry",
+     "contract": "C75",
+     "q": 1,
+     "at": "2026-11-17T20:00:00Z"
+    },
+    {
+     "id": "e4",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 68
+    },
+    {
+     "id": "e5",
+     "at": "2026-11-18T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 69
+    }
+   ],
+   "expect": {
+    "steps": [
+     {
+      "after": "e1",
+      "Rf": 0,
+      "Co": 0,
+      "positions": {
+       "Z6": [
+        1,
+        70
+       ]
+      }
+     },
+     {
+      "after": "e2",
+      "Co": 1200,
+      "Rs": 0,
+      "positions": {
+       "Z6": [
+        1,
+        70
+       ],
+       "C75": [
+        -1,
+        1200
+       ]
+      }
+     },
+     {
+      "after": "e3",
+      "Rs": 1200,
+      "positions": {
+       "Z6": [
+        1,
+        70
+       ]
+      }
+     },
+     {
+      "after": "e4",
+      "Rf": -2000,
+      "positions": {}
+     },
+     {
+      "after": "e5",
+      "Rf": -2000,
+      "positions": {
+       "F7": [
+        1,
+        69
+       ]
+      }
+     }
+    ],
+    "totals": {
+     "Rf": -2000,
+     "Uf": 0,
+     "Co": 1200,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": -800
+    },
+    "sellerLens": {
+     "Rs": 1200,
+     "Es": 0,
+     "Js": 0,
+     "breakEven": 69.8,
+     "breakEvenIfOpenShortsExpire": 69.8,
+     "longExerciseAffectsBreakEven": false
+    },
+    "positions": {
+     "F7": {
+      "contracts": 1,
+      "averagePrice": 69
+     }
+    },
+    "realized": {
+     "Z6": -2000
+    },
+    "rolls": [
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "e4",
+        "Z6",
+        -1,
+        0
+       ],
+       [
+        "e5",
+        "F7",
+        1,
+        0
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "§5.4 roll with fees",
+   "plan": "§5.4 row 2",
+   "requirements": [
+    "F12",
+    "F18"
+   ],
+   "marks": {
+    "F7": 69
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    },
+    {
+     "id": "e3",
+     "kind": "option_expiry",
+     "contract": "C75",
+     "q": 1,
+     "at": "2026-11-17T20:00:00Z"
+    },
+    {
+     "id": "e4",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 68,
+     "fees": 5
+    },
+    {
+     "id": "e5",
+     "at": "2026-11-18T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 69,
+     "fees": 5
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": -2000,
+     "Uf": 0,
+     "Co": 1200,
+     "Vo": 0,
+     "E": 10,
+     "J": 0,
+     "economicPnl": -810
+    },
+    "sellerLens": {
+     "Rs": 1200,
+     "Es": 10,
+     "Js": 0,
+     "breakEven": 69.81,
+     "breakEvenIfOpenShortsExpire": 69.81
+    },
+    "rolls": [
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "e4",
+        "Z6",
+        -1,
+        5
+       ],
+       [
+        "e5",
+        "F7",
+        1,
+        5
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "§5.4 open premium",
+   "plan": "§5.4 row 3",
+   "requirements": [
+    "F12"
+   ],
+   "marks": {
+    "Z6": 70,
+    "C75": 1.5
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": 0,
+     "Co": 1200,
+     "Vo": -1500,
+     "E": 0,
+     "J": 0,
+     "economicPnl": -300
+    },
+    "sellerLens": {
+     "Rs": 0,
+     "Es": 0,
+     "Js": 0,
+     "breakEven": 70,
+     "breakEvenIfOpenShortsExpire": 68.8
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 70
+     },
+     "C75": {
+      "contracts": -1,
+      "remainingNetPremium": 1200
+     }
+    }
+   }
+  },
+  {
+   "name": "§5.4 option bought back at a loss",
+   "plan": "§5.4 row 4",
+   "requirements": [
+    "F12"
+   ],
+   "marks": {
+    "Z6": 70
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": 1,
+     "price": 1.8
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": 0,
+     "Co": -600,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": -600
+    },
+    "sellerLens": {
+     "Rs": -600,
+     "Es": 0,
+     "Js": 0,
+     "breakEven": 70.6,
+     "breakEvenIfOpenShortsExpire": 70.6
+    }
+   }
+  },
+  {
+   "name": "§5.4 short roll",
+   "plan": "§5.4 row 5",
+   "requirements": [
+    "F12",
+    "F29"
+   ],
+   "marks": {
+    "F7": 69
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    },
+    {
+     "id": "e3",
+     "kind": "option_expiry",
+     "contract": "C75",
+     "q": 1,
+     "at": "2026-11-17T20:00:00Z"
+    },
+    {
+     "id": "e4",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 68
+    },
+    {
+     "id": "e5",
+     "at": "2026-11-18T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 69
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 2000,
+     "Uf": 0,
+     "Co": 1200,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 3200
+    },
+    "sellerLens": {
+     "Rs": 1200,
+     "Es": 0,
+     "Js": 0,
+     "breakEven": 72.2,
+     "breakEvenIfOpenShortsExpire": 72.2
+    },
+    "positions": {
+     "F7": {
+      "contracts": -1,
+      "averagePrice": 69
+     }
+    },
+    "rolls": [
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "e4",
+        "Z6",
+        1,
+        0
+       ],
+       [
+        "e5",
+        "F7",
+        -1,
+        0
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "§5.4 partial roll",
+   "plan": "§5.4 row 6",
+   "requirements": [
+    "F09",
+    "F13"
+   ],
+   "marks": {
+    "Z6": 67,
+    "F7": 70
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 2,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 68
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-18T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 69
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": -2000,
+     "Uf": -2000,
+     "Co": 0,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": -4000
+    },
+    "sellerLens": {
+     "breakEven": null,
+     "breakEvenIfOpenShortsExpire": null
+    },
+    "reasons": {
+     "sellerLens.breakEven": "multiple_future_contracts"
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 70
+     },
+     "F7": {
+      "contracts": 1,
+      "averagePrice": 69
+     }
+    },
+    "rolls": [
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "e2",
+        "Z6",
+        -1,
+        0
+       ],
+       [
+        "e3",
+        "F7",
+        1,
+        0
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "§5.4 old-month call assigned after the roll",
+   "plan": "§5.4 row 7",
+   "requirements": [
+    "F08",
+    "F06"
+   ],
+   "marks": {
+    "Z6": 74,
+    "F7": 73
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-10T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 72
+    },
+    {
+     "id": "e4",
+     "at": "2026-11-10T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 72.5
+    },
+    {
+     "id": "e5",
+     "kind": "option_assignment",
+     "contract": "C75",
+     "q": 1,
+     "at": "2026-11-17T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "steps": [
+     {
+      "after": "e5",
+      "Rf": 2000,
+      "Rs": 1200,
+      "positions": {
+       "Z6": [
+        -1,
+        75
+       ],
+       "F7": [
+        1,
+        72.5
+       ]
+      }
+     }
+    ],
+    "totals": {
+     "Rf": 2000,
+     "Uf": 1500,
+     "Co": 1200,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 4700
+    },
+    "sellerLens": {
+     "Rs": 1200,
+     "Es": 0,
+     "Js": 0,
+     "breakEven": null
+    },
+    "reasons": {
+     "sellerLens.breakEven": "multiple_future_contracts"
+    },
+    "positions": {
+     "Z6": {
+      "contracts": -1,
+      "averagePrice": 75
+     },
+     "F7": {
+      "contracts": 1,
+      "averagePrice": 72.5
+     }
+    }
+   }
+  },
+  {
+   "name": "§5.4 protective put",
+   "plan": "§5.4 row 8",
+   "requirements": [
+    "F12",
+    "F18"
+   ],
+   "marks": {
+    "Z6": 70,
+    "P65": 0.8
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.5
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": 0,
+     "Co": -500,
+     "Vo": 800,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 300
+    },
+    "sellerLens": {
+     "Rs": 0,
+     "Es": 0,
+     "Js": 0,
+     "breakEven": 70,
+     "breakEvenIfOpenShortsExpire": 70
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 70
+     },
+     "P65": {
+      "contracts": 1,
+      "remainingNetPremium": -500
+     }
+    }
+   }
+  },
+  {
+   "name": "§5.4 long exercise path A: exercise one put",
+   "plan": "§5.4 row 9 A",
+   "requirements": [
+    "F33",
+    "F06"
+   ],
+   "marks": {
+    "Z6": 60,
+    "P65": 5
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 2,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 2,
+     "price": 0.5
+    },
+    {
+     "id": "e3",
+     "kind": "option_exercise",
+     "contract": "P65",
+     "q": -1,
+     "at": "2026-11-10T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": -5000,
+     "Uf": -10000,
+     "Co": -1000,
+     "Vo": 5000,
+     "E": 0,
+     "J": 0,
+     "economicPnl": -11000
+    },
+    "sellerLens": {
+     "Rs": 0,
+     "Es": 0,
+     "Js": 0,
+     "breakEven": 75,
+     "breakEvenIfOpenShortsExpire": 75,
+     "longExerciseAffectsBreakEven": true
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 70
+     },
+     "P65": {
+      "contracts": 1,
+      "remainingNetPremium": -500
+     }
+    }
+   }
+  },
+  {
+   "name": "§5.4 long exercise path B: sell the put, sell the future",
+   "plan": "§5.4 row 9 B",
+   "requirements": [
+    "F33"
+   ],
+   "marks": {
+    "Z6": 60,
+    "P65": 5
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 2,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 2,
+     "price": 0.5
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-10T21:00:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": -1,
+     "price": 5
+    },
+    {
+     "id": "e4",
+     "at": "2026-11-10T21:00:01Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 60
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": -10000,
+     "Uf": -10000,
+     "Co": 4000,
+     "Vo": 5000,
+     "E": 0,
+     "J": 0,
+     "economicPnl": -11000
+    },
+    "sellerLens": {
+     "Rs": 0,
+     "Es": 0,
+     "Js": 0,
+     "breakEven": 80,
+     "breakEvenIfOpenShortsExpire": 80,
+     "longExerciseAffectsBreakEven": false
+    }
+   }
+  },
+  {
+   "name": "§5.4 negative prices",
+   "plan": "§5.4 row 10",
+   "requirements": [
+    "F15"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": -5
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": -2
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 3000,
+     "Uf": 0,
+     "Co": 0,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 3000
+    },
+    "sellerLens": {
+     "breakEven": null
+    },
+    "reasons": {
+     "sellerLens.breakEven": "no_future_position"
+    },
+    "realized": {
+     "Z6": 3000
+    }
+   }
+  },
+  {
+   "name": "F15 a negative average and a negative mark",
+   "plan": "plan §6.4",
+   "requirements": [
+    "F15",
+    "F16"
+   ],
+   "marks": {
+    "Z6": -1
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": -5
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": -3
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": 6000,
+     "Co": 0,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 6000
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 2,
+      "averagePrice": -4
+     }
+    },
+    "sellerLens": {
+     "breakEven": -4
+    }
+   }
+  },
+  {
+   "name": "§9.6 three rolls, D at 71.8",
+   "plan": "§9.6",
+   "requirements": [
+    "F29",
+    "F30"
+   ],
+   "marks": {
+    "H7": 71.8
+   },
+   "events": [
+    {
+     "id": "evt-open-0001",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "evt-call-0001",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    },
+    {
+     "id": "evt-exp-0001",
+     "kind": "option_expiry",
+     "contract": "C75",
+     "q": 1,
+     "at": "2026-11-17T20:00:00Z"
+    },
+    {
+     "id": "evt-roll-0001",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 68
+    },
+    {
+     "id": "evt-roll-0002",
+     "at": "2026-11-18T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 69
+    },
+    {
+     "id": "evt-roll-0003",
+     "at": "2026-12-15T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 72
+    },
+    {
+     "id": "evt-roll-0004",
+     "at": "2026-12-15T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "G7",
+     "q": 1,
+     "price": 72.5
+    },
+    {
+     "id": "evt-roll-0005",
+     "at": "2027-01-14T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "G7",
+     "q": -1,
+     "price": 71
+    },
+    {
+     "id": "evt-roll-0006",
+     "at": "2027-01-14T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "H7",
+     "q": 1,
+     "price": 70.8
+    },
+    {
+     "id": "evt-fee-0001",
+     "at": "2027-01-20T15:00:00Z",
+     "kind": "fee",
+     "cash": -30,
+     "category": "futures"
+    }
+   ],
+   "expect": {
+    "steps": [
+     {
+      "after": "evt-roll-0001",
+      "Rf": -2000
+     },
+     {
+      "after": "evt-roll-0003",
+      "Rf": 1000
+     },
+     {
+      "after": "evt-roll-0005",
+      "Rf": -500
+     },
+     {
+      "after": "evt-roll-0006",
+      "positions": {
+       "H7": [
+        1,
+        70.8
+       ]
+      }
+     }
+    ],
+    "totals": {
+     "Rf": -500,
+     "Uf": 1000,
+     "Co": 1200,
+     "Vo": 0,
+     "E": 30,
+     "J": 0,
+     "economicPnl": 1670
+    },
+    "sellerLens": {
+     "Rs": 1200,
+     "Es": 30,
+     "Js": 0,
+     "breakEven": 70.13,
+     "breakEvenIfOpenShortsExpire": 70.13
+    },
+    "positions": {
+     "H7": {
+      "contracts": 1,
+      "averagePrice": 70.8
+     }
+    },
+    "realized": {
+     "Z6": -2000,
+     "F7": 3000,
+     "G7": -1500
+    },
+    "rolls": [
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "evt-roll-0001",
+        "Z6",
+        -1,
+        0
+       ],
+       [
+        "evt-roll-0002",
+        "F7",
+        1,
+        0
+       ]
+      ]
+     },
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "evt-roll-0003",
+        "F7",
+        -1,
+        0
+       ],
+       [
+        "evt-roll-0004",
+        "G7",
+        1,
+        0
+       ]
+      ]
+     },
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "evt-roll-0005",
+        "G7",
+        -1,
+        0
+       ],
+       [
+        "evt-roll-0006",
+        "H7",
+        1,
+        0
+       ]
+      ]
+     }
+    ],
+    "coreOutputExample": "plan §9.6 after three rolls, D at 71.8"
+   }
+  },
+  {
+   "name": "§9.6 three rolls, D unquoted",
+   "plan": "§9.6",
+   "requirements": [
+    "F29",
+    "F16"
+   ],
+   "events": [
+    {
+     "id": "evt-open-0001",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "evt-call-0001",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    },
+    {
+     "id": "evt-exp-0001",
+     "kind": "option_expiry",
+     "contract": "C75",
+     "q": 1,
+     "at": "2026-11-17T20:00:00Z"
+    },
+    {
+     "id": "evt-roll-0001",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 68
+    },
+    {
+     "id": "evt-roll-0002",
+     "at": "2026-11-18T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 69
+    },
+    {
+     "id": "evt-roll-0003",
+     "at": "2026-12-15T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 72
+    },
+    {
+     "id": "evt-roll-0004",
+     "at": "2026-12-15T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "G7",
+     "q": 1,
+     "price": 72.5
+    },
+    {
+     "id": "evt-roll-0005",
+     "at": "2027-01-14T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "G7",
+     "q": -1,
+     "price": 71
+    },
+    {
+     "id": "evt-roll-0006",
+     "at": "2027-01-14T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "H7",
+     "q": 1,
+     "price": 70.8
+    },
+    {
+     "id": "evt-fee-0001",
+     "at": "2027-01-20T15:00:00Z",
+     "kind": "fee",
+     "cash": -30,
+     "category": "futures"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": -500,
+     "Uf": null,
+     "Co": 1200,
+     "Vo": 0,
+     "E": 30,
+     "J": 0,
+     "economicPnl": null
+    },
+    "sellerLens": {
+     "breakEven": 70.13
+    },
+    "reasons": {
+     "totals.Uf": "missing_mark:fut-clh7-0001",
+     "totals.economicPnl": "missing_mark:fut-clh7-0001"
+    },
+    "coreOutputExample": "plan §9.6 with D unquoted: dependent totals are null with a reason"
+   }
+  },
+  {
+   "name": "§9.6 three rolls, then D closed at 71.8",
+   "plan": "§9.6",
+   "requirements": [
+    "F29"
+   ],
+   "events": [
+    {
+     "id": "evt-open-0001",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "evt-call-0001",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    },
+    {
+     "id": "evt-exp-0001",
+     "kind": "option_expiry",
+     "contract": "C75",
+     "q": 1,
+     "at": "2026-11-17T20:00:00Z"
+    },
+    {
+     "id": "evt-roll-0001",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 68
+    },
+    {
+     "id": "evt-roll-0002",
+     "at": "2026-11-18T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 69
+    },
+    {
+     "id": "evt-roll-0003",
+     "at": "2026-12-15T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 72
+    },
+    {
+     "id": "evt-roll-0004",
+     "at": "2026-12-15T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "G7",
+     "q": 1,
+     "price": 72.5
+    },
+    {
+     "id": "evt-roll-0005",
+     "at": "2027-01-14T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "G7",
+     "q": -1,
+     "price": 71
+    },
+    {
+     "id": "evt-roll-0006",
+     "at": "2027-01-14T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "H7",
+     "q": 1,
+     "price": 70.8
+    },
+    {
+     "id": "evt-fee-0001",
+     "at": "2027-01-20T15:00:00Z",
+     "kind": "fee",
+     "cash": -30,
+     "category": "futures"
+    },
+    {
+     "id": "evt-close-0001",
+     "at": "2027-02-01T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "H7",
+     "q": -1,
+     "price": 71.8
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 500,
+     "Uf": 0,
+     "Co": 1200,
+     "Vo": 0,
+     "E": 30,
+     "J": 0,
+     "economicPnl": 1670
+    },
+    "sellerLens": {
+     "breakEven": null
+    },
+    "reasons": {
+     "sellerLens.breakEven": "no_future_position"
+    },
+    "realized": {
+     "Z6": -2000,
+     "F7": 3000,
+     "G7": -1500,
+     "H7": 1000
+    }
+   }
+  },
+  {
+   "name": "F47 a repeating average",
+   "plan": "§6.4, §14.1 F47",
+   "requirements": [
+    "F47"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-03T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 71
+    },
+    {
+     "id": "e4",
+     "at": "2026-10-04T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 72
+    }
+   ],
+   "expect": {
+    "steps": [
+     {
+      "after": "e3",
+      "positions": {
+       "Z6": [
+        3,
+        "211/3"
+       ]
+      }
+     }
+    ],
+    "totals": {
+     "Rf": "5000/3"
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 2,
+      "averagePrice": "211/3"
+     }
+    }
+   }
+  },
+  {
+   "name": "F35 month collision: two real contracts, nothing realized",
+   "plan": "§2, month_collision.json",
+   "requirements": [
+    "F35",
+    "F03"
+   ],
+   "events": [
+    {
+     "id": "manual-z6",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "csv-f7",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 71
+    },
+    {
+     "id": "csv-z6",
+     "at": "2026-10-03T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 69
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 2,
+      "averagePrice": 69.5
+     },
+     "F7": {
+      "contracts": -1,
+      "averagePrice": 71
+     }
+    },
+    "realized": {}
+   }
+  },
+  {
+   "name": "F18 option commission is in Co, never in E",
+   "plan": "§8.1 E sum, F18",
+   "requirements": [
+    "F18"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.0,
+     "fees": 5
+    },
+    {
+     "id": "e2",
+     "kind": "option_expiry",
+     "contract": "C75",
+     "q": 1,
+     "at": "2026-11-17T20:00:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": 0,
+     "Co": 995,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 995
+    },
+    "sellerLens": {
+     "Rs": 995,
+     "Es": 0,
+     "breakEven": null
+    },
+    "reasons": {
+     "sellerLens.breakEven": "no_future_position"
+    }
+   }
+  },
+  {
+   "name": "F18 fees, rebates, categories and adjustments",
+   "plan": "§5.2 table, §8.1",
+   "requirements": [
+    "F18",
+    "F12"
+   ],
+   "marks": {
+    "Z6": 70,
+    "P65": 0.5
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70,
+     "fees": 2.5
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "fee",
+     "cash": -3,
+     "category": "futures",
+     "feeSource": "e1"
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-03T14:00:00Z",
+     "kind": "fee",
+     "cash": 1,
+     "category": "futures",
+     "refund": true
+    },
+    {
+     "id": "e4",
+     "at": "2026-10-04T14:00:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.5,
+     "fees": 2
+    },
+    {
+     "id": "e5",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "fee",
+     "cash": -4,
+     "category": "long_option"
+    },
+    {
+     "id": "e6",
+     "at": "2026-10-06T14:00:00Z",
+     "kind": "fee",
+     "cash": -7,
+     "category": "strategy",
+     "includeInCost": false
+    },
+    {
+     "id": "e7",
+     "at": "2026-10-07T14:00:00Z",
+     "kind": "manual_adjust",
+     "cash": 50,
+     "scope": "strategy"
+    },
+    {
+     "id": "e8",
+     "at": "2026-10-08T14:00:00Z",
+     "kind": "manual_adjust",
+     "cash": 20,
+     "scope": "seller_lens"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": 0,
+     "Co": -502,
+     "Vo": 500,
+     "E": 8.5,
+     "J": 70,
+     "economicPnl": 59.5
+    },
+    "sellerLens": {
+     "Rs": 0,
+     "Es": 4.5,
+     "Js": 20,
+     "breakEven": 69.9845,
+     "breakEvenIfOpenShortsExpire": 69.9845
+    }
+   }
+  },
+  {
+   "name": "F06 short put assigned",
+   "plan": "§6.1",
+   "requirements": [
+    "F06"
+   ],
+   "marks": {
+    "Z6": 66
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": -1,
+     "price": 2
+    },
+    {
+     "id": "e2",
+     "kind": "option_assignment",
+     "contract": "P65",
+     "q": 1,
+     "at": "2026-11-17T21:00:00Z",
+     "fees": 1.5
+    }
+   ],
+   "expect": {
+    "steps": [
+     {
+      "after": "e2",
+      "Rs": 2000,
+      "E": 1.5,
+      "Es": 1.5,
+      "positions": {
+       "Z6": [
+        1,
+        65
+       ]
+      }
+     }
+    ],
+    "totals": {
+     "Rf": 0,
+     "Uf": 1000,
+     "Co": 2000,
+     "Vo": 0,
+     "E": 1.5,
+     "J": 0,
+     "economicPnl": 2998.5
+    },
+    "sellerLens": {
+     "Rs": 2000,
+     "Es": 1.5,
+     "breakEven": 63.0015,
+     "breakEvenIfOpenShortsExpire": 63.0015
+    }
+   }
+  },
+  {
+   "name": "F06 short call assigned",
+   "plan": "§6.1",
+   "requirements": [
+    "F06"
+   ],
+   "marks": {
+    "Z6": 76
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    },
+    {
+     "id": "e2",
+     "kind": "option_assignment",
+     "contract": "C75",
+     "q": 1,
+     "at": "2026-11-17T21:00:00Z",
+     "fees": 1.5
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": -1000,
+     "Co": 1200,
+     "Vo": 0,
+     "E": 1.5,
+     "J": 0,
+     "economicPnl": 198.5
+    },
+    "sellerLens": {
+     "Rs": 1200,
+     "Es": 1.5,
+     "breakEven": 76.1985
+    },
+    "positions": {
+     "Z6": {
+      "contracts": -1,
+      "averagePrice": 75
+     }
+    }
+   }
+  },
+  {
+   "name": "F06 long call exercised",
+   "plan": "§6.1",
+   "requirements": [
+    "F06",
+    "F33"
+   ],
+   "marks": {
+    "Z6": 77
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": 1,
+     "price": 1.0
+    },
+    {
+     "id": "e2",
+     "kind": "option_exercise",
+     "contract": "C75",
+     "q": -1,
+     "at": "2026-11-10T21:00:00Z",
+     "fees": 1.5
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": 2000,
+     "Co": -1000,
+     "Vo": 0,
+     "E": 1.5,
+     "J": 0,
+     "economicPnl": 998.5
+    },
+    "sellerLens": {
+     "Rs": 0,
+     "Es": 0,
+     "breakEven": 75,
+     "longExerciseAffectsBreakEven": true
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 75
+     }
+    }
+   }
+  },
+  {
+   "name": "F06 long put exercised",
+   "plan": "§6.1",
+   "requirements": [
+    "F06"
+   ],
+   "marks": {
+    "Z6": 63
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.8
+    },
+    {
+     "id": "e2",
+     "kind": "option_exercise",
+     "contract": "P65",
+     "q": -1,
+     "at": "2026-11-10T21:00:00Z",
+     "fees": 1.5
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": 2000,
+     "Co": -800,
+     "Vo": 0,
+     "E": 1.5,
+     "J": 0,
+     "economicPnl": 1198.5
+    },
+    "sellerLens": {
+     "Es": 0,
+     "breakEven": 65,
+     "longExerciseAffectsBreakEven": true
+    },
+    "positions": {
+     "Z6": {
+      "contracts": -1,
+      "averagePrice": 65
+     }
+    }
+   }
+  },
+  {
+   "name": "F07 an assignment closes a short future",
+   "plan": "§6.1",
+   "requirements": [
+    "F07"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": -1,
+     "price": 2
+    },
+    {
+     "id": "e3",
+     "kind": "option_assignment",
+     "contract": "P65",
+     "q": 1,
+     "at": "2026-11-17T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 5000,
+     "Uf": 0,
+     "Co": 2000,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 7000
+    },
+    "positions": {},
+    "realized": {
+     "Z6": 5000
+    }
+   }
+  },
+  {
+   "name": "F07 an assignment reverses a short future",
+   "plan": "§6.1",
+   "requirements": [
+    "F07"
+   ],
+   "marks": {
+    "Z6": 66
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": -2,
+     "price": 2
+    },
+    {
+     "id": "e3",
+     "kind": "option_assignment",
+     "contract": "P65",
+     "q": 2,
+     "at": "2026-11-17T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 5000,
+     "Uf": 1000,
+     "Co": 4000,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 10000
+    },
+    "sellerLens": {
+     "Rs": 4000,
+     "breakEven": 56
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 65
+     }
+    }
+   }
+  },
+  {
+   "name": "F07 two deliveries on one day",
+   "plan": "§6.1",
+   "requirements": [
+    "F07"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": -1,
+     "price": 2
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    },
+    {
+     "id": "e3",
+     "kind": "option_assignment",
+     "contract": "P65",
+     "q": 1,
+     "at": "2026-11-17T21:00:00Z"
+    },
+    {
+     "id": "e4",
+     "kind": "option_assignment",
+     "contract": "C75",
+     "q": 1,
+     "at": "2026-11-17T21:30:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 10000,
+     "Uf": 0,
+     "Co": 3200,
+     "Vo": 0,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 13200
+    },
+    "sellerLens": {
+     "Rs": 3200
+    },
+    "positions": {},
+    "realized": {
+     "Z6": 10000
+    }
+   }
+  },
+  {
+   "name": "F36 a late fee goes back to the cycle of its trade",
+   "plan": "§13.2",
+   "requirements": [
+    "F36",
+    "F14"
+   ],
+   "boundaries": [
+    {
+     "id": "cycle-000000001",
+     "anchor": "e2"
+    }
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 70.1
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e4",
+     "at": "2026-10-06T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 70.2
+    },
+    {
+     "id": "e5",
+     "at": "2026-10-10T14:00:00Z",
+     "kind": "fee",
+     "cash": -10,
+     "category": "futures",
+     "feeSource": "e1"
+    }
+   ],
+   "expect": {
+    "cycles": [
+     {
+      "Rf": 100,
+      "E": 10,
+      "economicPnl": 90
+     },
+     {
+      "Rf": 200,
+      "E": 0,
+      "economicPnl": 200
+     }
+    ],
+    "totals": {
+     "Rf": 300,
+     "E": 10,
+     "economicPnl": 290
+    }
+   }
+  },
+  {
+   "name": "F36 before the late fee arrived",
+   "plan": "§13.2",
+   "requirements": [
+    "F36"
+   ],
+   "boundaries": [
+    {
+     "id": "cycle-000000001",
+     "anchor": "e2"
+    }
+   ],
+   "asOf": "2026-10-08T00:00:00Z",
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 70.1
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e4",
+     "at": "2026-10-06T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 70.2
+    },
+    {
+     "id": "e5",
+     "at": "2026-10-10T14:00:00Z",
+     "kind": "fee",
+     "cash": -10,
+     "category": "futures",
+     "feeSource": "e1"
+    }
+   ],
+   "expect": {
+    "cycles": [
+     {
+      "Rf": 100,
+      "E": 0,
+      "economicPnl": 100
+     },
+     {
+      "Rf": 200,
+      "E": 0,
+      "economicPnl": 200
+     }
+    ],
+    "totals": {
+     "Rf": 300,
+     "E": 0,
+     "economicPnl": 300
+    }
+   }
+  },
+  {
+   "name": "F14 a new cycle has its own seller lens",
+   "plan": "§1.3",
+   "requirements": [
+    "F14"
+   ],
+   "boundaries": [
+    {
+     "id": "cycle-000000001",
+     "anchor": "e2"
+    }
+   ],
+   "marks": {
+    "F7": 73
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 75
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 72
+    }
+   ],
+   "expect": {
+    "cycles": [
+     {
+      "Rf": 5000,
+      "economicPnl": 5000
+     },
+     {
+      "Rf": 0,
+      "economicPnl": 1000
+     }
+    ],
+    "totals": {
+     "Rf": 5000,
+     "economicPnl": 6000
+    },
+    "sellerLens": {
+     "Rs": 0,
+     "breakEven": 72
+    }
+   }
+  },
+  {
+   "name": "§13.2 a sourceless futures fee at a boundary belongs to no single cycle",
+   "plan": "§13.2",
+   "requirements": [
+    "F36",
+    "F14"
+   ],
+   "boundaries": [
+    {
+     "id": "cycle-000000001",
+     "anchor": "e2"
+    }
+   ],
+   "marks": {
+    "F7": 71
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 70.1
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "fee",
+     "cash": -10,
+     "category": "futures"
+    },
+    {
+     "id": "e4",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    }
+   ],
+   "expect": {
+    "cycles": [
+     {
+      "Rf": 100,
+      "E": 0,
+      "economicPnl": null
+     },
+     {
+      "Rf": 0,
+      "E": 0,
+      "economicPnl": null
+     }
+    ],
+    "totals": {
+     "Rf": 100,
+     "Uf": 1000,
+     "E": 10,
+     "economicPnl": 1090
+    },
+    "unattributed": {
+     "E": 10,
+     "J": 0
+    },
+    "sellerLens": {
+     "Es": 0,
+     "breakEven": null
+    },
+    "reasons": {
+     "cycles.0.totals.economicPnl": "cycle_unattributed:e3",
+     "cycles.1.totals.economicPnl": "cycle_unattributed:e3",
+     "sellerLens.breakEven": "cycle_unattributed:e3"
+    }
+   }
+  },
+  {
+   "name": "§13.2 a sourceless long-option fee at a boundary leaves the break-even alone",
+   "plan": "§13.2",
+   "requirements": [
+    "F36"
+   ],
+   "boundaries": [
+    {
+     "id": "cycle-000000001",
+     "anchor": "e2"
+    }
+   ],
+   "marks": {
+    "F7": 71
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 70.1
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "fee",
+     "cash": -10,
+     "category": "long_option"
+    },
+    {
+     "id": "e4",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    }
+   ],
+   "expect": {
+    "cycles": [
+     {
+      "E": 0,
+      "economicPnl": null
+     },
+     {
+      "E": 0,
+      "economicPnl": null
+     }
+    ],
+    "totals": {
+     "E": 10,
+     "economicPnl": 1090
+    },
+    "unattributed": {
+     "E": 10,
+     "J": 0
+    },
+    "sellerLens": {
+     "breakEven": 70
+    }
+   }
+  },
+  {
+   "name": "§13.2 a seller-lens adjustment at a boundary belongs to no single cycle",
+   "plan": "§13.2",
+   "requirements": [
+    "F36"
+   ],
+   "boundaries": [
+    {
+     "id": "cycle-000000001",
+     "anchor": "e2"
+    }
+   ],
+   "marks": {
+    "F7": 71
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 70.1
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "manual_adjust",
+     "cash": -10,
+     "scope": "seller_lens"
+    },
+    {
+     "id": "e4",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    }
+   ],
+   "expect": {
+    "cycles": [
+     {
+      "J": 0,
+      "economicPnl": null
+     },
+     {
+      "J": 0,
+      "economicPnl": null
+     }
+    ],
+    "totals": {
+     "J": -10,
+     "economicPnl": 1090
+    },
+    "unattributed": {
+     "E": 0,
+     "J": -10
+    },
+    "sellerLens": {
+     "Js": 0,
+     "breakEven": null
+    },
+    "reasons": {
+     "sellerLens.breakEven": "cycle_unattributed:e3"
+    }
+   }
+  },
+  {
+   "name": "§13.2 a late fee timed across the as-of instant leaves its trade's cycle open",
+   "plan": "§13.2, §8.1",
+   "requirements": [
+    "F36",
+    "F22"
+   ],
+   "boundaries": [
+    {
+     "id": "cycle-000000001",
+     "anchor": "e2"
+    }
+   ],
+   "marks": {
+    "F7": 71
+   },
+   "asOf": "2026-10-08T12:00:00Z",
+   "model": false,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 70.1
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e5",
+     "range": [
+      "2026-10-08T00:00:00Z",
+      "2026-10-09T00:00:00Z"
+     ],
+     "kind": "fee",
+     "cash": -10,
+     "category": "futures",
+     "feeSource": "e1"
+    }
+   ],
+   "expect": {
+    "cycles": [
+     {
+      "Rf": 100,
+      "E": null,
+      "economicPnl": null
+     },
+     {
+      "Rf": 0,
+      "E": 0,
+      "economicPnl": 1000
+     }
+    ],
+    "totals": {
+     "Rf": 100,
+     "Uf": 1000,
+     "E": null,
+     "economicPnl": null
+    },
+    "sellerLens": {
+     "Es": 0,
+     "breakEven": 70
+    },
+    "reasons": {
+     "cycles.0.totals.E": "event_time_unresolved:e5",
+     "totals.E": "event_time_unresolved:e5"
+    }
+   }
+  },
+  {
+   "name": "§13.2 a boundary whose group is not over at the as-of instant is not passed yet",
+   "plan": "§13.2, §9.2",
+   "requirements": [
+    "F36",
+    "F14",
+    "F22"
+   ],
+   "boundaries": [
+    {
+     "id": "cycle-000000001",
+     "anchor": "e2"
+    }
+   ],
+   "asOf": "2026-10-02T15:00:00Z",
+   "model": false,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 71
+    },
+    {
+     "id": "e3",
+     "range": [
+      "2026-10-02T12:00:00Z",
+      "2026-10-02T18:00:00Z"
+     ],
+     "kind": "fee",
+     "cash": -5,
+     "category": "futures"
+    },
+    {
+     "id": "e4",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    }
+   ],
+   "expect": {
+    "cycles": [
+     {
+      "Rf": 1000,
+      "E": 0,
+      "economicPnl": null
+     }
+    ],
+    "totals": {
+     "Rf": 1000,
+     "E": null,
+     "economicPnl": null
+    },
+    "unattributed": {
+     "E": null,
+     "J": 0
+    },
+    "reasons": {
+     "cycles.0.totals.economicPnl": "event_time_unresolved:e3",
+     "unattributed.E": "event_time_unresolved:e3"
+    }
+   }
+  },
+  {
+   "name": "F42 at B the change since B is zero",
+   "plan": "§9.2, §14.2",
+   "requirements": [
+    "F42"
+   ],
+   "historyScope": "since_baseline",
+   "marks": {
+    "Z6": 70,
+    "P65": 0.5
+   },
+   "events": [
+    {
+     "id": "b1",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70,
+     "baseline": "reference_price",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    },
+    {
+     "id": "b2",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.5,
+     "baseline": "reference_price",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": 0,
+     "Co": 0,
+     "Vo": 500,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 0
+    },
+    "openingValue": 500,
+    "sellerLens": {
+     "breakEven": null
+    },
+    "reasons": {
+     "sellerLens.breakEven": "opening_premium_unknown:fop-loz6-p65-01"
+    }
+   }
+  },
+  {
+   "name": "F42 as of B the ledger holds its opening balances",
+   "plan": "§9.2, §14.2",
+   "requirements": [
+    "F42"
+   ],
+   "historyScope": "since_baseline",
+   "marks": {
+    "Z6": 70,
+    "P65": 0.5
+   },
+   "asOf": "2026-10-01T21:00:00Z",
+   "events": [
+    {
+     "id": "b1",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70,
+     "baseline": "reference_price",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    },
+    {
+     "id": "b2",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.5,
+     "baseline": "reference_price",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "Uf": 0,
+     "Co": 0,
+     "Vo": 500,
+     "E": 0,
+     "J": 0,
+     "economicPnl": 0
+    },
+    "openingValue": 500,
+    "baselineAsOfUtc": "2026-10-01T21:00:00Z",
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 70
+     },
+     "P65": {
+      "contracts": 1
+     }
+    }
+   }
+  },
+  {
+   "name": "F42 before B the ledger cannot tell a change",
+   "plan": "§9.2",
+   "requirements": [
+    "F42"
+   ],
+   "historyScope": "since_baseline",
+   "marks": {
+    "Z6": 70,
+    "P65": 0.5
+   },
+   "asOf": "2026-10-01T20:00:00Z",
+   "model": false,
+   "events": [
+    {
+     "id": "b1",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70,
+     "baseline": "reference_price",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    },
+    {
+     "id": "b2",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.5,
+     "baseline": "reference_price",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 0,
+     "economicPnl": null
+    },
+    "openingValue": null,
+    "baselineAsOfUtc": "2026-10-01T21:00:00Z",
+    "positions": {},
+    "reasons": {
+     "scope.openingValue": "as_of_before_baseline",
+     "totals.economicPnl": "as_of_before_baseline"
+    }
+   }
+  },
+  {
+   "name": "F42 the change since B",
+   "plan": "§9.2, §14.2",
+   "requirements": [
+    "F42"
+   ],
+   "historyScope": "since_baseline",
+   "marks": {
+    "Z6": 71,
+    "P65": 0.8
+   },
+   "events": [
+    {
+     "id": "b1",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70,
+     "baseline": "reference_price",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    },
+    {
+     "id": "b2",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.5,
+     "baseline": "reference_price",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Uf": 1000,
+     "Vo": 800,
+     "economicPnl": 1300
+    },
+    "openingValue": 500
+   }
+  },
+  {
+   "name": "F42 a put without its B price leaves the total unknown",
+   "plan": "§9.2, §14.2",
+   "requirements": [
+    "F42"
+   ],
+   "historyScope": "since_baseline",
+   "marks": {
+    "Z6": 71,
+    "P65": 0.8
+   },
+   "events": [
+    {
+     "id": "b1",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70,
+     "baseline": "reference_price",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    },
+    {
+     "id": "b2",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "P65",
+     "q": 1,
+     "baseline": "unknown_cost",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Uf": 1000,
+     "Vo": 800,
+     "economicPnl": null
+    },
+    "openingValue": null,
+    "reasons": {
+     "totals.economicPnl": "unknown_opening_cost:fop-loz6-p65-01"
+    }
+   }
+  },
+  {
+   "name": "F42 a short option baseline is not new premium",
+   "plan": "§14.2",
+   "requirements": [
+    "F42"
+   ],
+   "historyScope": "since_baseline",
+   "marks": {
+    "C75": 1
+   },
+   "events": [
+    {
+     "id": "b1",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "C75",
+     "q": -1,
+     "price": 2,
+     "baseline": "reference_price",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Co": 0,
+     "Vo": -1000,
+     "economicPnl": 1000
+    },
+    "openingValue": -2000
+   }
+  },
+  {
+   "name": "§14.2 simultaneous buy and sell, bought first by evidence",
+   "plan": "§9.2, §14.2",
+   "requirements": [
+    "F41",
+    "F22"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 80,
+     "evidence": "tws-20261002#1"
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 75,
+     "evidence": "tws-20261002#2"
+    }
+   ],
+   "expect": {
+    "order": [
+     "e1",
+     "e2",
+     "e3"
+    ],
+    "totals": {
+     "Rf": 0
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 75
+     }
+    }
+   }
+  },
+  {
+   "name": "§14.2 simultaneous buy and sell, sold first by evidence",
+   "plan": "§9.2, §14.2",
+   "requirements": [
+    "F41",
+    "F22"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 75,
+     "evidence": "tws-20261002#1"
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 80,
+     "evidence": "tws-20261002#2"
+    }
+   ],
+   "expect": {
+    "order": [
+     "e1",
+     "e3",
+     "e2"
+    ],
+    "totals": {
+     "Rf": 5000
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 80
+     }
+    }
+   }
+  },
+  {
+   "name": "§14.2 simultaneous buy and sell without evidence",
+   "plan": "§9.2, §14.2",
+   "requirements": [
+    "F41"
+   ],
+   "model": false,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 80
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 75
+    }
+   ],
+   "expect": {
+    "ambiguous": [
+     "Z6"
+    ],
+    "reasons": {
+     "totals.Rf": "order_ambiguous:e3"
+    }
+   }
+  },
+  {
+   "name": "F41 simultaneous adds are exchangeable",
+   "plan": "§9.2 condition 1",
+   "requirements": [
+    "F41"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 2,
+     "price": 71,
+     "src": {
+      "ns": "tws_exec",
+      "ref": "fill-a"
+     }
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70,
+     "src": {
+      "ns": "tws_exec",
+      "ref": "fill-b"
+     }
+    }
+   ],
+   "expect": {
+    "order": [
+     "e1",
+     "e2"
+    ],
+    "positions": {
+     "Z6": {
+      "contracts": 3,
+      "averagePrice": "212/3"
+     }
+    }
+   }
+  },
+  {
+   "name": "F41 the same adds listed the other way round",
+   "plan": "§9.2 condition 1",
+   "requirements": [
+    "F41"
+   ],
+   "events": [
+    {
+     "id": "x2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70,
+     "src": {
+      "ns": "tws_exec",
+      "ref": "fill-b"
+     }
+    },
+    {
+     "id": "x1",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 2,
+     "price": 71,
+     "src": {
+      "ns": "tws_exec",
+      "ref": "fill-a"
+     }
+    }
+   ],
+   "expect": {
+    "order": [
+     "x1",
+     "x2"
+    ],
+    "positions": {
+     "Z6": {
+      "contracts": 3,
+      "averagePrice": "212/3"
+     }
+    }
+   }
+  },
+  {
+   "name": "F41 simultaneous reductions that do not cross zero are exchangeable",
+   "plan": "§9.2 condition 2",
+   "requirements": [
+    "F41"
+   ],
+   "events": [
+    {
+     "id": "e0",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 3,
+     "price": 70
+    },
+    {
+     "id": "e1",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 72,
+     "src": {
+      "ns": "tws_exec",
+      "ref": "fill-a"
+     }
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 73,
+     "src": {
+      "ns": "tws_exec",
+      "ref": "fill-b"
+     }
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 5000
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 70
+     }
+    }
+   }
+  },
+  {
+   "name": "F41 simultaneous fills of different contracts are exchangeable",
+   "plan": "§9.2",
+   "requirements": [
+    "F41"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 71
+    }
+   ],
+   "expect": {
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 70
+     },
+     "F7": {
+      "contracts": -1,
+      "averagePrice": 71
+     }
+    }
+   }
+  },
+  {
+   "name": "F41 simultaneous reductions that cross zero need evidence",
+   "plan": "§9.2",
+   "requirements": [
+    "F41"
+   ],
+   "model": false,
+   "events": [
+    {
+     "id": "e0",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e1",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 72
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 73
+    }
+   ],
+   "expect": {
+    "ambiguous": [
+     "Z6"
+    ]
+   }
+  },
+  {
+   "name": "F41 a boundary after a group that empties the ledger",
+   "plan": "§9.2",
+   "requirements": [
+    "F41",
+    "F14"
+   ],
+   "boundaries": [
+    {
+     "id": "cycle-000000001",
+     "anchor": "e2"
+    }
+   ],
+   "marks": {
+    "F7": 71
+   },
+   "events": [
+    {
+     "id": "e0",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 2,
+     "price": 70
+    },
+    {
+     "id": "e1",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 73,
+     "src": {
+      "ns": "tws_exec",
+      "ref": "fill-a"
+     }
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 72,
+     "src": {
+      "ns": "tws_exec",
+      "ref": "fill-b"
+     }
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 71
+    }
+   ],
+   "expect": {
+    "cycles": [
+     {
+      "Rf": 5000,
+      "economicPnl": 5000
+     },
+     {
+      "Rf": 0
+     }
+    ],
+    "boundaryAnchors": {
+     "valid": [
+      "e1",
+      "e2"
+     ],
+     "refusedTogether": [
+      [
+       "e1",
+       "e2"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "F41 two months closed together: a boundary on either sits after both",
+   "plan": "§9.2, §8.3",
+   "requirements": [
+    "F41",
+    "F14"
+   ],
+   "boundaries": [
+    {
+     "id": "cycle-000000001",
+     "anchor": "e3"
+    }
+   ],
+   "marks": {
+    "G7": 71
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 72
+    },
+    {
+     "id": "e4",
+     "at": "2026-10-02T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 72
+    },
+    {
+     "id": "e5",
+     "at": "2026-10-05T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "G7",
+     "q": 1,
+     "price": 71
+    }
+   ],
+   "expect": {
+    "cycles": [
+     {
+      "Rf": 4000,
+      "economicPnl": 4000
+     },
+     {
+      "Rf": 0,
+      "economicPnl": 0
+     }
+    ],
+    "boundaryAnchors": {
+     "valid": [
+      "e3",
+      "e4"
+     ],
+     "refusedTogether": [
+      [
+       "e3",
+       "e4"
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "§9.2 as of inside a fill's range, evidence proves the fill came first",
+   "plan": "§9.2, §8.1",
+   "requirements": [
+    "F22",
+    "F41"
+   ],
+   "asOf": "2026-10-02T13:00:00Z",
+   "marks": {
+    "Z6": 75
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "range": [
+      "2026-10-02T10:00:00Z",
+      "2026-10-02T20:00:00Z"
+     ],
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 60,
+     "evidence": "tws-20261002#1"
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T12:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 80,
+     "evidence": "tws-20261002#2"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 15000,
+     "Uf": 10000,
+     "economicPnl": 25000
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 65
+     }
+    },
+    "realized": {
+     "Z6": 15000
+    },
+    "sellerLens": {
+     "breakEven": 50
+    }
+   }
+  },
+  {
+   "name": "§9.2 as of inside a fill's range, evidence puts the fill after the close",
+   "plan": "§9.2, §8.1",
+   "requirements": [
+    "F22",
+    "F41"
+   ],
+   "asOf": "2026-10-02T13:00:00Z",
+   "marks": {
+    "Z6": 75
+   },
+   "model": false,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T12:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 80,
+     "evidence": "tws-20261002#1"
+    },
+    {
+     "id": "e2",
+     "range": [
+      "2026-10-02T10:00:00Z",
+      "2026-10-02T20:00:00Z"
+     ],
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 60,
+     "evidence": "tws-20261002#2"
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 10000,
+     "Uf": null,
+     "economicPnl": null
+    },
+    "positions": {
+     "Z6": {
+      "contracts": null
+     }
+    },
+    "realized": {
+     "Z6": 10000
+    },
+    "reasons": {
+     "totals.Uf": "event_time_unresolved:e2"
+    }
+   }
+  },
+  {
+   "name": "§9.2 an order no evidence fixes stays unfixed as of inside it",
+   "plan": "§9.2, §8.1",
+   "requirements": [
+    "F41",
+    "F22"
+   ],
+   "asOf": "2026-10-02T13:00:00Z",
+   "model": false,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-02T12:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 75
+    },
+    {
+     "id": "e3",
+     "range": [
+      "2026-10-02T10:00:00Z",
+      "2026-10-02T20:00:00Z"
+     ],
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 80
+    }
+   ],
+   "expect": {
+    "ambiguous": [
+     "Z6"
+    ],
+    "totals": {
+     "Rf": null
+    },
+    "reasons": {
+     "totals.Rf": "order_ambiguous:e2"
+    }
+   }
+  },
+  {
+   "name": "§9.2 evidence that contradicts the times orders nothing",
+   "plan": "§9.2",
+   "requirements": [
+    "F41"
+   ],
+   "model": false,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 2,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "range": [
+      "2026-10-02T10:00:00Z",
+      "2026-10-02T20:00:00Z"
+     ],
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 60,
+     "evidence": "tws-20261002#2"
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-02T11:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 72,
+     "evidence": "tws-20261002#3"
+    },
+    {
+     "id": "e4",
+     "at": "2026-10-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 73,
+     "evidence": "tws-20261002#1"
+    }
+   ],
+   "expect": {
+    "ambiguous": [
+     "Z6"
+    ],
+    "reasons": {
+     "totals.Rf": "order_ambiguous:e3"
+    }
+   }
+  },
+  {
+   "name": "F22 a trade-date-only fill overlaps an instant",
+   "plan": "§9.2 ranges",
+   "requirements": [
+    "F22",
+    "F41"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "range": [
+      "2026-09-30T04:00:00Z",
+      "2026-10-02T04:00:00Z"
+     ],
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 71
+    },
+    {
+     "id": "e3",
+     "at": "2026-10-03T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 72
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": 1500
+    },
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 70.5
+     }
+    },
+    "groups": [
+     [
+      "e1",
+      "e2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "F13 options only",
+   "plan": "§5.3",
+   "requirements": [
+    "F13"
+   ],
+   "marks": {
+    "C75": 1
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Co": 1200,
+     "Vo": -1000,
+     "economicPnl": 200
+    },
+    "sellerLens": {
+     "breakEven": null
+    },
+    "reasons": {
+     "sellerLens.breakEven": "no_future_position"
+    }
+   }
+  },
+  {
+   "name": "F13 a cross-month spread nets to zero but is not flat",
+   "plan": "§5.3",
+   "requirements": [
+    "F13"
+   ],
+   "marks": {
+    "Z6": 70,
+    "F7": 71
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-10-01T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 71
+    }
+   ],
+   "expect": {
+    "positions": {
+     "Z6": {
+      "contracts": 1,
+      "averagePrice": 70
+     },
+     "F7": {
+      "contracts": -1,
+      "averagePrice": 71
+     }
+    },
+    "sellerLens": {
+     "breakEven": null
+    },
+    "reasons": {
+     "sellerLens.breakEven": "multiple_future_contracts"
+    }
+   }
+  },
+  {
+   "name": "F16 a zero option quote is a quote",
+   "plan": "§6.4, §10.3",
+   "requirements": [
+    "F16"
+   ],
+   "marks": {
+    "C75": 0
+   },
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Co": 1200,
+     "Vo": 0,
+     "economicPnl": 1200
+    }
+   }
+  },
+  {
+   "name": "F16 a negative option quote is no quote",
+   "plan": "§6.4",
+   "requirements": [
+    "F16"
+   ],
+   "marks": {
+    "C75": -0.5
+   },
+   "model": false,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Co": 1200,
+     "Vo": null,
+     "economicPnl": null
+    },
+    "reasons": {
+     "totals.Vo": "missing_mark:fop-loz6-c75-01",
+     "totals.economicPnl": "missing_mark:fop-loz6-c75-01"
+    }
+   }
+  },
+  {
+   "name": "F09 an order group pairs its legs as evidence",
+   "plan": "§6.2",
+   "requirements": [
+    "F09"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 2,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -2,
+     "price": 68,
+     "src": {
+      "ns": "tws_exec",
+      "ref": "combo-0001",
+      "stated": [
+       null,
+       null
+      ]
+     }
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 2,
+     "price": 69,
+     "src": {
+      "ns": "tws_exec",
+      "ref": "combo-0001",
+      "stated": [
+       null,
+       null
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": -4000
+    },
+    "rolls": [
+     {
+      "evidence": "order",
+      "matched": 2,
+      "legs": [
+       [
+        "e2",
+        "Z6",
+        -2,
+        0
+       ],
+       [
+        "e3",
+        "F7",
+        2,
+        0
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "F10 one close feeds three rolls, its fee split without loss",
+   "plan": "§6.2",
+   "requirements": [
+    "F10",
+    "F09"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 3,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -3,
+     "price": 68,
+     "fees": 0.01
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-18T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 69
+    },
+    {
+     "id": "e4",
+     "at": "2026-11-18T15:00:02Z",
+     "kind": "futures_trade",
+     "contract": "G7",
+     "q": 1,
+     "price": 69.5
+    },
+    {
+     "id": "e5",
+     "at": "2026-11-18T15:00:03Z",
+     "kind": "futures_trade",
+     "contract": "G7",
+     "q": 1,
+     "price": 69.6
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": -6000,
+     "E": 0.01
+    },
+    "rolls": [
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "e2",
+        "Z6",
+        -1,
+        "1/300"
+       ],
+       [
+        "e3",
+        "F7",
+        1,
+        0
+       ]
+      ]
+     },
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "e2",
+        "Z6",
+        -1,
+        "1/300"
+       ],
+       [
+        "e4",
+        "G7",
+        1,
+        0
+       ]
+      ]
+     },
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "e2",
+        "Z6",
+        -1,
+        "1/300"
+       ],
+       [
+        "e5",
+        "G7",
+        1,
+        0
+       ]
+      ]
+     }
+    ],
+    "rollFeesAddUp": {
+     "e2": 0.01
+    }
+   }
+  },
+  {
+   "name": "F10 only the closing part of a reversal rolls",
+   "plan": "§6.2",
+   "requirements": [
+    "F10"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -2,
+     "price": 68
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-18T15:00:01Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 69
+    }
+   ],
+   "expect": {
+    "positions": {
+     "Z6": {
+      "contracts": -1,
+      "averagePrice": 68
+     },
+     "F7": {
+      "contracts": 1,
+      "averagePrice": 69
+     }
+    },
+    "rolls": [
+     {
+      "evidence": "candidate",
+      "matched": 1,
+      "legs": [
+       [
+        "e2",
+        "Z6",
+        -1,
+        0
+       ],
+       [
+        "e3",
+        "F7",
+        1,
+        0
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "F09 a roll with one leg only",
+   "plan": "§6.2",
+   "requirements": [
+    "F09",
+    "F30"
+   ],
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-01T14:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-18T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "Z6",
+     "q": -1,
+     "price": 68
+    }
+   ],
+   "expect": {
+    "totals": {
+     "Rf": -2000
+    },
+    "rolls": []
+   }
+  },
+  {
+   "name": "core_output: a baseline option with unknown premium",
+   "plan": "core_output.json example 3",
+   "requirements": [
+    "F42"
+   ],
+   "historyScope": "since_baseline",
+   "marks": {
+    "C75": 1.4
+   },
+   "bindings": {
+    "C75": "verified_statement"
+   },
+   "events": [
+    {
+     "id": "b1",
+     "at": "2026-10-01T21:00:00Z",
+     "kind": "opening_balance",
+     "contract": "C75",
+     "q": -1,
+     "baseline": "unknown_cost",
+     "baselineAsOf": "2026-10-01T21:00:00Z"
+    }
+   ],
+   "expect": {
+    "coreOutputExample": "shape: a baseline option with unknown premium keeps its quantity and value",
+    "totals": {
+     "Vo": -1400,
+     "economicPnl": null
+    },
+    "openingValue": null
+   }
+  },
+  {
+   "name": "core_output: an as-of instant inside a delivery range",
+   "plan": "core_output.json example 4, §8.1",
+   "requirements": [
+    "F46",
+    "F22"
+   ],
+   "asOf": "2026-11-17T20:00:00Z",
+   "marks": {
+    "Z6": 75.4,
+    "C75": 0.45
+   },
+   "bindings": {
+    "C75": "verified_statement"
+   },
+   "model": false,
+   "events": [
+    {
+     "id": "evt-sell-00001",
+     "at": "2026-10-01T14:30:05Z",
+     "kind": "option_trade",
+     "contract": "C75",
+     "q": -1,
+     "price": 1.2,
+     "fees": 2.5
+    },
+    {
+     "id": "evt-assign-00001",
+     "kind": "option_assignment",
+     "contract": "C75",
+     "q": 1,
+     "fees": 1.5,
+     "range": [
+      "2026-11-16T05:00:00Z",
+      "2026-11-18T05:00:00Z"
+     ]
+    }
+   ],
+   "expect": {
+    "coreOutputExample": "shape: an as-of instant inside a delivery range leaves both legs unknown",
+    "reasons": {
+     "totals.economicPnl": "delivery_time_unresolved:evt-assign-00001"
+    }
+   }
+  }
+ ]
+}

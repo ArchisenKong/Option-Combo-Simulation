@@ -25,11 +25,15 @@ CONTRACT = REPO_ROOT / 'tests' / 'fixtures' / 'cost_basis_fop' / 'contract'
 
 
 def row(event_id, kind, seq, *, contracts=None, future_contracts=None, contract='c1',
-        delivered=None, open_close=None, at='2026-10-01T14:00:00.000000Z'):
+        delivered=None, open_close=None, at='2026-10-01T14:00:00.000000Z', span=None,
+        evidence=None, ref=None, price=None):
+    start, end = span or (None, None)
     return {'event_id': event_id, 'kind': kind, 'seq': seq, 'contracts': contracts,
             'future_contracts': future_contracts, 'contract_id': contract,
             'delivered_contract_id': delivered, 'open_close': open_close,
-            'executed_at_utc': at, 'time_range_start_utc': None, 'time_range_end_utc': None}
+            'executed_at_utc': None if span else at, 'time_range_start_utc': start,
+            'time_range_end_utc': end, 'order_evidence': evidence, 'external_ref': ref,
+            'price': price, 'cash_amount': 0.0, 'fees': 0.0}
 
 
 class ContractShapeTests(unittest.TestCase):
@@ -133,12 +137,13 @@ class RuleTests(unittest.TestCase):
                 row('b', 'futures_trade', 2, future_contracts=-1, contract='f1',
                     at='2026-10-02T00:00:00.000000Z'),
                 row('c', 'fee', 3, at='2026-10-03T00:00:00.000000Z')]
-        _order, after = domain.replay_quantities(rows)
-        domain.check_cycle_anchors([{'boundary_id': 'x', 'anchor_event_id': 'b'}], after, {'a', 'b', 'c'})
-        domain.check_cycle_anchors([{'boundary_id': 'x', 'anchor_event_id': 'c'}], after, {'a', 'b', 'c'})
-        for anchor, live in (('a', {'a', 'b', 'c'}), ('b', {'a', 'c'})):
+        timeline = domain.build_timeline(rows)
+        domain.check_cycle_anchors([{'boundary_id': 'x', 'anchor_event_id': 'b'}], timeline)
+        domain.check_cycle_anchors([{'boundary_id': 'x', 'anchor_event_id': 'c'}], timeline)
+        without_b = domain.build_timeline([rows[0], rows[2]])
+        for anchor, built in (('a', timeline), ('b', without_b)):
             with self.subTest(anchor=anchor), self.assertRaises(domain.FopDomainError) as caught:
-                domain.check_cycle_anchors([{'boundary_id': 'x', 'anchor_event_id': anchor}], after, live)
+                domain.check_cycle_anchors([{'boundary_id': 'x', 'anchor_event_id': anchor}], built)
             self.assertEqual(caught.exception.code, 'fop_cycle_boundary_violated')
 
 

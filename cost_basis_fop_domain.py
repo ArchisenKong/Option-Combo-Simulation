@@ -8,14 +8,18 @@ back. Every payload is first checked against the frozen contract types
 language cannot express (tests/fixtures/cost_basis_fop/contract/
 protocol.json "domainRules").
 
-The quantity replay here is the P2 minimum: per contract, in a fixed order,
-no close may take more than is open and a closed cycle boundary must sit where
-every balance is zero. P3 replaces the order with the §9.2 ambiguity-group
-comparator; nothing here computes economics. check_graph proves a whole
-backup graph before a restore writes it.
+The timeline (build_timeline) orders events as plan §9.2 says, refuses an
+order that changes a result and that no evidence fixes, replays quantities
+per contract (no close may take more than is open) and keeps every closed cycle
+boundary where all balances are zero, after the whole group of its anchor;
+listing_order pages events in that same order. js/cost_basis_fop_core.js
+orders the same way and computes the economics;
+nothing here computes economics. check_graph proves a whole backup graph
+before a restore writes it.
 """
 import json
 import math
+import re
 from datetime import datetime, timezone
 
 try:
@@ -306,13 +310,6 @@ def time_projection(time, timezone_name):
     return local.date().isoformat(), None
 
 
-def order_key(details, seq):
-    """The P2 replay order: effective start, end, then entry order (P3: §9.2)."""
-    start = details['executed_at_utc'] or details['time_range_start_utc']
-    end = details['executed_at_utc'] or details['time_range_end_utc']
-    return (start, end, seq)
-
-
 def delivery_direction(right, closing_contracts):
     """The FUT delta sign of a delivery (plan §6.1).
 
@@ -584,41 +581,210 @@ def check_package_keys(package):
 
 
 # ----------------------------------------------------------------------
-# Timeline (P2 minimum)
+# Timeline (plan §9.2): economic order, ambiguity groups, quantities
 # ----------------------------------------------------------------------
+#
+# js/cost_basis_fop_core.js orders events with the same rules; both run the
+# vectors of tests/fixtures/cost_basis_fop/core_vectors.json.
+#
+# - Every event has an interval: [t, t] for an instant, [start, end] for a
+#   time range (UtcInstant text compares as time).
+# - Events are sorted by (start, end, stable key). Events whose intervals
+#   overlap, same second included, form one ambiguity group (connected by
+#   overlap). A group of one event is ordered by time.
+# - A group is order-independent when, for every FUT and FOP contract it
+#   touches, with q0 the position before the group and d_i the changes in
+#   it, either all d_i share one sign and q0 is zero or of that sign (pure
+#   adding), or all d_i share one sign opposite to q0 and |sum d_i| <= |q0|
+#   (pure reducing, no crossing). Fees and adjustments carry no quantity.
+#   Such a group is ordered by stable key; that order only makes output
+#   deterministic.
+# - Otherwise every event touching a contract that fails the test needs
+#   order evidence, time.orderEvidence of the form '<scope>#<sequence>', all
+#   in one scope with distinct sequences, and never putting an event after one
+#   that ended before it started. Those events go first in that order, the
+#   others follow by stable key. Without it the ledger refuses the write
+#   (fop_ordering_ambiguous); entry order (seq) is never evidence.
+# - The stable key is the event's primary source key (external_ref without
+#   a split suffix), then its kind and economic values, then its id.
+
+ORDER_EVIDENCE = re.compile(r'^([^#]+)#([0-9]{1,15})$')
+
+
+def event_interval(row):
+    """(start, end) UtcInstant text of one event row."""
+    if row['executed_at_utc']:
+        return row['executed_at_utc'], row['executed_at_utc']
+    return row['time_range_start_utc'], row['time_range_end_utc']
+
+
+def _key_number(value):
+    return (0, 0.0) if value is None else (1, float(value))
+
+
+def stable_key(row):
+    """The deterministic order of events the time and the evidence leave open."""
+    source = row.get('external_ref') or ''
+    suffix = f'#{row["event_id"]}'
+    if source.endswith(suffix):
+        source = source[:-len(suffix)]
+    return (source, row['kind'], _key_number(row.get('future_contracts')),
+            _key_number(row.get('contracts')), _key_number(row.get('price')),
+            _key_number(row.get('cash_amount')), _key_number(row.get('fees')), row['event_id'])
+
+
+def order_evidence(row):
+    """(scope, sequence) of time.orderEvidence, or None when it orders nothing."""
+    match = ORDER_EVIDENCE.match(row.get('order_evidence') or '')
+    return (match.group(1), int(match.group(2))) if match else None
+
+
+def event_deltas(row):
+    """[(('FUT'|'FOP', contract_id), quantity change)] of one event row."""
+    kind = row['kind']
+    if kind in ('fee', 'manual_adjust'):
+        return []
+    if kind == 'futures_trade' or (kind == 'opening_balance'
+                                    and row['future_contracts'] is not None):
+        return [(('FUT', row['contract_id']), float(row['future_contracts']))]
+    deltas = [(('FOP', row['contract_id']), float(row['contracts']))]
+    if kind in DELIVERY_KINDS:
+        deltas.append((('FUT', row['delivered_contract_id']), float(row['future_contracts'])))
+    return deltas
+
+
+def order_independent(position, deltas):
+    """plan §9.2: pure adding, or pure reducing that does not cross zero."""
+    signs = {1 if delta > 0 else -1 for delta in deltas}
+    if len(signs) != 1:
+        return False
+    sign = signs.pop()
+    if abs(position) < _EPSILON or (position > 0) == (sign > 0):
+        return True
+    return abs(sum(deltas)) <= abs(position) + _EPSILON
+
+
+def ambiguity_groups(rows):
+    """rows sorted by (start, end, stable key), cut into groups of overlapping intervals."""
+    ordered = sorted(rows, key=lambda row: (*event_interval(row), stable_key(row)))
+    groups = []
+    latest_end = None
+    for row in ordered:
+        start, end = event_interval(row)
+        if groups and start <= latest_end:
+            groups[-1].append(row)
+            latest_end = max(latest_end, end)
+        else:
+            groups.append([row])
+            latest_end = end
+    return groups
+
+
+def _order_group(group, balances):
+    by_key = sorted(group, key=stable_key)
+    touched = {}
+    for row in group:
+        for contract, delta in event_deltas(row):
+            touched.setdefault(contract, []).append((row, delta))
+    unsettled = [contract for contract, items in touched.items()
+                 if not order_independent(balances.get(contract, 0.0),
+                                          [delta for _row, delta in items])]
+    if not unsettled:
+        return by_key
+    needing = {row['event_id']: row for contract in unsettled for row, _delta in touched[contract]}
+    evidence = {event_id: order_evidence(row) for event_id, row in needing.items()}
+    scopes = {found[0] for found in evidence.values() if found is not None}
+    sequences = [found[1] for found in evidence.values() if found is not None]
+    if None in evidence.values() or len(scopes) != 1 or len(set(sequences)) != len(sequences):
+        names = ', '.join(row['event_id'] for row in by_key if row['event_id'] in needing)
+        contracts = ', '.join(sorted(contract[1] for contract in unsettled))
+        raise FopDomainError(
+            'fop_ordering_ambiguous',
+            f'events {names} share a time, and their order changes the position, average price '
+            f'or realized result of {contracts}; enter the broker order (time.orderEvidence) or '
+            'exact execution times')
+    first = sorted(needing.values(), key=lambda row: evidence[row['event_id']][1])
+    latest = None
+    for row in first:
+        start, end = event_interval(row)
+        if latest is not None and latest[0] > end:
+            raise FopDomainError(
+                'fop_ordering_ambiguous',
+                f'the order evidence puts {latest[1]} before {row["event_id"]}, but {latest[1]} '
+                f'starts after {row["event_id"]} ends; correct the evidence or the times')
+        if latest is None or start > latest[0]:
+            latest = (start, row['event_id'])
+    return first + [row for row in by_key if row['event_id'] not in needing]
+
+
+class Timeline:
+    """The live events of one ledger in economic order, replayed for quantities.
+
+    order: event ids in economic order; after: {event_id: non-zero balances
+    after it}, keyed ('FUT'|'FOP', contract_id); group_of: {event_id: the ids
+    of its ambiguity group, in order}; rows: {event_id: row}.
+    """
+
+    def __init__(self, order, after, group_of, rows):
+        self.order = order
+        self.after = after
+        self.group_of = group_of
+        self.rows = rows
+
+
+def build_timeline(rows):
+    """Order live event rows (plan §9.2) and replay their quantities.
+
+    rows: dicts with event_id, kind, contracts, future_contracts, price,
+    cash_amount, fees, external_ref, contract_id, delivered_contract_id,
+    open_close, order_evidence and the time columns of their details, for every
+    live event of one ledger. Refuses an order no evidence fixes
+    (fop_ordering_ambiguous) and a close that overdraws (position_overdraw).
+    """
+    balances = {}
+    order = []
+    after = {}
+    group_of = {}
+    for group in ambiguity_groups(rows):
+        if len(group) > 1:
+            group = _order_group(group, balances)
+        ids = tuple(row['event_id'] for row in group)
+        for row in group:
+            for contract, delta in event_deltas(row):
+                position = balances.get(contract, 0.0)
+                if contract[0] == 'FOP' or row['kind'] not in DELIVERY_KINDS:
+                    _check_close(row, position, delta)
+                balances[contract] = position + delta
+            order.append(row['event_id'])
+            after[row['event_id']] = {k: v for k, v in balances.items() if abs(v) > _EPSILON}
+            group_of[row['event_id']] = ids
+    return Timeline(order, after, group_of, {row['event_id']: row for row in rows})
+
+
+def listing_order(live, voided=()):
+    """Event ids in the order a FOP ledger lists them (plan §9.2): the live
+    events in economic order, the same one the core replays, so a page never
+    reorders what the server cut. A voided event is placed by its own time,
+    after every group that starts no later than it. A stored ledger always has
+    an economic order; if one does not (it was written under older rules), the
+    live events keep their time and stable-key order instead of failing.
+    """
+    groups = ambiguity_groups(live)
+    try:
+        order = build_timeline(live).order
+    except FopDomainError:
+        order = [row['event_id'] for group in groups for row in group]
+    group_start = {row['event_id']: event_interval(group[0])[0] for group in groups for row in group}
+    keyed = [((group_start[event_id], 0, index), event_id) for index, event_id in enumerate(order)]
+    keyed += [((event_interval(row)[0], 1, event_interval(row)[1], stable_key(row)), row['event_id'])
+              for row in voided]
+    return [event_id for _key, event_id in sorted(keyed, key=lambda item: item[0])]
+
 
 def replay_quantities(rows):
-    """Replay live events per contract and refuse a close that overdraws.
-
-    rows: dicts with event_id, kind, seq, contracts, future_contracts,
-    contract_id, delivered_contract_id, open_close and the time columns of
-    their details, for every live event of one ledger. Returns
-    (ordered event ids, {event_id: balances after it}) where balances maps
-    ('FOP'|'FUT', contract_id) to the open quantity.
-    """
-    ordered = sorted(rows, key=lambda row: order_key(row, row['seq']))
-    balances = {}
-    after = {}
-    for row in ordered:
-        kind = row['kind']
-        if kind in ('fee', 'manual_adjust'):
-            after[row['event_id']] = {k: v for k, v in balances.items() if abs(v) > _EPSILON}
-            continue
-        if kind == 'futures_trade' or (kind == 'opening_balance'
-                                        and row['future_contracts'] is not None):
-            key = ('FUT', row['contract_id'])
-            delta = row['future_contracts']
-        else:
-            key = ('FOP', row['contract_id'])
-            delta = row['contracts']
-        position = balances.get(key, 0.0)
-        _check_close(row, position, delta)
-        balances[key] = position + delta
-        if kind in DELIVERY_KINDS:
-            fut_key = ('FUT', row['delivered_contract_id'])
-            balances[fut_key] = balances.get(fut_key, 0.0) + row['future_contracts']
-        after[row['event_id']] = {k: v for k, v in balances.items() if abs(v) > _EPSILON}
-    return [row['event_id'] for row in ordered], after
+    """(ordered event ids, {event_id: balances after it}); see build_timeline."""
+    timeline = build_timeline(rows)
+    return timeline.order, timeline.after
 
 
 def _check_close(row, position, delta):
@@ -642,11 +808,43 @@ def _check_close(row, position, delta):
             f'{position:+g}')
 
 
-def check_cycle_anchors(boundaries, balances_after, live_event_ids):
-    """Every current closed boundary sits on its own live event after which all
-    balances are zero. Every write and every restore runs this same check;
-    superseded revisions keep their old anchors and are not passed in."""
+def check_baseline(rows, history_scope):
+    """A baseline belongs to a since-baseline ledger, at one instant B, before
+    every other event (plan §9.2): a full-history ledger has no opening balance,
+    every opening balance takes effect at the B it states (an as-of view at B
+    holds it), and no Rf or Rs may come from before B."""
+    baselines = [row for row in rows if row['kind'] == 'opening_balance']
+    if not baselines:
+        return None
+    if history_scope != 'since_baseline':
+        _refuse(f'opening balance {baselines[0]["event_id"]} in a full-history ledger; a ledger '
+                'kept since a baseline is created with historyScope since_baseline')
+    instants = {row['baseline_as_of_utc'] for row in baselines}
+    if len(instants) != 1:
+        _refuse(f'the opening balances name {len(instants)} baseline instants; a ledger has one')
+    instant = instants.pop()
+    for row in baselines:
+        if event_interval(row) != (instant, instant):
+            _refuse(f'opening balance {row["event_id"]} states the baseline instant {instant} but '
+                    'is timed otherwise; an opening balance is executed at its baseline instant')
+    for row in rows:
+        if row['kind'] != 'opening_balance' and event_interval(row)[0] <= instant:
+            _refuse(f'{row["kind"]} {row["event_id"]} is not after the baseline instant {instant}; '
+                    'history before the baseline is not part of this ledger')
+    return instant
+
+
+def check_cycle_anchors(boundaries, timeline):
+    """Every current closed boundary sits on its own live event, and every
+    balance is zero after it. Inside a group of simultaneous events a boundary
+    means "after the whole group" whichever member anchors it (plan §9.2): the
+    page anchors it on the member with the largest stable key, but a key that
+    ends in an event id changes when a restore gives every event a new id, and
+    the meaning must not. One group closes at most one cycle. Every write and
+    every restore runs this same check; superseded revisions keep their old
+    anchors and are not passed in."""
     anchored = {}
+    closed_groups = {}
     for boundary in boundaries:
         anchor = boundary['anchor_event_id']
         if anchor in anchored:
@@ -655,12 +853,20 @@ def check_cycle_anchors(boundaries, balances_after, live_event_ids):
                 f'cycle boundaries {anchored[anchor]} and {boundary["boundary_id"]} both close a '
                 f'cycle at {anchor}; one event closes one cycle')
         anchored[anchor] = boundary['boundary_id']
-        if anchor not in live_event_ids:
+        if anchor not in timeline.after:
             raise FopDomainError(
                 'fop_cycle_boundary_violated',
                 f'cycle boundary {boundary["boundary_id"]} is anchored on {anchor}, which is not '
                 'a live event; revoke or move the boundary first')
-        if balances_after.get(anchor):
+        group = timeline.group_of[anchor]
+        if group in closed_groups:
+            raise FopDomainError(
+                'fop_cycle_boundary_violated',
+                f'cycle boundaries {closed_groups[group]} and {boundary["boundary_id"]} both close a '
+                'cycle after the same group of simultaneous events; a boundary goes after the '
+                'whole group, so one group closes one cycle')
+        closed_groups[group] = boundary['boundary_id']
+        if timeline.after[group[-1]]:
             raise FopDomainError(
                 'fop_cycle_boundary_violated',
                 f'cycle boundary {boundary["boundary_id"]} no longer sits where every balance is '

@@ -182,7 +182,9 @@ an order or subscribe to market data. Full details in
 `cost_basis_fop.html` is the standalone FOP ledger that will replace the frozen
 `FUT` books. It is being built in phases (`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`);
 for now it only reads the ledger list, sends a stock ledger to `cost_basis.html`
-and shows a `FUT` ledger's identity. It computes and writes nothing.
+and shows a `FUT` ledger's identity. It computes and writes nothing yet; its
+economic core (`js/cost_basis_fop_core.js`) is built and tested but not wired
+into the page.
 
 ### `workspace_db_admin.html`
 

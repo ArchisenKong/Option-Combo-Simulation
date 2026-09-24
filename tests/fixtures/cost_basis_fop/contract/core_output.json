@@ -2,7 +2,7 @@
   "format": "cost-basis-fop-core-output",
   "version": 1,
   "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §5.2, §5.3, §9.6, §13.3 P1 step 3",
-  "description": "The output of the standalone FOP core (js/cost_basis_fop_core.js, P3) for one ledger. Every figure is a Metric: a number, or null with the reason it is unavailable; an unknown is never 0. Current positions list only non-zero contracts; realized results of closed months stay in realizedByContract. The examples are the plan §9.6 three-roll case at a D mark of 71.8, and the same ledger with D unquoted. P3 must reproduce these numbers from the events; P1 only fixes the shape. The other two examples fix only how an unknown is carried: a baseline option whose opening premium is unknown (plan §9.2), and an as-of instant inside a composite delivery's time range (plan §8.1), where even the quantity of the two delivery contracts is a Count with a reason. P3 names the final reason codes.",
+  "description": "The output of the standalone FOP core (js/cost_basis_fop_core.js, P3) for one ledger. Every figure is a Metric: a number, or null with the reason it is unavailable; an unknown is never 0. Current positions list only non-zero contracts; realized results of closed months stay in realizedByContract. The examples are the plan §9.6 three-roll case at a D mark of 71.8, and the same ledger with D unquoted. P3 reproduces all four from the events of tests/fixtures/cost_basis_fop/core_vectors.json. The other two examples show how an unknown is carried: a baseline option whose opening premium is unknown (plan §9.2), and an as-of instant inside a composite delivery's time range (plan §8.1), where even the quantity of the two delivery contracts is a Count with a reason. P3 names the final reason codes. P3 revision (before any release): a cycle carries its own totals, \"unattributed\" holds fees and adjustments no single cycle owns (plan §13.2), and a ROLL leg carries its price and the fees allocated to it (plan §6.2). A cycle's buckets hold only what is attributed to it, so the whole book is the cycles plus \"unattributed\"; a cycle an unattributed item may belong to has no complete economicPnl, and neither has the seller lens when that item is seller money (reason cycle_unattributed:<eventId>).",
   "schemaLanguage": "Same language as protocol.json.",
   "types": {
     "Token": {
@@ -284,12 +284,21 @@
         "contracts": {
           "type": "integer",
           "nonzero": true
+        },
+        "price": {
+          "type": "number"
+        },
+        "fees": {
+          "type": "number",
+          "min": 0
         }
       },
       "required": [
         "eventId",
         "contractId",
-        "contracts"
+        "contracts",
+        "price",
+        "fees"
       ]
     },
     "RollGroup": {
@@ -334,12 +343,16 @@
         "closedByBoundaryId": {
           "ref": "Token",
           "nullable": true
+        },
+        "totals": {
+          "ref": "Totals"
         }
       },
       "required": [
         "index",
         "startsAfterBoundaryId",
-        "closedByBoundaryId"
+        "closedByBoundaryId",
+        "totals"
       ]
     },
     "Gap": {
@@ -473,6 +486,21 @@
         "sellerLens": {
           "ref": "SellerLens"
         },
+        "unattributed": {
+          "type": "object",
+          "fields": {
+            "E": {
+              "ref": "Metric"
+            },
+            "J": {
+              "ref": "Metric"
+            }
+          },
+          "required": [
+            "E",
+            "J"
+          ]
+        },
         "roll": {
           "type": "object",
           "fields": {
@@ -505,6 +533,7 @@
         "realizedByContract",
         "totals",
         "sellerLens",
+        "unattributed",
         "roll",
         "gaps"
       ]
@@ -533,7 +562,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": -500,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": 1000,
+                  "reason": null
+                },
+                "Co": {
+                  "value": 1200,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": 0,
+                  "reason": null
+                },
+                "E": {
+                  "value": 30,
+                  "reason": null
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": 1670,
+                  "reason": null
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -645,6 +704,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": [
               {
@@ -653,12 +722,16 @@
                   {
                     "eventId": "evt-roll-0001",
                     "contractId": "fut-clz6-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 68,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0002",
                     "contractId": "fut-clf7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 69,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -669,12 +742,16 @@
                   {
                     "eventId": "evt-roll-0003",
                     "contractId": "fut-clf7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 72,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0004",
                     "contractId": "fut-clg7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 72.5,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -685,12 +762,16 @@
                   {
                     "eventId": "evt-roll-0005",
                     "contractId": "fut-clg7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 71,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0006",
                     "contractId": "fut-clh7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70.8,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -721,7 +802,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": -500,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": null,
+                  "reason": "missing_mark:fut-clh7-0001"
+                },
+                "Co": {
+                  "value": 1200,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": 0,
+                  "reason": null
+                },
+                "E": {
+                  "value": 30,
+                  "reason": null
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": null,
+                  "reason": "missing_mark:fut-clh7-0001"
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -833,6 +944,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": [
               {
@@ -841,12 +962,16 @@
                   {
                     "eventId": "evt-roll-0001",
                     "contractId": "fut-clz6-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 68,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0002",
                     "contractId": "fut-clf7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 69,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -857,12 +982,16 @@
                   {
                     "eventId": "evt-roll-0003",
                     "contractId": "fut-clf7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 72,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0004",
                     "contractId": "fut-clg7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 72.5,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -873,12 +1002,16 @@
                   {
                     "eventId": "evt-roll-0005",
                     "contractId": "fut-clg7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 71,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0006",
                     "contractId": "fut-clh7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70.8,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -918,7 +1051,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": 0,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": 0,
+                  "reason": null
+                },
+                "Co": {
+                  "value": 0,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": -1400,
+                  "reason": null
+                },
+                "E": {
+                  "value": 0,
+                  "reason": null
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": null,
+                  "reason": "unknown_opening_cost:fop-loz6-c75-01"
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -1004,6 +1167,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": []
           },
@@ -1052,7 +1225,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": 0,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": null,
+                  "reason": "delivery_time_unresolved:evt-assign-00001"
+                },
+                "Co": {
+                  "value": 1197.5,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": null,
+                  "reason": "delivery_time_unresolved:evt-assign-00001"
+                },
+                "E": {
+                  "value": null,
+                  "reason": "delivery_time_unresolved:evt-assign-00001"
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": null,
+                  "reason": "delivery_time_unresolved:evt-assign-00001"
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -1165,6 +1368,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": []
           },
@@ -1178,11 +1391,39 @@
               "reason": "delivery_time_unresolved:evt-assign-00001"
             },
             {
+              "metric": "options[0].remainingNetPremium",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "totals.Uf",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "totals.Vo",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "totals.E",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
               "metric": "totals.economicPnl",
               "reason": "delivery_time_unresolved:evt-assign-00001"
             },
             {
+              "metric": "sellerLens.Rs",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "sellerLens.Es",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
               "metric": "sellerLens.breakEven",
+              "reason": "delivery_time_unresolved:evt-assign-00001"
+            },
+            {
+              "metric": "sellerLens.breakEvenIfOpenShortsExpire",
               "reason": "delivery_time_unresolved:evt-assign-00001"
             }
           ]
@@ -1211,7 +1452,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": -500,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": 1000,
+                  "reason": null
+                },
+                "Co": {
+                  "value": 1200,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": 0,
+                  "reason": null
+                },
+                "E": {
+                  "value": 30,
+                  "reason": null
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": 1670,
+                  "reason": null
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -1323,6 +1594,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": [
               {
@@ -1331,12 +1612,16 @@
                   {
                     "eventId": "evt-roll-0001",
                     "contractId": "fut-clz6-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0002",
                     "contractId": "fut-clf7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -1347,12 +1632,16 @@
                   {
                     "eventId": "evt-roll-0003",
                     "contractId": "fut-clf7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0004",
                     "contractId": "fut-clg7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -1363,12 +1652,16 @@
                   {
                     "eventId": "evt-roll-0005",
                     "contractId": "fut-clg7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0006",
                     "contractId": "fut-clh7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -1403,7 +1696,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": -500,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": 1000,
+                  "reason": null
+                },
+                "Co": {
+                  "value": 1200,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": 0,
+                  "reason": null
+                },
+                "E": {
+                  "value": 30,
+                  "reason": null
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": 1670,
+                  "reason": null
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -1515,6 +1838,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": [
               {
@@ -1523,12 +1856,16 @@
                   {
                     "eventId": "evt-roll-0001",
                     "contractId": "fut-clz6-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0002",
                     "contractId": "fut-clf7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -1539,12 +1876,16 @@
                   {
                     "eventId": "evt-roll-0003",
                     "contractId": "fut-clf7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0004",
                     "contractId": "fut-clg7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -1555,12 +1896,16 @@
                   {
                     "eventId": "evt-roll-0005",
                     "contractId": "fut-clg7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0006",
                     "contractId": "fut-clh7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -1595,7 +1940,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": -500,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": 1000,
+                  "reason": null
+                },
+                "Co": {
+                  "value": 1200,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": 0,
+                  "reason": null
+                },
+                "E": {
+                  "value": 30,
+                  "reason": null
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": 1670,
+                  "reason": null
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -1707,6 +2082,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": [
               {
@@ -1715,12 +2100,16 @@
                   {
                     "eventId": "evt-roll-0001",
                     "contractId": "fut-clz6-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0002",
                     "contractId": "fut-clf7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -1731,12 +2120,16 @@
                   {
                     "eventId": "evt-roll-0003",
                     "contractId": "fut-clf7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0004",
                     "contractId": "fut-clg7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -1747,12 +2140,16 @@
                   {
                     "eventId": "evt-roll-0005",
                     "contractId": "fut-clg7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0006",
                     "contractId": "fut-clh7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -1787,7 +2184,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": -500,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": 1000,
+                  "reason": null
+                },
+                "Co": {
+                  "value": 1200,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": 0,
+                  "reason": null
+                },
+                "E": {
+                  "value": 30,
+                  "reason": null
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": 1670,
+                  "reason": null
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -1873,6 +2300,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": []
           },
@@ -1925,7 +2362,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": -500,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": 1000,
+                  "reason": null
+                },
+                "Co": {
+                  "value": 1200,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": 0,
+                  "reason": null
+                },
+                "E": {
+                  "value": 30,
+                  "reason": null
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": 1670,
+                  "reason": null
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -2037,6 +2504,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": [
               {
@@ -2045,12 +2522,16 @@
                   {
                     "eventId": "evt-roll-0001",
                     "contractId": "fut-clz6-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0002",
                     "contractId": "fut-clf7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -2061,12 +2542,16 @@
                   {
                     "eventId": "evt-roll-0003",
                     "contractId": "fut-clf7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0004",
                     "contractId": "fut-clg7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -2077,12 +2562,16 @@
                   {
                     "eventId": "evt-roll-0005",
                     "contractId": "fut-clg7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0006",
                     "contractId": "fut-clh7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -2117,7 +2606,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": -500,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": 1000,
+                  "reason": null
+                },
+                "Co": {
+                  "value": 1200,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": 0,
+                  "reason": null
+                },
+                "E": {
+                  "value": 30,
+                  "reason": null
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": 1670,
+                  "reason": null
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -2227,6 +2746,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": []
           },
@@ -2275,7 +2804,37 @@
             {
               "index": 0,
               "startsAfterBoundaryId": null,
-              "closedByBoundaryId": null
+              "closedByBoundaryId": null,
+              "totals": {
+                "Rf": {
+                  "value": -500,
+                  "reason": null
+                },
+                "Uf": {
+                  "value": 1000,
+                  "reason": null
+                },
+                "Co": {
+                  "value": 1200,
+                  "reason": null
+                },
+                "Vo": {
+                  "value": 0,
+                  "reason": null
+                },
+                "E": {
+                  "value": 30,
+                  "reason": null
+                },
+                "J": {
+                  "value": 0,
+                  "reason": null
+                },
+                "economicPnl": {
+                  "value": 1670,
+                  "reason": null
+                }
+              }
             }
           ],
           "currentCycleIndex": 0,
@@ -2387,6 +2946,16 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "unattributed": {
+            "E": {
+              "value": 0,
+              "reason": null
+            },
+            "J": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "roll": {
             "groups": [
               {
@@ -2395,12 +2964,16 @@
                   {
                     "eventId": "evt-roll-0001",
                     "contractId": "fut-clz6-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0002",
                     "contractId": "fut-clf7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -2411,12 +2984,16 @@
                   {
                     "eventId": "evt-roll-0003",
                     "contractId": "fut-clf7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0004",
                     "contractId": "fut-clg7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1
@@ -2427,12 +3004,16 @@
                   {
                     "eventId": "evt-roll-0005",
                     "contractId": "fut-clg7-0001",
-                    "contracts": -1
+                    "contracts": -1,
+                    "price": 70,
+                    "fees": 0
                   },
                   {
                     "eventId": "evt-roll-0006",
                     "contractId": "fut-clh7-0001",
-                    "contracts": 1
+                    "contracts": 1,
+                    "price": 70,
+                    "fees": 0
                   }
                 ],
                 "matchedContracts": 1

@@ -142,6 +142,7 @@ def raise_store_error(exc):
         'fop_binding_evidence_invalid': base.FopBindingEvidenceInvalidError,
         'fop_cycle_boundary_violated': base.FopCycleBoundaryViolatedError,
         'fop_reference_revision_conflict': base.FopReferenceRevisionConflictError,
+        'fop_ordering_ambiguous': base.FopOrderingAmbiguousError,
     }
     raise by_code.get(exc.code, base.InvalidRequestError)(str(exc)) from exc
 
@@ -656,12 +657,17 @@ class FopLedgerMixin:
                     'WHERE event_id = ?', (by_package_key[source['packageKey']], event_id))
         return event_ids
 
+    # The event columns the timeline reads, with every FOP detail.
+    _FOP_TIMELINE_SELECT = (
+        'SELECT e.event_id, e.seq, e.kind, e.contracts, e.future_contracts, e.price, '
+        'e.cash_amount, e.fees, e.external_ref, e.voided_at_utc, d.* '
+        'FROM cost_basis_events e JOIN cost_basis_fop_event_details d ON d.event_id = e.event_id')
+
     def _validate_fop_ledger(self, conn, book_id):
-        """The P2 timeline: quantities, cycle anchors and fee sources of the whole book."""
+        """The whole timeline of the book (plan §9.2): economic order and its
+        evidence, quantities, the baseline, cycle anchors and fee sources."""
         rows = [dict(row) for row in conn.execute(
-            'SELECT e.event_id, e.seq, e.kind, e.contracts, e.future_contracts, d.* '
-            'FROM cost_basis_events e JOIN cost_basis_fop_event_details d '
-            'ON d.event_id = e.event_id WHERE e.book_id = ? AND e.voided_at_utc IS NULL',
+            f'{self._FOP_TIMELINE_SELECT} WHERE e.book_id = ? AND e.voided_at_utc IS NULL',
             (book_id,))]
         orphans = conn.execute(
             'SELECT count(*) FROM cost_basis_events e WHERE e.book_id = ? AND NOT EXISTS ('
@@ -670,11 +676,13 @@ class FopLedgerMixin:
         if orphans:
             domain._refuse(f'{orphans} events of this FOP ledger have no FOP details')
         live = {row['event_id']: row for row in rows}
-        _order, after = domain.replay_quantities(rows)
+        scope = self._fop_book_row(conn, book_id)['history_scope']
+        domain.check_baseline(rows, scope)
+        timeline = domain.build_timeline(rows)
         boundaries = [dict(row) for row in conn.execute(
             "SELECT * FROM cost_basis_fop_cycles WHERE book_id = ? AND state = 'closed' "
             'AND superseded_by_revision IS NULL', (book_id,))]
-        domain.check_cycle_anchors(boundaries, after, set(live))
+        domain.check_cycle_anchors(boundaries, timeline)
         for row in rows:
             source = row['fee_source_event_id']
             if row['kind'] != 'fee' or source is None:
@@ -1846,16 +1854,15 @@ class FopLedgerMixin:
         }
 
     def _list_fop_events(self, conn, book_id, *, include_voided, limit, offset):
+        """One page of the ledger in economic order (plan §9.2): the whole order
+        is fixed first, then cut, so no page depends on entry order (seq)."""
         where = 'e.book_id = ?' + ('' if include_voided else ' AND e.voided_at_utc IS NULL')
-        total = conn.execute(f'SELECT count(*) FROM cost_basis_events e WHERE {where}',
-                             (book_id,)).fetchone()[0]
-        rows = conn.execute(
-            'SELECT e.event_id FROM cost_basis_events e JOIN cost_basis_fop_event_details d '
-            f'ON d.event_id = e.event_id WHERE {where} ORDER BY '
-            'COALESCE(d.executed_at_utc, d.time_range_start_utc) ASC, '
-            'COALESCE(d.executed_at_utc, d.time_range_end_utc) ASC, e.seq ASC LIMIT ? OFFSET ?',
-            (book_id, limit, offset)).fetchall()
-        return int(total), [self._listed_fop_event(conn, row['event_id']) for row in rows]
+        rows = [dict(row) for row in conn.execute(
+            f'{self._FOP_TIMELINE_SELECT} WHERE {where}', (book_id,))]
+        live = [row for row in rows if row['voided_at_utc'] is None]
+        voided = [row for row in rows if row['voided_at_utc'] is not None]
+        page = domain.listing_order(live, voided)[offset:offset + limit]
+        return len(rows), [self._listed_fop_event(conn, event_id) for event_id in page]
 
     # ------------------------------------------------------------------
     # Digest

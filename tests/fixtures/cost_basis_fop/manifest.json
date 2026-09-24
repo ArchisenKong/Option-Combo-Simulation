@@ -203,6 +203,44 @@
         { "name": "BrokerResolutionTests.test_conflicts_and_ambiguity_are_reported_not_guessed", "requirements": ["F05 (P2 part)"] },
         { "name": "BrokerResolutionTests.test_resolution_is_bounded_and_writes_nothing", "requirements": ["P2 item 3 (bounded read-only resolution)", "F26 (P2 part)"] }
       ]
+    },
+    {
+      "stage": "P3",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_core.test.js",
+      "name": "cost_basis_fop_core",
+      "cases": [
+        { "name": "every hand-worked vector gives its figures, step by step", "requirements": ["F06", "F07", "F08", "F09 (P3 part)", "F10 (P3 part)", "F12", "F13", "F14 (P3 part)", "F15 (core)", "F18", "F22 (P3 part)", "F29", "F30", "F33 (P3 part: figures)", "F35", "F36 (P3 part)", "F41 (P3 part)", "F42 (P3 part)", "F47"] },
+        { "name": "the P0 month-collision gold standard holds in the new engine", "requirements": ["F35", "F03 (P3 part)", "P0 step 2"] },
+        { "name": "every output satisfies the frozen core output contract", "requirements": ["P1 step 3", "F42 (P3 part: unknown is null)"] },
+        { "name": "the contract examples are what the core computes from their events", "requirements": ["P1 step 3", "F29", "F46 (P3 part)"] },
+        { "name": "ROLL groups and their query range never change a figure", "requirements": ["F09", "F30"] },
+        { "name": "the same history under other ids and entry order gives the same results", "requirements": ["F41 (P3 part)", "P3 step 5"] },
+        { "name": "no step is rounded: a repeating average stays exact to 1e-9", "requirements": ["F47"] },
+        { "name": "the core is pure: no clock, DOM, network or randomness", "requirements": ["plan §3 invariant 8"] }
+      ]
+    },
+    {
+      "stage": "P3",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_core_test.py",
+      "cases": [
+        { "name": "ModelTests.test_the_model_reproduces_every_hand_worked_vector", "requirements": ["P3 step 1"] },
+        { "name": "TimelineTests.test_the_server_timeline_agrees_with_every_vector", "requirements": ["F41 (P3 part)", "F22 (P3 part)", "F14 (P3 part)"] },
+        { "name": "TimelineTests.test_evidence_decides_only_where_order_matters_and_seq_never_does", "requirements": ["F41 (P3 part)"] },
+        { "name": "TimelineTests.test_a_baseline_belongs_to_one_instant_before_everything_else", "requirements": ["F42 (P3 part)", "F19 (P3 part)"] },
+        { "name": "TimelineTests.test_order_evidence_cannot_contradict_the_times", "requirements": ["F41 (P3 part)", "F22 (P3 part)"] },
+        { "name": "StoreChainTests.test_every_vector_through_the_store_replays_to_the_model", "requirements": ["P3 step 2", "F06", "F29", "F36 (P3 part)"] },
+        { "name": "StoreChainTests.test_the_server_refuses_what_no_evidence_orders", "requirements": ["F41 (P3 part)"] },
+        { "name": "StoreChainTests.test_a_boundary_inside_a_group_goes_after_the_whole_group", "requirements": ["F41 (P3 part)", "F14 (P3 part)"] },
+        { "name": "StoreChainTests.test_a_backup_restores_into_another_ledger_whatever_ids_it_gets", "requirements": ["F39 (P3 part)", "F41 (P3 part)"] },
+        { "name": "StoreChainTests.test_the_event_listing_pages_the_economic_order", "requirements": ["F41 (P3 part)", "C5"] },
+        { "name": "StoreChainTests.test_an_opening_balance_is_timed_at_its_baseline_instant", "requirements": ["F42 (P3 part)", "F19 (P3 part)"] },
+        { "name": "StoreChainTests.test_metadata_revisions_leave_every_figure_as_it_was", "requirements": ["P3 step 3", "F40 (P3 part)"] },
+        { "name": "RandomHistoryTests.test_random_histories_agree_with_the_model", "requirements": ["P3 step 2", "F47"] },
+        { "name": "RandomHistoryTests.test_random_as_of_views_are_sound", "requirements": ["F46 (P3 part)", "F22 (P3 part)", "F36 (P3 part)"] },
+        { "name": "RandomHistoryTests.test_random_histories_through_the_store_agree_with_the_model", "requirements": ["P3 step 2"] }
+      ]
     }
   ],
   "fixtures": [
@@ -215,6 +253,7 @@
     { "id": "write_coverage", "file": "tests/fixtures/cost_basis_fop/contract/write_coverage.json", "source": "synthetic", "requirements": ["P1 step 4"] },
     { "id": "protocol", "file": "tests/fixtures/cost_basis_fop/contract/protocol.json", "source": "synthetic", "requirements": ["P1 step 2"] },
     { "id": "core_output", "file": "tests/fixtures/cost_basis_fop/contract/core_output.json", "source": "synthetic", "requirements": ["P1 step 3"] },
-    { "id": "runtime_protocol", "file": "cost_basis_fop_protocol.json", "source": "synthetic", "requirements": ["P2 item 1"] }
+    { "id": "runtime_protocol", "file": "cost_basis_fop_protocol.json", "source": "synthetic", "requirements": ["P2 item 1"] },
+    { "id": "core_vectors", "file": "tests/fixtures/cost_basis_fop/core_vectors.json", "source": "synthetic", "requirements": ["P3 step 1", "§5.4", "§9.6"] }
   ]
 }

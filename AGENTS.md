@@ -68,6 +68,11 @@ Do not assume a bare `python` command will work in every shell, especially on Wi
   - the frozen contract (DDL draft, protocol, core output) lives in
     `tests/fixtures/cost_basis_fop/contract/`; `node tests/run_cost_basis_fop.js
     --stage <P>` runs the phase suites
+  - its economic core is `js/cost_basis_fop_core.js` (DOM-free, not loaded by
+    the page until the page stage): it replays the exported ledger graph and
+    must keep reproducing `tests/fixtures/cost_basis_fop/core_vectors.json`,
+    whose numbers come from the plan and the independent rational model
+    `tests/helpers/cost_basis_fop_model.py`, never from production code
 
 - `workspace_db_admin.html`
   - standalone, loopback-only admin page for the workspace database and its

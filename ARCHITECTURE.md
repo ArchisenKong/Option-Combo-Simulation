@@ -986,6 +986,30 @@ function. FOP writes are gated by `fop_writes_enabled`, off in both servers
 until the release stage; a FUT book without FOP metadata stays export and
 delete only.
 
+The FOP economics live in `js/cost_basis_fop_core.js`, a DOM-free core that
+replays the ledger graph exactly as the server exports it (the version 2 backup
+payload): weighted-average FUT positions with gross realized results, option
+premium by contract (a close releases its share, the last close what is left),
+the four deliveries and expiries, Co/E/J and the seller lens (Rs/Es/Js, one
+break-even only with exactly one FUT contract open), cycles derived from their
+boundaries with late fees going back to the cycle of their trade (a fee or
+adjustment no single cycle owns is "unattributed" and leaves the cycles it may
+belong to without a complete net result), since-baseline figures net of the
+opening value, as-of views (an event has happened once its time has ended or
+its order evidence puts it before one that has; one still unresolved blanks
+only what it could change, in the cycle it belongs to), and ROLL groups derived
+at read time (they never change a figure). Nothing is rounded in between, and every
+unknown figure is null with a reason. The server orders events the same way
+(`cost_basis_fop_domain.build_timeline`, plan §9.2): overlapping times form
+groups, a group whose order would change a result needs order evidence or the
+write is refused, and a cycle boundary sits after the whole group, whichever of
+its events anchors it, so a restore that renumbers events keeps its meaning. An
+opening balance happens at the baseline instant it states, and the event list is
+paged in this same order. The hand-worked
+vectors in `tests/fixtures/cost_basis_fop/core_vectors.json` are reproduced by an
+independent rational model (`tests/helpers/cost_basis_fop_model.py`), by the core
+and, written through the real store, by the core again.
+
 Schema v9 ties statement coverage to reset archives, checks both archive digests
 on restoration, and invalidates prior coverage after historical changes.
 Import/reset/rebuild/restore require identity and version credentials. Event

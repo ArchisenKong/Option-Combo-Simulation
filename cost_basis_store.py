@@ -278,6 +278,12 @@ class FopReferenceRevisionConflictError(CostBasisStoreError):
     code = 'fop_reference_revision_conflict'
 
 
+class FopOrderingAmbiguousError(CostBasisStoreError):
+    """Events whose order changes a result and that no evidence orders (plan §9.2)."""
+
+    code = 'fop_ordering_ambiguous'
+
+
 def _reject_frozen_sec_type(sec_type, action):
     if str(sec_type or 'STK').strip().upper() in FROZEN_BOOK_SEC_TYPES:
         raise FuturesBookFrozenError(
