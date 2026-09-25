@@ -247,6 +247,7 @@ h3 {
     border-bottom: 1px solid var(--fop-border);
     text-align: left;
     vertical-align: top;
+    white-space: nowrap;
 }
 
 .fop-table th {
@@ -259,4 +260,61 @@ h3 {
     .fop-form {
         grid-template-columns: minmax(0, 1fr);
     }
+}
+
+.fop-stack {
+    display: grid;
+    gap: 14px;
+}
+
+.fop-stack[hidden] {
+    display: none;
+}
+
+.fop-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.fop-inline {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.fop-headline {
+    font-size: 17px;
+}
+
+.fop-tag {
+    color: var(--fop-muted);
+    font-size: 13px;
+}
+
+.fop-warning {
+    color: var(--fop-warn);
+}
+
+.fop-form textarea {
+    min-width: 0;
+    max-width: 100%;
+    font: inherit;
+    color: inherit;
+    padding: 4px 8px;
+    background: var(--fop-surface);
+    border: 1px solid var(--fop-border);
+    border-radius: 6px;
+}
+
+.fop-form [hidden] {
+    display: none;
+}
+
+/* The hidden attribute always hides, whatever display a class gives the element. */
+[hidden] {
+    display: none !important;
 }

@@ -1736,6 +1736,13 @@
         "fopPackage": {
           "ref": "FopPackage",
           "nullable": true
+        },
+        "duplicateDecisions": {
+          "type": "array",
+          "items": {
+            "ref": "DuplicateDecision"
+          },
+          "maxItems": 5000
         }
       },
       "required": [
@@ -1878,6 +1885,13 @@
               "items": {
                 "ref": "ReferenceChange"
               }
+            },
+            "contracts": {
+              "type": "array",
+              "items": {
+                "ref": "ContractRecord"
+              },
+              "maxItems": 2
             }
           },
           "required": [
@@ -2539,7 +2553,7 @@
           "type": "string"
         },
         "twsSnapshot": {
-          "type": "json",
+          "ref": "FopPositionsSnapshot",
           "nullable": true
         },
         "reconciled": {
@@ -3998,6 +4012,570 @@
         "success",
         "bookId",
         "results"
+      ]
+    },
+    "MarketSnapshotRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "request_cost_basis_fop_market_snapshot"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "contractIds": {
+          "type": "array",
+          "items": {
+            "ref": "Token"
+          },
+          "minItems": 1,
+          "maxItems": 40
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId",
+        "contractIds"
+      ]
+    },
+    "MarketQuoteEvidence": {
+      "type": "object",
+      "fields": {
+        "contractId": {
+          "ref": "Token"
+        },
+        "conId": {
+          "type": "integer",
+          "nullable": true
+        },
+        "localSymbol": {
+          "type": "string",
+          "nullable": true
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "no_data",
+            "failed",
+            "identity_conflict"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "nullable": true
+        },
+        "bid": {
+          "type": "number",
+          "nullable": true
+        },
+        "bidSize": {
+          "type": "number",
+          "nullable": true
+        },
+        "ask": {
+          "type": "number",
+          "nullable": true
+        },
+        "askSize": {
+          "type": "number",
+          "nullable": true
+        },
+        "last": {
+          "type": "number",
+          "nullable": true
+        },
+        "lastSize": {
+          "type": "number",
+          "nullable": true
+        },
+        "close": {
+          "type": "number",
+          "nullable": true
+        },
+        "closeDate": {
+          "ref": "IsoDate",
+          "nullable": true
+        },
+        "settlement": {
+          "type": "number",
+          "nullable": true
+        },
+        "settlementDate": {
+          "ref": "IsoDate",
+          "nullable": true
+        },
+        "observedAtUtc": {
+          "ref": "UtcInstant",
+          "nullable": true
+        },
+        "marketDataType": {
+          "type": "integer",
+          "nullable": true
+        }
+      },
+      "required": [
+        "contractId",
+        "conId",
+        "localSymbol",
+        "status",
+        "reason",
+        "bid",
+        "bidSize",
+        "ask",
+        "askSize",
+        "last",
+        "lastSize",
+        "close",
+        "closeDate",
+        "settlement",
+        "settlementDate",
+        "observedAtUtc",
+        "marketDataType"
+      ],
+      "rules": [
+        {
+          "id": "a_failed_quote_says_why",
+          "when": {
+            "field": "status",
+            "in": [
+              "no_data",
+              "failed",
+              "identity_conflict"
+            ]
+          },
+          "require": [
+            "reason"
+          ]
+        }
+      ]
+    },
+    "MarketSnapshotResponse": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "cost_basis_fop_market_snapshot"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "const",
+          "value": true
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "quoteBatchId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestedAtUtc": {
+          "ref": "UtcInstant"
+        },
+        "ledgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "quotes": {
+          "type": "array",
+          "items": {
+            "ref": "MarketQuoteEvidence"
+          }
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "success",
+        "bookId",
+        "quoteBatchId",
+        "requestedAtUtc",
+        "ledgerVersion",
+        "quotes"
+      ]
+    },
+    "DuplicateDecision": {
+      "type": "object",
+      "fields": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "same_fill",
+            "distinct_fill"
+          ]
+        },
+        "namespace": {
+          "type": "string",
+          "enum": [
+            "flex_trade",
+            "ib_exec",
+            "activity_row"
+          ]
+        },
+        "sourceRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "eventIds": {
+          "type": "array",
+          "items": {
+            "ref": "Token"
+          },
+          "minItems": 1,
+          "maxItems": 20
+        },
+        "attestation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "ref": "SourceSubmission",
+          "nullable": true
+        }
+      },
+      "required": [
+        "decision",
+        "namespace",
+        "sourceRef",
+        "eventIds",
+        "attestation",
+        "source"
+      ],
+      "rules": [
+        {
+          "id": "a_same_fill_decision_carries_its_row",
+          "when": {
+            "field": "decision",
+            "in": [
+              "same_fill"
+            ]
+          },
+          "require": [
+            "source"
+          ]
+        },
+        {
+          "id": "a_distinct_fill_row_travels_in_the_package",
+          "when": {
+            "field": "decision",
+            "in": [
+              "distinct_fill"
+            ]
+          },
+          "forbid": [
+            "source"
+          ]
+        }
+      ]
+    },
+    "FopPositionsRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "request_cost_basis_fop_positions"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId"
+      ]
+    },
+    "FopPositionEvidence": {
+      "type": "object",
+      "fields": {
+        "account": {
+          "ref": "Account"
+        },
+        "conId": {
+          "type": "integer",
+          "min": 1,
+          "nullable": true
+        },
+        "secType": {
+          "type": "string",
+          "enum": [
+            "FUT",
+            "FOP"
+          ]
+        },
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "localSymbol": {
+          "type": "string",
+          "nullable": true
+        },
+        "tradingClass": {
+          "type": "string",
+          "nullable": true
+        },
+        "lastTradeDateOrContractMonth": {
+          "type": "string",
+          "nullable": true
+        },
+        "right": {
+          "type": "string",
+          "enum": [
+            "C",
+            "P"
+          ],
+          "nullable": true
+        },
+        "strike": {
+          "type": "number",
+          "nullable": true
+        },
+        "multiplier": {
+          "type": "number",
+          "nullable": true
+        },
+        "currency": {
+          "type": "string",
+          "nullable": true
+        },
+        "position": {
+          "type": "number",
+          "nonzero": true
+        },
+        "averageCost": {
+          "type": "number",
+          "nullable": true
+        }
+      },
+      "required": [
+        "account",
+        "conId",
+        "secType",
+        "symbol",
+        "localSymbol",
+        "tradingClass",
+        "lastTradeDateOrContractMonth",
+        "right",
+        "strike",
+        "multiplier",
+        "currency",
+        "position",
+        "averageCost"
+      ]
+    },
+    "FopPositionsResponse": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "cost_basis_fop_positions"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "const",
+          "value": true
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "account": {
+          "ref": "Account"
+        },
+        "observedAtUtc": {
+          "ref": "UtcInstant"
+        },
+        "ledgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "accountConnected": {
+          "type": "boolean"
+        },
+        "positionsReady": {
+          "type": "boolean"
+        },
+        "positions": {
+          "type": "array",
+          "items": {
+            "ref": "FopPositionEvidence"
+          }
+        },
+        "evidenceCredential": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "success",
+        "bookId",
+        "account",
+        "observedAtUtc",
+        "ledgerVersion",
+        "accountConnected",
+        "positionsReady",
+        "positions",
+        "evidenceCredential"
+      ],
+      "rules": [
+        {
+          "id": "only_read_positions_carry_a_credential",
+          "when": {
+            "field": "positionsReady",
+            "in": [
+              false
+            ]
+          },
+          "forbid": [
+            "evidenceCredential"
+          ]
+        }
+      ]
+    },
+    "FopReconciliationRow": {
+      "type": "object",
+      "fields": {
+        "contractId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "localSymbol": {
+          "type": "string",
+          "nullable": true
+        },
+        "ledgerQuantity": {
+          "type": "number",
+          "nullable": true
+        },
+        "twsQuantity": {
+          "type": "number"
+        },
+        "quantityStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "mismatch",
+            "unknown"
+          ]
+        },
+        "ledgerAverage": {
+          "type": "number",
+          "nullable": true
+        },
+        "twsAverage": {
+          "type": "number",
+          "nullable": true
+        },
+        "avgCostStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "differs",
+            "not_comparable"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "contractId",
+        "localSymbol",
+        "ledgerQuantity",
+        "twsQuantity",
+        "quantityStatus",
+        "ledgerAverage",
+        "twsAverage",
+        "avgCostStatus",
+        "note"
+      ]
+    },
+    "FopPositionsSnapshot": {
+      "type": "object",
+      "fields": {
+        "kind": {
+          "type": "const",
+          "value": "fop_positions"
+        },
+        "account": {
+          "ref": "Account"
+        },
+        "observedAtUtc": {
+          "ref": "UtcInstant"
+        },
+        "ledgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "accountConnected": {
+          "type": "boolean"
+        },
+        "positionsReady": {
+          "type": "boolean"
+        },
+        "positions": {
+          "type": "array",
+          "items": {
+            "ref": "FopPositionEvidence"
+          }
+        },
+        "evidenceCredential": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "ref": "FopReconciliationRow"
+          }
+        },
+        "quantityStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "mismatch",
+            "unknown",
+            "not_checked"
+          ]
+        },
+        "avgCostStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "differs",
+            "partial",
+            "not_comparable",
+            "not_checked"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "account",
+        "observedAtUtc",
+        "ledgerVersion",
+        "accountConnected",
+        "positionsReady",
+        "positions",
+        "evidenceCredential",
+        "rows",
+        "quantityStatus",
+        "avgCostStatus"
       ]
     }
   }

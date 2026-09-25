@@ -51,7 +51,7 @@ class FopProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.db_path = pathlib.Path(self._tmp.name) / 'c.db'
         self.env = self.make_env(fop_writes_enabled=True)
 
-    def make_env(self, *, fop_writes_enabled, fetcher=None):
+    def make_env(self, *, fop_writes_enabled, fetcher=None, quotes=None):
         config = configparser.ConfigParser()
         config.read_string(f'[cost_basis]\ndb_path = {self.db_path}\n')
         env = create_store_env(config, environ={})
@@ -59,6 +59,8 @@ class FopProtocolTests(unittest.IsolatedAsyncioTestCase):
                    .initialize(), available=True, _initialized=True)
         if fetcher is not None:
             env['fetch_fop_contract_details'] = fetcher
+        if quotes is not None:
+            env['fetch_fop_market_snapshot'] = quotes
         return env
 
     async def call(self, action, env=None, **fields):
@@ -89,7 +91,7 @@ class FopProtocolTests(unittest.IsolatedAsyncioTestCase):
         capabilities = fop.pop('importCapabilities')
         self.assertEqual(fop, {
             'engineVersion': 1, 'productRules': ['NYMEX-CL-v1'], 'writesReleased': True,
-            'contractDetails': False})
+            'contractDetails': False, 'marketSnapshot': False, 'positions': False})
         # The page hands the statement row types to the importer (plan §9.7, P4).
         self.assertEqual(capabilities, json.loads(
             (REPO_ROOT / 'cost_basis_fop_capabilities.json').read_text(encoding='utf-8')))
@@ -135,6 +137,49 @@ class FopProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((registered['inserted'], registered['ledgerVersion']), (0, again['ledgerVersion']))
         self.assertIn('2026-11-01', [batch['periodFrom'] for batch in
                                      self.env['store'].list_import_batches(book_id)])
+
+    async def test_one_quote_batch_for_the_ledgers_own_contracts(self):
+        # P5: a quote batch names ledger contracts by id; the servers read the
+        # terms from the stored records and answer in one shape, the
+        # historical server with its capability error (plan §10.1-§10.3, F26).
+        asked = []
+
+        async def quotes(queries):
+            asked.extend(queries)
+            return [{'contractId': query['contractId'], 'conId': 555, 'localSymbol': 'CLZ6', 'secType': 'FUT',
+                     'bid': 70.1, 'bidSize': 2, 'ask': 70.2, 'askSize': 3, 'last': 70.15, 'lastSize': 1,
+                     'close': 69.8, 'closeDate': None, 'settlement': None, 'settlementDate': None,
+                     'observedAtUtc': '2026-10-02T14:30:05.120000Z', 'marketDataType': 1} for query in queries]
+
+        env = self.make_env(fop_writes_enabled=True, quotes=quotes)
+        created = await self.create(env=env)
+        book_id = created['book']['bookId']
+        fut = await self.call('append_cost_basis_event', env=env, bookId=book_id, clientToken=token(),
+                              expectedLedgerVersion=(await self.call('list_cost_basis_events', env=env,
+                                                                     bookId=book_id))['ledgerVersion'],
+                              bookIdentity=dict(IDENTITY),
+                              fopPackage=package(at(example_event('FUT trade: cash is minus fees, notional stays out'),
+                                                    '2026-10-01T14:30:05.000000Z'), contracts=[CLZ6]))
+        self.assertTrue(fut['success'], fut)
+        status = await self.call('request_cost_basis_status', env=env)
+        self.assertTrue(status['features']['fopLedger']['marketSnapshot'])
+        batch = await self.call('request_cost_basis_fop_market_snapshot', env=env, bookId=book_id,
+                                contractIds=[CLZ6['contractId']])
+        self.assertTrue(batch['success'], batch)
+        self.assertEqual(schema.check('MarketSnapshotResponse', batch), [])
+        self.assertEqual(batch['ledgerVersion'], fut['ledgerVersion'])
+        self.assertEqual([(query['conId'], query['contractMonth']) for query in asked], [(555, '202612')])
+        # The page cannot ask for another ledger's contract, or for too many.
+        for contract_ids in (['fut-other-0001'], [f'fut-{index:04d}' for index in range(41)]):
+            refused = await self.call('request_cost_basis_fop_market_snapshot', env=env, bookId=book_id,
+                                      contractIds=contract_ids)
+            self.assertEqual(refused['code'], 'invalid_request', refused)
+        # A server without a broker answers with the same action and its capability error.
+        unavailable = await self.call('request_cost_basis_fop_market_snapshot', bookId=book_id,
+                                      contractIds=[CLZ6['contractId']])
+        self.assertEqual((unavailable['action'], unavailable['success'], unavailable['code']),
+                         ('cost_basis_fop_market_snapshot', False, 'fop_market_snapshot_unavailable'))
+        self.assertEqual(len(asked), 1, 'refused batches never reach the broker')
 
     async def test_a_fop_ledger_round_trips_through_the_protocol(self):
         created = await self.create()
@@ -276,6 +321,206 @@ class FopProtocolTests(unittest.IsolatedAsyncioTestCase):
         too_many = await self.call('request_cost_basis_fop_contract_details', env=live,
                                    bookId=book_id, contracts=[LOZ6] * 21)
         self.assertEqual(too_many['code'], 'invalid_request')
+
+    def positions_env(self, items, *, accounts=None, ready=True, connected=True):
+        env = self.make_env(fop_writes_enabled=True)
+
+        async def fetch():
+            return {'connected': connected, 'ready': ready,
+                    'accounts': [IDENTITY['account']] if accounts is None else accounts,
+                    'items': copy.deepcopy(items)}
+
+        env['fetch_fop_positions'] = fetch
+        return env
+
+    TWS_ITEMS = [
+        {'account': IDENTITY['account'], 'conId': 555, 'secType': 'FUT', 'symbol': 'CL', 'localSymbol': 'CLZ6',
+         'expDate': '20261119', 'right': '', 'strike': 0.0, 'multiplier': '1000', 'tradingClass': 'CL',
+         'position': 1.0, 'averageCost': 70002.02},
+        {'account': IDENTITY['account'], 'conId': 9001, 'secType': 'FOP', 'symbol': 'CL',
+         'localSymbol': 'LOZ6 C7500', 'expDate': '20261117', 'right': 'C', 'strike': 75.0, 'multiplier': '1000',
+         'tradingClass': 'LO', 'position': -1.0, 'averageCost': 1197.5},
+        # Another account, another root and a stock never reach the page.
+        {'account': 'U2222222', 'conId': 555, 'secType': 'FUT', 'symbol': 'CL', 'localSymbol': 'CLZ6',
+         'expDate': '20261119', 'right': '', 'strike': 0.0, 'multiplier': '1000', 'tradingClass': 'CL',
+         'position': 3.0, 'averageCost': 69000.0},
+        {'account': IDENTITY['account'], 'conId': 777, 'secType': 'FUT', 'symbol': 'MCL', 'localSymbol': 'MCLZ6',
+         'expDate': '20261119', 'right': '', 'strike': 0.0, 'multiplier': '100', 'tradingClass': 'MCL',
+         'position': 2.0, 'averageCost': 7000.0},
+        {'account': IDENTITY['account'], 'conId': 320227571, 'secType': 'STK', 'symbol': 'QQQ', 'localSymbol': 'QQQ',
+         'expDate': '', 'right': '', 'strike': 0.0, 'multiplier': '', 'tradingClass': 'NMS', 'position': 100.0,
+         'averageCost': 400.0},
+    ]
+
+    async def held(self, env):
+        book_id = (await self.create(env))['book']['bookId']
+        for event, parts in (
+                (at(example_event('FUT trade: cash is minus fees, notional stays out'),
+                    '2026-10-01T14:30:05.000000Z'), {'contracts': [CLZ6]}),
+                (at(example_event('short call with its contract record'), '2026-10-02T15:00:00.000000Z'),
+                 {'contracts': [LOZ6]})):
+            answer = await self.call('append_cost_basis_event', env=env, bookId=book_id, clientToken=token(),
+                                     expectedLedgerVersion=await self.version_in(env, book_id),
+                                     bookIdentity=dict(IDENTITY), fopPackage=package(event, **parts))
+            self.assertTrue(answer['success'], answer)
+        return book_id
+
+    async def version_in(self, env, book_id):
+        return (await self.call('list_cost_basis_events', env=env, bookId=book_id))['ledgerVersion']
+
+    async def test_positions_are_only_the_ledger_account_and_root(self):
+        book_id = (await self.create())['book']['bookId']
+        missing = await self.call('request_cost_basis_fop_positions', bookId=book_id)
+        self.assertEqual(missing['code'], 'fop_positions_unavailable', 'the historical backend has none')
+        env = self.positions_env(self.TWS_ITEMS)
+        answer = await self.call('request_cost_basis_fop_positions', env=env, bookId=book_id)
+        self.assertTrue(answer['success'], answer)
+        self.assertEqual(schema.check('FopPositionsResponse', answer), [])
+        self.assertEqual([(item['localSymbol'], item['position'], item['averageCost'], item['multiplier'])
+                          for item in answer['positions']],
+                         [('CLZ6', 1, 70002.02, 1000), ('LOZ6 C7500', -1, 1197.5, 1000)])
+        self.assertTrue(answer['accountConnected'] and answer['positionsReady'] and answer['evidenceCredential'])
+        self.assertEqual(answer['ledgerVersion'], await self.version_in(env, book_id))
+        # An account TWS does not manage: nothing is read, so nothing can be reconciled.
+        offline = self.positions_env(self.TWS_ITEMS, accounts=['U2222222'])
+        answer = await self.call('request_cost_basis_fop_positions', env=offline, bookId=book_id)
+        self.assertEqual((answer['accountConnected'], answer['positionsReady'], answer['positions'],
+                          answer['evidenceCredential']), (False, False, [], None))
+        self.assertEqual(schema.check('FopPositionsResponse', answer), [])
+        waiting = self.positions_env(self.TWS_ITEMS, ready=False)
+        answer = await self.call('request_cost_basis_fop_positions', env=waiting, bookId=book_id)
+        self.assertEqual((answer['accountConnected'], answer['positionsReady'], answer['evidenceCredential']),
+                         (True, False, None))
+
+    @staticmethod
+    def rows_for(positions, status='matched', avg_cost='not_comparable'):
+        """One FopReconciliationRow per position, as the page shows them."""
+        return [{'contractId': None, 'localSymbol': item['localSymbol'], 'ledgerQuantity': item['position'],
+                 'twsQuantity': item['position'], 'quantityStatus': status, 'ledgerAverage': None,
+                 'twsAverage': None, 'avgCostStatus': avg_cost, 'note': ''} for item in positions['positions']]
+
+    def snapshot_fields(self, book_id, version, positions=None, *, reconciled, rows=None, status='matched',
+                        avg_cost='not_comparable'):
+        evidence = None
+        if positions is not None:
+            evidence = {'kind': 'fop_positions', 'account': positions['account'],
+                        'observedAtUtc': positions['observedAtUtc'], 'ledgerVersion': positions['ledgerVersion'],
+                        'accountConnected': positions['accountConnected'],
+                        'positionsReady': positions['positionsReady'], 'positions': positions['positions'],
+                        'evidenceCredential': positions['evidenceCredential'],
+                        'rows': self.rows_for(positions, status) if rows is None else rows,
+                        'quantityStatus': status, 'avgCostStatus': avg_cost}
+        return {'bookId': book_id, 'expectedLedgerVersion': version, 'bookIdentity': dict(IDENTITY),
+                'asOfDate': '2026-11-12', 'accountScope': IDENTITY['account'], 'twsSnapshot': evidence,
+                'reconciled': reconciled, 'note': 'end of day',
+                'summary': {'ledgerVersion': version, 'quoteBatchId': None, 'quotes': [],
+                            'completeness': {'quantity': 'complete' if status == 'matched' else 'incomplete',
+                                             'openingCost': 'complete', 'binding': 'complete',
+                                             'marketData': 'not_checked', 'coverage': 'not_checked',
+                                             'cash': 'not_checked'}}}
+
+    async def test_a_reconciliation_snapshot_is_held_to_its_evidence(self):
+        env = self.positions_env(self.TWS_ITEMS)
+        book_id = await self.held(env)
+        version = await self.version_in(env, book_id)
+        positions = await self.call('request_cost_basis_fop_positions', env=env, bookId=book_id)
+        saved = await self.call('save_cost_basis_snapshot', env=env,
+                                **self.snapshot_fields(book_id, version, positions, reconciled=True))
+        self.assertTrue(saved['success'], saved)
+        self.assertEqual((saved['snapshot']['reconciled'], saved['idempotentReplay']), (True, False))
+        self.assertEqual(saved['snapshot']['eventsSha256'], version['digest'])
+        self.assertEqual(await self.version_in(env, book_id), version, 'a snapshot changes no ledger version')
+        # The same confirmation again is the first snapshot.
+        again = await self.call('save_cost_basis_snapshot', env=env,
+                                **self.snapshot_fields(book_id, version, positions, reconciled=True))
+        self.assertEqual((again['snapshot']['snapshotId'], again['idempotentReplay']),
+                         (saved['snapshot']['snapshotId'], True))
+        listed = await self.call('list_cost_basis_snapshots', env=env, bookId=book_id)
+        self.assertEqual(len(listed['snapshots']), 1)
+        self.assertEqual(listed['snapshots'][0]['twsSnapshot']['positions'], positions['positions'])
+
+        async def refused(fields, code, pattern):
+            answer = await self.call('save_cost_basis_snapshot', env=env, **fields)
+            self.assertEqual(answer.get('code'), code, answer)
+            self.assertRegex(answer['message'], pattern)
+            listed = await self.call('list_cost_basis_snapshots', env=env, bookId=book_id)
+            self.assertEqual(len(listed['snapshots']), 1)
+
+        # No broker evidence: never reconciled.
+        await refused(self.snapshot_fields(book_id, version, reconciled=True), 'invalid_request', 'reconciled needs')
+        # Positions other than the ones read.
+        tampered = copy.deepcopy(positions)
+        tampered['positions'][0]['position'] = 2
+        await refused(self.snapshot_fields(book_id, version, tampered, reconciled=True), 'invalid_request',
+                      'not the positions that were read')
+        # Positions that differ from the ledger: a record of the mismatch, never "reconciled".
+        env_two = self.positions_env([dict(self.TWS_ITEMS[0], position=2.0)] + self.TWS_ITEMS[1:])
+        env_two['store'] = env['store']
+        differing = await self.call('request_cost_basis_fop_positions', env=env_two, bookId=book_id)
+        await refused(self.snapshot_fields(book_id, version, differing, reconciled=True), 'invalid_request',
+                      '1 in the ledger, 2 in TWS')
+        kept = await self.call('save_cost_basis_snapshot', env=env, **self.snapshot_fields(
+            book_id, version, differing, reconciled=False, status='mismatch'))
+        self.assertTrue(kept['success'], kept)
+        self.assertFalse(kept['snapshot']['reconciled'])
+        # Evidence read before the ledger moved belongs to that version.
+        await self.call('append_cost_basis_event', env=env, bookId=book_id, clientToken=token(),
+                        expectedLedgerVersion=version, bookIdentity=dict(IDENTITY),
+                        fopPackage=package(at(example_event('FUT trade: cash is minus fees, notional stays out'),
+                                              '2026-10-05T14:30:05.000000Z')))
+        moved = await self.version_in(env, book_id)
+        answer = await self.call('save_cost_basis_snapshot', env=env,
+                                 **self.snapshot_fields(book_id, moved, positions, reconciled=False))
+        self.assertEqual(answer['code'], 'ledger_changed', answer)
+        # Writes closed: nothing is saved.
+        closed = self.make_env(fop_writes_enabled=False)
+        closed['store'] = CostBasisStore(self.db_path, fop_writes_enabled=False).initialize()
+        answer = await self.call('save_cost_basis_snapshot', env=closed,
+                                 **self.snapshot_fields(book_id, moved, reconciled=False))
+        self.assertEqual(answer['code'], 'futures_book_frozen', answer)
+
+    async def test_a_conid_conflict_or_a_partial_avg_cost_is_never_saved_as_agreeing(self):
+        # Review P5-C3: TWS names CLZ6 with another conId than the ledger's 555.
+        env = self.positions_env([dict(self.TWS_ITEMS[0], conId=999999)] + self.TWS_ITEMS[1:])
+        book_id = await self.held(env)
+        version = await self.version_in(env, book_id)
+        conflicting = await self.call('request_cost_basis_fop_positions', env=env, bookId=book_id)
+        self.assertEqual([item['conId'] for item in conflicting['positions']], [999999, 9001])
+
+        async def refused(fields, pattern):
+            answer = await self.call('save_cost_basis_snapshot', env=env, **fields)
+            self.assertEqual(answer.get('code'), 'invalid_request', answer)
+            self.assertRegex(answer['message'], pattern)
+            listed = await self.call('list_cost_basis_snapshots', env=env, bookId=book_id)
+            self.assertEqual(listed['snapshots'], [])
+
+        await refused(self.snapshot_fields(book_id, version, conflicting, reconciled=True),
+                      r'CLZ6 is conId 999999 in TWS but conId 555 in the ledger')
+        # The summaries are what the rows say: some AvgCost comparable and the rest not is partial.
+        env['fetch_fop_positions'] = self.positions_env(self.TWS_ITEMS)['fetch_fop_positions']
+        positions = await self.call('request_cost_basis_fop_positions', env=env, bookId=book_id)
+        rows = self.rows_for(positions)
+        rows[1]['avgCostStatus'] = 'matched'
+        await refused(self.snapshot_fields(book_id, version, positions, reconciled=True, rows=rows,
+                                           avg_cost='matched'),
+                      'avgCostStatus is matched, but its rows make it partial')
+        mismatched = self.rows_for(positions)
+        mismatched[0]['quantityStatus'] = 'mismatch'
+        await refused(self.snapshot_fields(book_id, version, positions, reconciled=False, rows=mismatched),
+                      'quantityStatus is matched, but its rows make it mismatch')
+        # Positions TWS never read compare nothing.
+        env['fetch_fop_positions'] = self.positions_env(self.TWS_ITEMS, accounts=['U2222222'])['fetch_fop_positions']
+        unread = await self.call('request_cost_basis_fop_positions', env=env, bookId=book_id)
+        self.assertEqual((unread['accountConnected'], unread['positions']), (False, []))
+        await refused(self.snapshot_fields(book_id, version, unread, reconciled=False, rows=[], avg_cost='matched'),
+                      'positions that were not read compare nothing')
+        saved = await self.call('save_cost_basis_snapshot', env=env, **self.snapshot_fields(
+            book_id, version, positions, reconciled=True, rows=rows, avg_cost='partial'))
+        self.assertTrue(saved['success'], saved)
+        self.assertEqual(saved['snapshot']['twsSnapshot']['avgCostStatus'], 'partial')
+        offline = await self.call('save_cost_basis_snapshot', env=env, **self.snapshot_fields(
+            book_id, version, unread, reconciled=False, rows=[], status='not_checked', avg_cost='not_checked'))
+        self.assertTrue(offline['success'], offline)
 
     async def test_one_failing_request_answers_its_own_request_id(self):
         book_id = (await self.create())['book']['bookId']

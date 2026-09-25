@@ -85,6 +85,8 @@ function loadFopPage(search) {
         localStorage: { getItem: (key) => (key === 'optionComboWsPort' ? '8799' : null) },
         WebSocket: FakeWebSocket,
         location: { search, replace: (url) => replaced.push(url) },
+        // Request timeouts and quote re-checks never fire here.
+        setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
     });
     const socket = sockets[0];
     const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -208,12 +210,28 @@ module.exports = {
             },
         },
         {
-            name: 'the FOP page may only read the status and the ledger list',
+            name: 'the FOP page sends ledger reads, one-shot quotes and FOP ledger writes, nothing else',
             run() {
                 const common = loadCommon();
                 const fopActions = Array.from(common.actionsForPage('fop'));
-                assert.deepEqual(fopActions, ['request_cost_basis_status', 'list_cost_basis_books']);
-                fopActions.forEach((action) => assert.equal(common.isWriteAction(action), false));
+                assert.deepEqual(fopActions, [
+                    'request_cost_basis_status', 'list_cost_basis_books', 'create_cost_basis_book',
+                    'request_cost_basis_delete_plan', 'delete_cost_basis_book', 'list_cost_basis_events',
+                    'append_cost_basis_event', 'void_cost_basis_event', 'import_cost_basis_events',
+                    'save_cost_basis_snapshot', 'list_cost_basis_snapshots',
+                    'request_cost_basis_reset_plan', 'rebuild_cost_basis_book', 'export_cost_basis_backup',
+                    'restore_cost_basis_backup', 'list_cost_basis_import_batches', 'commit_cost_basis_fop_metadata',
+                    'request_cost_basis_fop_contract_details', 'request_cost_basis_fop_statement_bindings',
+                    'request_cost_basis_fop_market_snapshot', 'request_cost_basis_fop_positions']);
+                // F27: no order, exercise, subscription, live position or stock-page action.
+                fopActions.forEach((action) => assert.doesNotMatch(action,
+                    /order|exercise|subscri|execution|portfolio|managed_accounts|market_price|scenario|split/, action));
+                // Every write it may send is one the store carries for a FOP ledger.
+                const coverage = readJson(`${CONTRACT}/write_coverage.json`);
+                const fopWrites = new Map(coverage.writes.map((entry) => [entry.wsAction, entry.fopStoreMethod]));
+                fopActions.filter((action) => common.isWriteAction(action)).forEach((action) => {
+                    assert.ok(fopWrites.get(action), `${action} has no FOP store method`);
+                });
             },
         },
         {
@@ -221,17 +239,18 @@ module.exports = {
             run() {
                 const common = loadCommon();
                 const core = loadBrowserScripts(['js/cost_basis_core.js']).OptionComboCostBasisCore;
-                // The writes a page may send are the stock page's; the FOP-only
-                // actions are listed for the backend but no page sends them yet.
+                // The writes pages may send: the stock page's (frozen for FUT
+                // ledgers there), plus the FOP page's metadata commit (P5).
                 const writes = Array.from(common.PROTOCOL_ACTIONS
                     .filter((entry) => entry.writes && entry.pages.length)
                     .map((entry) => entry.action)).sort();
                 assert.deepEqual(writes, Array.from(core.FUTURES_FROZEN_WRITE_ACTIONS)
-                    .concat(['create_cost_basis_book', 'delete_cost_basis_book']).sort());
+                    .concat(['create_cost_basis_book', 'delete_cost_basis_book', 'commit_cost_basis_fop_metadata'])
+                    .sort());
+                // No FOP-only write reaches the stock page.
+                assert.ok(!Array.from(core.ALLOWED_CLIENT_ACTIONS).includes('commit_cost_basis_fop_metadata'));
                 assert.deepEqual(Array.from(common.PROTOCOL_ACTIONS
-                    .filter((entry) => !entry.pages.length).map((entry) => entry.action)).sort(),
-                ['commit_cost_basis_fop_metadata', 'request_cost_basis_fop_contract_details',
-                    'request_cost_basis_fop_statement_bindings']);
+                    .filter((entry) => !entry.pages.length).map((entry) => entry.action)), []);
                 const coverage = readJson(`${CONTRACT}/write_coverage.json`);
                 const serverWrites = new Set(coverage.writes.map((entry) => entry.wsAction));
                 const serverReads = new Set(coverage.reads);
@@ -334,7 +353,7 @@ module.exports = {
             },
         },
         {
-            name: 'the FOP page loads the common layer, the FOP importer and core, and its own controller',
+            name: 'the FOP page loads the common layer, the FOP importer, core, quotes, messages, views, forms and reconciliation, and its controller',
             run() {
                 const html = read('cost_basis_fop.html');
                 const scripts = Array.from(html.matchAll(/<script src="([^"?]+)/g)).map((match) => match[1]);
@@ -342,7 +361,10 @@ module.exports = {
                 // importer and replays them with the FOP core; never the
                 // stock ledger core or the trading shell.
                 assert.deepEqual(scripts, ['js/cost_basis_common.js', 'js/cost_basis_import_common.js',
-                    'js/cost_basis_fop_core.js', 'js/cost_basis_fop_import.js', 'js/cost_basis_fop.js']);
+                    'js/cost_basis_fop_core.js', 'js/cost_basis_fop_import.js', 'js/cost_basis_fop_quotes.js',
+                    'js/cost_basis_fop_messages.js', 'js/cost_basis_fop_view.js', 'js/cost_basis_fop_forms.js',
+                    'js/cost_basis_fop_reconcile.js',
+                    'js/cost_basis_fop.js']);
                 const styles = Array.from(html.matchAll(/<link rel="stylesheet" href="([^"?]+)/g))
                     .map((match) => match[1]);
                 assert.deepEqual(styles, ['cost_basis_fop.css']);

@@ -12,6 +12,7 @@ import copy
 import pathlib
 import re
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -24,6 +25,7 @@ if str(REPO_ROOT) not in sys.path:
 if str(REPO_ROOT / 'tests') not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / 'tests'))
 
+import cost_basis_fop_domain as domain  # noqa: E402
 import cost_basis_store  # noqa: E402
 from cost_basis_fop_store import FOP_GRAPH_TABLES, FOP_TABLES  # noqa: E402
 import cost_basis_fop_schema as schema  # noqa: E402
@@ -728,6 +730,78 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual([tuple(row) for row in rows],
                          [(1, 'manual_attested', 2), (2, 'verified_broker', None)])
 
+    def unresolved_call(self, option=LOZ6):
+        """A short call no statement or broker has bound yet; the ledger holds no FUT."""
+        unresolved = dict(MANUAL_BINDING, status='unresolved', futureContractId=None,
+                          evidenceSummary='the statement names no underlying future')
+        return self.ledger.append(short_call(), contracts=[option], bindings=[unresolved])['event']
+
+    def broker_proof(self, option=LOZ6, future=CLZ6):
+        """What request_cost_basis_fop_contract_details answers for the option (plan §19 P5-C2)."""
+        future = dict(future, evidenceStatus='verified_broker', evidenceSummary='IB contract details via underConId')
+        credential = self.store.issue_binding_credential(
+            self.book_id, status='verified_broker', option=option,
+            future=dict(future, contractId=None, revision=None),
+            evidence={'optionConId': 9001, 'underConId': 555, 'contractMonth': future['futureContractMonth']})
+        binding = dict(MANUAL_BINDING, revision=2, status='verified_broker', evidenceCredential=credential,
+                       futureContractId=future['contractId'], evidenceSummary='IB: LOZ6 C7500 -> CLZ6')
+        return binding, future
+
+    def test_an_adoption_brings_the_future_the_broker_proved(self):
+        self.unresolved_call()
+        binding, future = self.broker_proof()
+        before = _all_tables(self.db_path)
+        refusals = [
+            ({'kind': 'adopt_binding', 'binding': binding, 'affected': []}, FopIdentityConflictError,
+             'the ledger holds no such future'),
+            ({'kind': 'adopt_binding', 'binding': binding, 'contracts': [dict(future, conId=556)], 'affected': []},
+             FopBindingEvidenceInvalidError, 'a future the broker did not prove'),
+            ({'kind': 'adopt_binding', 'binding': dict(binding, status='manual_attested', evidenceCredential=None),
+              'contracts': [future], 'affected': []}, FopBindingEvidenceInvalidError,
+             'contracts travel only with verified evidence'),
+            ({'kind': 'adopt_binding', 'binding': binding,
+              'contracts': [future, dict(future, contractId='fut-clf7-0009', futureContractMonth='202701')],
+              'affected': []}, FopIdentityConflictError, 'a contract that is neither side of the binding'),
+        ]
+        for operation, error, why in refusals:
+            with self.subTest(why), self.assertRaises(error):
+                self.commit(operation)
+            self.assertEqual(_all_tables(self.db_path), before, why)
+        confirm = token('adopt')
+        result = self.commit({'kind': 'adopt_binding', 'binding': binding, 'contracts': [future], 'affected': []},
+                             client_token=confirm)
+        self.assertEqual(result['operation']['kind'], 'adopt_binding')
+        rows = _pragma(self.db_path, 'SELECT contract_id, revision, evidence_status FROM cost_basis_fop_contracts '
+                                     'WHERE sec_type = "FUT"')
+        self.assertEqual([tuple(row) for row in rows], [('fut-clz6-0001', 1, 'verified_broker')])
+        rows = _pragma(self.db_path, 'SELECT revision, status, future_contract_id FROM cost_basis_fop_bindings '
+                                     'ORDER BY revision')
+        self.assertEqual([tuple(row) for row in rows],
+                         [(1, 'unresolved', None), (2, 'verified_broker', 'fut-clz6-0001')])
+        # The same confirmation again is its first answer.
+        after = _all_tables(self.db_path)
+        again = self.commit({'kind': 'adopt_binding', 'binding': binding, 'contracts': [future], 'affected': []},
+                            client_token=confirm, expected=self.ledger.version())
+        self.assertTrue(again['idempotentReplay'])
+        self.assertEqual(_all_tables(self.db_path), after)
+
+    def test_an_adoption_fills_in_the_option_terms_the_broker_proved(self):
+        call = self.unresolved_call(dict(LOZ6, conId=None, localSymbol=None))
+        self.ledger.append(fut_trade(), contracts=[CLZ6])
+        binding, _future = self.broker_proof(future=CLZ6)
+        revised = dict(LOZ6, revision=2, evidenceStatus='verified_broker', evidenceSummary='IB contract details')
+        moved = [self.change(call['eventId'], 'contract', 1, 2, LOZ6['contractId'])]
+        with self.assertRaises(FopBindingEvidenceInvalidError, msg='the stored option lacks the proved conId'):
+            self.commit({'kind': 'adopt_binding', 'binding': binding, 'affected': []})
+        with self.assertRaises(FopReferenceRevisionConflictError, msg='the preview lists every moved reference'):
+            self.commit({'kind': 'adopt_binding', 'binding': binding, 'contracts': [revised], 'affected': []})
+        result = self.commit({'kind': 'adopt_binding', 'binding': binding, 'contracts': [revised],
+                              'affected': moved})
+        self.assertEqual(result['operation']['referenceChanges'], moved)
+        listed = [event for event in self.ledger.events() if event['eventId'] == call['eventId']][0]
+        self.assertEqual(listed['fop']['contractRef'], {'contractId': LOZ6['contractId'], 'revision': 2})
+        self.assertEqual(listed['display']['localSymbol'], 'LOZ6 C7500')
+
     def test_a_confirmed_delivery_is_not_moved_to_another_future_by_a_binding(self):
         assigned = self.assigned()
         clf7 = dict(CLZ6, contractId='fut-clf7-0001', conId=556, localSymbol='CLF7',
@@ -975,9 +1049,7 @@ class GraphTests(unittest.TestCase):
         backup = self.store.export_backup(self.book_id)
         self.assertEqual((backup['version'], backup['kind']), (2, 'fop'))
         self.assertEqual(schema.check('BackupEnvelopeV2', backup), [])
-        encoded = json.dumps(backup['payload'], ensure_ascii=False, sort_keys=True,
-                             separators=(',', ':'))
-        self.assertEqual(hashlib.sha256(encoded.encode()).hexdigest(), backup['sha256'])
+        self.assertEqual(domain.backup_digest(backup['payload']), backup['sha256'])
         payload = backup['payload']
         self.assertEqual(len(payload['events']), 5)
         self.assertEqual(len(payload['bindings']), 2)
@@ -999,6 +1071,26 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(result['restoredEvents'], 5)
         _assert_same_graph(self, self.store.export_backup(self.book_id)['payload'],
                            backup['payload'])
+        self.assertEqual(self.ledger.version()['digest'], version['digest'])
+
+    def test_a_backup_a_browser_parsed_and_wrote_again_still_restores(self):
+        # P5: the page downloads a backup through JSON.parse/JSON.stringify,
+        # which writes 70.0 as 70; the digest reads whole numbers as integers,
+        # while any changed figure still fails it.
+        self.build()
+        backup = self.store.export_backup(self.book_id)
+        script = ('let s = ""; process.stdin.on("data", (d) => { s += d; })'
+                  '.on("end", () => process.stdout.write(JSON.stringify(JSON.parse(s))));')
+        browser = json.loads(subprocess.check_output(['node', '-e', script], input=json.dumps(backup), text=True))
+        self.assertNotEqual(json.dumps(browser['payload'], sort_keys=True),
+                            json.dumps(backup['payload'], sort_keys=True), 'the fixture has whole floats')
+        version = self.ledger.version()
+        tampered = copy.deepcopy(browser)
+        tampered['payload']['events'][0]['row']['price'] += 0.01
+        with self.assertRaises(InvalidRequestError):
+            self.restore(tampered)
+        self.assertEqual(self.ledger.version(), version)
+        self.assertEqual(self.restore(browser)['restoredEvents'], 5)
         self.assertEqual(self.ledger.version()['digest'], version['digest'])
 
     def test_a_backup_restores_into_another_ledger_id_with_every_id_remapped(self):

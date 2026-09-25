@@ -1,0 +1,1744 @@
+[
+  {
+    "phase": "create",
+    "failures": 0,
+    "results": [
+      {
+        "name": "the type range is not preselected",
+        "pass": true,
+        "actual": "",
+        "expected": ""
+      },
+      {
+        "name": "writes are released on the synthetic backend",
+        "pass": true,
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "creating without choosing full history or a baseline is refused",
+        "pass": true,
+        "actual": "未建账：请选择账本范围：完整历史或自基线起",
+        "expected": true
+      }
+    ],
+    "navigating": true,
+    "note": "the page opens the new ledger; run the import phase there"
+  },
+  {
+    "phase": "import",
+    "failures": 0,
+    "results": [
+      {
+        "name": "the page routed the new ledger by its backend type",
+        "pass": true,
+        "actual": "独立 FOP 账本：数字由账本流水逐合约回放得到，每个金额都能追到事件与合约。",
+        "expected": true
+      },
+      {
+        "name": "the ledger is CL, FUT, full history under NYMEX-CL-v1",
+        "pass": true,
+        "actual": [
+          "U1111111",
+          "CL",
+          "FUT",
+          "USD",
+          "2026-10-01",
+          "0",
+          "NYMEX-CL-v1 · 引擎 v1",
+          "完整历史"
+        ],
+        "expected": true
+      },
+      {
+        "name": "the preview names the synthetic row types",
+        "pass": true,
+        "actual": [
+          "仅合成样本：只能预览或人工认领",
+          "仅合成样本：只能预览或人工认领",
+          "仅合成样本：只能预览或人工认领",
+          "仅合成样本：只能预览或人工认领",
+          "仅合成样本：只能预览或人工认领"
+        ],
+        "expected": true
+      },
+      {
+        "name": "the preview says the rows need a manual claim",
+        "pass": true,
+        "actual": "没有阻断问题。报表经济行的格式尚未经真实样本验收：需逐行人工认领后才能写入。",
+        "expected": true
+      },
+      {
+        "name": "without a claim the server refuses the synthetic rows, in words",
+        "pass": true,
+        "actual": "未导入：报表的这类行尚未经真实样本验收（能力未验收）。下一步：逐行核对后勾选“人工认领”并写明核对说明；认领不会把行类型变成已验收。[fop_capability_not_verified] 原文：statement row activity_row:act-c5b2a1b6f6c554a5 is activity/trades/FUT/trade, which has no real-statement acceptance yet; import it only as a manually verified event that claims the row (plan §9.7)",
+        "expected": true
+      },
+      {
+        "name": "Rf",
+        "pass": true,
+        "actual": "2000.00",
+        "expected": "2000.00"
+      },
+      {
+        "name": "Co",
+        "pass": true,
+        "actual": "400.00",
+        "expected": "400.00"
+      },
+      {
+        "name": "E",
+        "pass": true,
+        "actual": "15.00",
+        "expected": "15.00"
+      },
+      {
+        "name": "without quotes the full P&L is unknown, never 0",
+        "pass": true,
+        "actual": "未知：缺报价（CLF7）",
+        "expected": true
+      },
+      {
+        "name": "futures",
+        "pass": true,
+        "actual": [
+          [
+            "202701",
+            "CLF7",
+            "2026-12-17",
+            "1",
+            "72.5"
+          ]
+        ],
+        "expected": [
+          [
+            "202701",
+            "CLF7",
+            "2026-12-17",
+            "1",
+            "72.5"
+          ]
+        ]
+      },
+      {
+        "name": "the old-month short call is flagged beside the new-month FUT",
+        "pass": true,
+        "actual": [
+          [
+            "2026-11-17",
+            "C",
+            "75",
+            "LO",
+            "-1",
+            "CLZ6",
+            "报表验证",
+            "1200.00",
+            "未取报价",
+            "未知：缺报价",
+            "旧月期权：对应期货未持有"
+          ],
+          [
+            "2026-11-17",
+            "P",
+            "65",
+            "LO",
+            "1",
+            "CLZ6",
+            "报表验证",
+            "-800.00",
+            "未取报价",
+            "未知：缺报价",
+            "旧月期权：对应期货未持有"
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "the options are bound through the statement",
+        "pass": true,
+        "actual": [
+          [
+            "2026-11-17",
+            "C",
+            "75",
+            "LO",
+            "-1",
+            "CLZ6",
+            "报表验证",
+            "1200.00",
+            "未取报价",
+            "未知：缺报价",
+            "旧月期权：对应期货未持有"
+          ],
+          [
+            "2026-11-17",
+            "P",
+            "65",
+            "LO",
+            "1",
+            "CLZ6",
+            "报表验证",
+            "-800.00",
+            "未取报价",
+            "未知：缺报价",
+            "旧月期权：对应期货未持有"
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "the new-month FUT does not cover the old-month short call (F08)",
+        "pass": true,
+        "actual": [
+          [
+            "CLZ6",
+            "0",
+            "-1",
+            "-1",
+            "无同合约多头覆盖",
+            "无空头 Put",
+            "持有的是其他月份期货，不构成同合约覆盖"
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "the roll is derived, a candidate, with its spread",
+        "pass": true,
+        "actual": [
+          [
+            "候选",
+            "CLZ6",
+            "CLF7",
+            "1",
+            "72",
+            "72.5",
+            "0.5"
+          ]
+        ],
+        "expected": [
+          [
+            "候选",
+            "CLZ6",
+            "CLF7",
+            "1",
+            "72",
+            "72.5",
+            "0.5"
+          ]
+        ]
+      },
+      {
+        "name": "break-even rows",
+        "pass": true,
+        "actual": [
+          [
+            "实际开仓均价",
+            "72.5"
+          ],
+          [
+            "卖方策略等效回本价（已结算结果）",
+            "70.515"
+          ],
+          [
+            "未平卖方期权全部归零假设价",
+            "69.315"
+          ]
+        ],
+        "expected": [
+          [
+            "实际开仓均价",
+            "72.5"
+          ],
+          [
+            "卖方策略等效回本价（已结算结果）",
+            "70.515"
+          ],
+          [
+            "未平卖方期权全部归零假设价",
+            "69.315"
+          ]
+        ]
+      },
+      {
+        "name": "every imported event shows as manually verified",
+        "pass": true,
+        "actual": [
+          [
+            "1e6de445a2fc417b95d34fb1516c9ad3",
+            "期货成交",
+            "CLZ6",
+            "1",
+            "70",
+            "5.00",
+            "-5.00",
+            "2026-10-01 14:00:00 UTC",
+            "",
+            "人工核实",
+            ""
+          ],
+          [
+            "5bac1ddb0a7847818df639bd8cfdbbe2",
+            "期权成交",
+            "LOZ6 C7500",
+            "-1",
+            "1.2",
+            "0.00",
+            "1200.00",
+            "2026-10-01 15:00:00 UTC",
+            "",
+            "人工核实",
+            ""
+          ],
+          [
+            "06ced47ea32946a380e398e8b5e49c4b",
+            "期权成交",
+            "LOZ6 P6500",
+            "1",
+            "0.8",
+            "0.00",
+            "-800.00",
+            "2026-10-02 15:30:00 UTC",
+            "",
+            "人工核实",
+            ""
+          ],
+          [
+            "c6475e1d0a5e4729ab25c977f9532862",
+            "期货成交",
+            "CLZ6",
+            "-1",
+            "72",
+            "5.00",
+            "-5.00",
+            "2026-11-10 15:00:00 UTC",
+            "",
+            "人工核实",
+            ""
+          ],
+          [
+            "e953db59f6994217ad55ca2b36bb4e3f",
+            "期货成交",
+            "CLF7",
+            "1",
+            "72.5",
+            "5.00",
+            "-5.00",
+            "2026-11-10 15:00:01 UTC",
+            "",
+            "人工核实",
+            ""
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "integrity",
+        "pass": true,
+        "actual": [
+          [
+            "数量",
+            "完整"
+          ],
+          [
+            "期初成本",
+            "完整"
+          ],
+          [
+            "期权绑定",
+            "完整"
+          ],
+          [
+            "行情",
+            "未核对"
+          ],
+          [
+            "报表覆盖",
+            "完整"
+          ],
+          [
+            "现金",
+            "未核对"
+          ]
+        ],
+        "expected": [
+          [
+            "数量",
+            "完整"
+          ],
+          [
+            "期初成本",
+            "完整"
+          ],
+          [
+            "期权绑定",
+            "完整"
+          ],
+          [
+            "行情",
+            "未核对"
+          ],
+          [
+            "报表覆盖",
+            "完整"
+          ],
+          [
+            "现金",
+            "未核对"
+          ]
+        ]
+      },
+      {
+        "name": "no quantity, share or per-share wording",
+        "pass": true,
+        "actual": null,
+        "expected": true
+      },
+      {
+        "name": "the page sent only allowed actions",
+        "pass": true,
+        "actual": [
+          "request_cost_basis_fop_statement_bindings",
+          "import_cost_basis_events",
+          "request_cost_basis_fop_statement_bindings",
+          "import_cost_basis_events",
+          "list_cost_basis_events",
+          "export_cost_basis_backup",
+          "list_cost_basis_events",
+          "list_cost_basis_import_batches",
+          "list_cost_basis_snapshots"
+        ],
+        "expected": true
+      }
+    ],
+    "sent": [
+      "request_cost_basis_fop_statement_bindings",
+      "import_cost_basis_events",
+      "request_cost_basis_fop_statement_bindings",
+      "import_cost_basis_events",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots"
+    ]
+  },
+  {
+    "phase": "quotes",
+    "failures": 0,
+    "results": [
+      {
+        "name": "A: full P&L at mids, real-time",
+        "pass": true,
+        "actual": [
+          "2035.00",
+          "实时"
+        ],
+        "expected": [
+          "2035.00",
+          "实时"
+        ]
+      },
+      {
+        "name": "A: a zero bid with a size is a valid side",
+        "pass": true,
+        "actual": [
+          [
+            "2026-11-17",
+            "C",
+            "75",
+            "LO",
+            "-1",
+            "CLZ6",
+            "报表验证",
+            "1200.00",
+            "0.325（实时中间价）",
+            "-325.00",
+            "旧月期权：对应期货未持有"
+          ],
+          [
+            "2026-11-17",
+            "P",
+            "65",
+            "LO",
+            "1",
+            "CLZ6",
+            "报表验证",
+            "-800.00",
+            "0.025（实时中间价）",
+            "25.00",
+            "旧月期权：对应期货未持有"
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "B: a long FUT with only an ask has no price",
+        "pass": true,
+        "actual": [
+          "202701",
+          "CLF7",
+          "2026-12-17",
+          "1",
+          "72.5",
+          "无可用报价：只有与平仓方向相反的一边（only_the_opposite_side）",
+          "未知：缺报价"
+        ],
+        "expected": true
+      },
+      {
+        "name": "B: a missing leg leaves the full P&L unknown",
+        "pass": true,
+        "actual": "未知：缺报价（CLF7）",
+        "expected": true
+      },
+      {
+        "name": "B: the short call uses its dated settlement, not the bid",
+        "pass": true,
+        "actual": [
+          [
+            "2026-11-17",
+            "C",
+            "75",
+            "LO",
+            "-1",
+            "CLZ6",
+            "报表验证",
+            "1200.00",
+            "0.33（结算参考 2026-11-11）",
+            "-330.00",
+            "旧月期权：对应期货未持有"
+          ],
+          [
+            "2026-11-17",
+            "P",
+            "65",
+            "LO",
+            "1",
+            "CLZ6",
+            "报表验证",
+            "-800.00",
+            "0.03（收盘参考 2026-11-11）",
+            "30.00",
+            "旧月期权：对应期货未持有"
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "B: the long put uses its dated close, not the ask",
+        "pass": true,
+        "actual": [
+          [
+            "2026-11-17",
+            "C",
+            "75",
+            "LO",
+            "-1",
+            "CLZ6",
+            "报表验证",
+            "1200.00",
+            "0.33（结算参考 2026-11-11）",
+            "-330.00",
+            "旧月期权：对应期货未持有"
+          ],
+          [
+            "2026-11-17",
+            "P",
+            "65",
+            "LO",
+            "1",
+            "CLZ6",
+            "报表验证",
+            "-800.00",
+            "0.03（收盘参考 2026-11-11）",
+            "30.00",
+            "旧月期权：对应期货未持有"
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "C: one-sided conservative values, and the summary says so",
+        "pass": true,
+        "actual": [
+          "1935.00",
+          "实时 · 含单边保守估值"
+        ],
+        "expected": [
+          "1935.00",
+          "实时 · 含单边保守估值"
+        ]
+      },
+      {
+        "name": "C: labelled as one-sided",
+        "pass": true,
+        "actual": [
+          "202701",
+          "CLF7",
+          "2026-12-17",
+          "1",
+          "72.5",
+          "72.4（单边保守估值）",
+          "-100.00"
+        ],
+        "expected": true
+      },
+      {
+        "name": "D: crossed book, settlement reference",
+        "pass": true,
+        "actual": [
+          "参考值，非实时",
+          "72.3（结算参考 2026-11-11）"
+        ],
+        "expected": [
+          "参考值，非实时",
+          "72.3（结算参考 2026-11-11）"
+        ]
+      },
+      {
+        "name": "E: quotes older than 120 s are not shown as current",
+        "pass": true,
+        "actual": [
+          "202701",
+          "CLF7",
+          "2026-12-17",
+          "1",
+          "72.5",
+          "无可用报价：报价已超过 120 秒（stale）",
+          "未知：缺报价"
+        ],
+        "expected": true
+      },
+      {
+        "name": "F: delayed data is not real-time",
+        "pass": true,
+        "actual": [
+          "202701",
+          "CLF7",
+          "2026-12-17",
+          "1",
+          "72.5",
+          "无可用报价：延迟行情，不算实时（market_data_type_3）",
+          "未知：缺报价"
+        ],
+        "expected": true
+      },
+      {
+        "name": "quote checks sent no write",
+        "pass": true,
+        "actual": [
+          "request_cost_basis_fop_market_snapshot",
+          "request_cost_basis_fop_market_snapshot",
+          "request_cost_basis_fop_market_snapshot",
+          "request_cost_basis_fop_market_snapshot",
+          "request_cost_basis_fop_market_snapshot",
+          "request_cost_basis_fop_market_snapshot"
+        ],
+        "expected": true
+      },
+      {
+        "name": "quote checks sent only allowed actions",
+        "pass": true,
+        "actual": [
+          "request_cost_basis_fop_market_snapshot",
+          "request_cost_basis_fop_market_snapshot",
+          "request_cost_basis_fop_market_snapshot",
+          "request_cost_basis_fop_market_snapshot",
+          "request_cost_basis_fop_market_snapshot",
+          "request_cost_basis_fop_market_snapshot"
+        ],
+        "expected": true
+      }
+    ],
+    "sent": [
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot"
+    ]
+  },
+  {
+    "phase": "delivery",
+    "failures": 0,
+    "results": [
+      {
+        "name": "mids 118 s old are still current",
+        "pass": true,
+        "actual": "实时",
+        "expected": "实时"
+      },
+      {
+        "name": "at the limit the figures stop being current, within 3 s of it",
+        "pass": true,
+        "actual": 2027,
+        "expected": true
+      },
+      {
+        "name": "the re-check kept the delivery inputs",
+        "pass": true,
+        "actual": [
+          "assign",
+          "76"
+        ],
+        "expected": true
+      },
+      {
+        "name": "at CLZ6 76 the short 75 call is assigned and the 65 put expires",
+        "pass": true,
+        "actual": [
+          "assign",
+          "expire"
+        ],
+        "expected": [
+          "assign",
+          "expire"
+        ]
+      },
+      {
+        "name": "the quantity defaults to what is open",
+        "pass": true,
+        "actual": "1",
+        "expected": "1"
+      },
+      {
+        "name": "more than is open is refused",
+        "pass": true,
+        "actual": "预览停止：LOZ6 C7500：交割张数必须是 1 到 1 之间的整数",
+        "expected": true
+      },
+      {
+        "name": "positions before and after",
+        "pass": true,
+        "actual": [
+          "CLF7 1 1",
+          "CLZ6 0 -1",
+          "LOZ6 C7500 -1 0",
+          "LOZ6 P6500 1 0"
+        ],
+        "expected": [
+          "CLF7 1 1",
+          "CLZ6 0 -1",
+          "LOZ6 C7500 -1 0",
+          "LOZ6 P6500 1 0"
+        ]
+      },
+      {
+        "name": "the full P&L after the assumed deliveries",
+        "pass": true,
+        "actual": "1885.00",
+        "expected": "1885.00"
+      },
+      {
+        "name": "a path past CLZ6's last trade date stops",
+        "pass": true,
+        "actual": "预览停止：CLZ6 在 2026-11-19 已最后交易：跨过期货最后交易日的路径首版停止，不自动滚仓或实物结算（§12.1）",
+        "expected": true
+      },
+      {
+        "name": "the ledger version is unchanged by the preview",
+        "pass": true,
+        "actual": "6e73f0a444d21c3c307c4b695d0711485728ea29a39ceccc6c2dad4668beb576",
+        "expected": "6e73f0a444d21c3c307c4b695d0711485728ea29a39ceccc6c2dad4668beb576"
+      },
+      {
+        "name": "the delivery preview sent no write",
+        "pass": true,
+        "actual": [],
+        "expected": []
+      }
+    ],
+    "sent": [
+      "request_cost_basis_fop_market_snapshot",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots"
+    ]
+  },
+  {
+    "phase": "after-reload",
+    "failures": 0,
+    "results": [
+      {
+        "name": "Rf after a page reload",
+        "pass": true,
+        "actual": "2000.00",
+        "expected": "2000.00"
+      },
+      {
+        "name": "Co after a page reload",
+        "pass": true,
+        "actual": "400.00",
+        "expected": "400.00"
+      },
+      {
+        "name": "events after a page reload",
+        "pass": true,
+        "actual": 5,
+        "expected": 5
+      }
+    ]
+  },
+  {
+    "phase": "backup",
+    "failures": 0,
+    "results": [
+      {
+        "name": "the backup is a FOP envelope",
+        "pass": true,
+        "actual": [
+          "cost-basis-backup",
+          2,
+          "fop"
+        ],
+        "expected": [
+          "cost-basis-backup",
+          2,
+          "fop"
+        ]
+      },
+      {
+        "name": "the backup keeps contracts, bindings, sources and raw fields",
+        "pass": true,
+        "actual": {
+          "contracts": 4,
+          "bindings": 2
+        },
+        "expected": true
+      },
+      {
+        "name": "the figures after a restore",
+        "pass": true,
+        "actual": {
+          "期货已实现（Rf）": "2000.00",
+          "期货浮动（Uf）": "未知：缺报价（CLF7）",
+          "期权净现金（Co，含佣金）": "400.00",
+          "未平期权市值（Vo）": "未知：缺报价（LOZ6 C7500）",
+          "费用（E，不含期权成交佣金）": "15.00",
+          "经济调整（J）": "0.00",
+          "卖方已结算净收益（Rs）": "0.00",
+          "卖方口径费用（Es）": "15.00"
+        },
+        "expected": {
+          "期货已实现（Rf）": "2000.00",
+          "期货浮动（Uf）": "未知：缺报价（CLF7）",
+          "期权净现金（Co，含佣金）": "400.00",
+          "未平期权市值（Vo）": "未知：缺报价（LOZ6 C7500）",
+          "费用（E，不含期权成交佣金）": "15.00",
+          "经济调整（J）": "0.00",
+          "卖方已结算净收益（Rs）": "0.00",
+          "卖方口径费用（Es）": "15.00"
+        }
+      }
+    ],
+    "sent": [
+      "export_cost_basis_backup",
+      "request_cost_basis_reset_plan",
+      "request_cost_basis_reset_plan",
+      "restore_cost_basis_backup",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots"
+    ]
+  },
+  {
+    "phase": "messages",
+    "failures": 0,
+    "results": [
+      {
+        "name": "the block says why, where and what to do, with its code",
+        "pass": true,
+        "actual": "报表里的账户号被遮罩，不能自动确认就是本账户。下一步：核对遮罩后露出的前后几位，勾选“报表中的遮罩账户就是本账本的账户”后重新预览。[account_confirmation_required] 原文：the statement account U****1111 is masked; confirm it is U1111111",
+        "expected": true
+      },
+      {
+        "name": "the original stays beside it",
+        "pass": true,
+        "actual": "报表里的账户号被遮罩，不能自动确认就是本账户。下一步：核对遮罩后露出的前后几位，勾选“报表中的遮罩账户就是本账本的账户”后重新预览。[account_confirmation_required] 原文：the statement account U****1111 is masked; confirm it is U1111111",
+        "expected": true
+      },
+      {
+        "name": "following the next step clears the block",
+        "pass": true,
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "explaining writes nothing",
+        "pass": true,
+        "actual": [],
+        "expected": []
+      }
+    ],
+    "sent": []
+  },
+  {
+    "phase": "duplicates",
+    "failures": 0,
+    "results": [
+      {
+        "name": "an undecided possible duplicate blocks, in words",
+        "pass": true,
+        "actual": "第 2 行 · CLF7：可能与已记账的成交重复，但没有证据证明是同一笔还是另一笔。下一步：在“疑似重复”逐行认定（同一笔 / 另一笔）并写明核对依据，再重新预览。[possible_duplicate] 原文：1 stored fill(s) of the same contract, direction and day (e953db59f6994217ad55ca2b36bb4e3f) may be this one at another granularity or reference; nothing proves it is the same fill or another one",
+        "expected": true
+      },
+      {
+        "name": "its candidate is the stored CLF7 fill, with its quantity, price and fees",
+        "pass": true,
+        "actual": [
+          [
+            "e953db59f6994217ad55ca2b36bb4e3f",
+            "CLF7",
+            "1",
+            "72.5",
+            "5",
+            "-5",
+            "2026-11-10 15:00:01 UTC",
+            "activity_row:act-cb3127a3b11fd861"
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "undecided, nothing is sent",
+        "pass": true,
+        "actual": [
+          "import_cost_basis_events",
+          "list_cost_basis_events",
+          "export_cost_basis_backup",
+          "list_cost_basis_events",
+          "list_cost_basis_import_batches",
+          "list_cost_basis_snapshots",
+          "import_cost_basis_events",
+          "list_cost_basis_events",
+          "export_cost_basis_backup",
+          "list_cost_basis_events",
+          "list_cost_basis_import_batches",
+          "list_cost_basis_snapshots"
+        ],
+        "expected": true
+      },
+      {
+        "name": "decided the same fill: nothing to write, not blocked",
+        "pass": true,
+        "actual": [
+          false,
+          0
+        ],
+        "expected": [
+          false,
+          0
+        ]
+      },
+      {
+        "name": "the same fill is not added",
+        "pass": true,
+        "actual": 5,
+        "expected": 5
+      },
+      {
+        "name": "the decision and its check are kept",
+        "pass": true,
+        "actual": [
+          [
+            "2026-09-25 15:17:39 UTC",
+            "batch-muh3uc74as759hqd",
+            "flex_trade:9101",
+            "同一笔",
+            "e953db59f6994217ad55ca2b36bb4e3f",
+            "the broker confirms one fill under two references"
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "the recorded decision holds for the same row",
+        "pass": true,
+        "actual": false,
+        "expected": false
+      },
+      {
+        "name": "another fill is added once",
+        "pass": true,
+        "actual": 6,
+        "expected": 6
+      },
+      {
+        "name": "the decision log keeps both decisions",
+        "pass": true,
+        "actual": [
+          [
+            "2026-09-25 15:17:39 UTC",
+            "batch-muh3uc74as759hqd",
+            "flex_trade:9101",
+            "同一笔",
+            "e953db59f6994217ad55ca2b36bb4e3f",
+            "the broker confirms one fill under two references"
+          ],
+          [
+            "2026-09-25 15:17:39 UTC",
+            "batch-muh3ucfpkrrer3ud",
+            "flex_trade:9102",
+            "另一笔",
+            "e953db59f6994217ad55ca2b36bb4e3f",
+            "two confirmations: 10:00:01 and 12:00:00"
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "the writes of this phase",
+        "pass": true,
+        "actual": [
+          "import_cost_basis_events",
+          "import_cost_basis_events"
+        ],
+        "expected": [
+          "import_cost_basis_events",
+          "import_cost_basis_events"
+        ]
+      }
+    ],
+    "sent": [
+      "import_cost_basis_events",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots",
+      "import_cost_basis_events",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots"
+    ]
+  },
+  {
+    "phase": "realized",
+    "failures": 0,
+    "results": [
+      {
+        "name": "the buyer's options apart from the totals",
+        "pass": true,
+        "actual": [
+          "0.00",
+          "0.00",
+          "-800.00"
+        ],
+        "expected": [
+          "0.00",
+          "0.00",
+          "-800.00"
+        ]
+      },
+      {
+        "name": "the same basis agrees",
+        "pass": true,
+        "actual": [
+          "1990",
+          "1990",
+          "2000",
+          "相符"
+        ],
+        "expected": [
+          "1990",
+          "1990",
+          "2000",
+          "相符"
+        ]
+      },
+      {
+        "name": "a value the ledger does not have is a difference",
+        "pass": true,
+        "actual": [
+          "5",
+          "0",
+          "有差异"
+        ],
+        "expected": [
+          "5",
+          "0",
+          "有差异"
+        ]
+      },
+      {
+        "name": "the comparison says it is evidence only",
+        "pass": true,
+        "actual": "账户 U1111111，期间 2026-10-01 至 2026-11-10，逐合约对照。账本按报表口径（FIFO 批次、含佣金）重算，账本自身口径（加权平均，期货不含费用）并列；报表值只作旁证，不覆盖 Rf，也不生成收益事件。",
+        "expected": true
+      },
+      {
+        "name": "a close without its value is missing, never 0",
+        "pass": true,
+        "actual": [
+          "CLZ6",
+          "缺值",
+          "1990",
+          "2000",
+          "—",
+          "不可比",
+          "报表有 1 行平仓没有给出已实现值（按缺值处理，不当作 0）",
+          "2",
+          "c6475e1d0a5e4729ab25c977f9532862"
+        ],
+        "expected": true
+      },
+      {
+        "name": "the figures are the ledger's",
+        "pass": true,
+        "actual": "2000.00",
+        "expected": "2000.00"
+      },
+      {
+        "name": "comparing writes nothing",
+        "pass": true,
+        "actual": [],
+        "expected": []
+      }
+    ],
+    "sent": []
+  },
+  {
+    "phase": "manual",
+    "failures": 0,
+    "results": [
+      {
+        "name": "nothing is confirmed without a preview",
+        "pass": true,
+        "actual": "未记入：请先预览",
+        "expected": true
+      },
+      {
+        "name": "the preview moves only the new option",
+        "pass": true,
+        "actual": [
+          [
+            "LOF7 C8000",
+            "0",
+            "-1"
+          ]
+        ],
+        "expected": [
+          [
+            "LOF7 C8000",
+            "0",
+            "-1"
+          ]
+        ]
+      },
+      {
+        "name": "the preview names the contract it adds",
+        "pass": true,
+        "actual": "已预览，尚未写入。将新增合约：LOF7 C8000。核对后点“确认记入”；改动任何输入、账户时区或账本变化都会作废这次预览。",
+        "expected": true
+      },
+      {
+        "name": "cancel writes nothing",
+        "pass": true,
+        "actual": "已取消，没有写入。",
+        "expected": true
+      },
+      {
+        "name": "an input changed after the preview retires it",
+        "pass": true,
+        "actual": "输入已改变，旧的预览已作废；请重新预览。",
+        "expected": true
+      },
+      {
+        "name": "a retired preview cannot be confirmed",
+        "pass": true,
+        "actual": "未记入：请先预览",
+        "expected": true
+      },
+      {
+        "name": "two confirmations of one preview write one event",
+        "pass": true,
+        "actual": 7,
+        "expected": 7
+      },
+      {
+        "name": "the entry is shown as manually verified",
+        "pass": true,
+        "actual": [
+          [
+            "1e6de445a2fc417b95d34fb1516c9ad3",
+            "期货成交",
+            "CLZ6",
+            "1",
+            "70",
+            "5.00",
+            "-5.00",
+            "2026-10-01 14:00:00 UTC",
+            "",
+            "人工核实",
+            ""
+          ],
+          [
+            "5bac1ddb0a7847818df639bd8cfdbbe2",
+            "期权成交",
+            "LOZ6 C7500",
+            "-1",
+            "1.2",
+            "0.00",
+            "1200.00",
+            "2026-10-01 15:00:00 UTC",
+            "",
+            "人工核实",
+            ""
+          ],
+          [
+            "06ced47ea32946a380e398e8b5e49c4b",
+            "期权成交",
+            "LOZ6 P6500",
+            "1",
+            "0.8",
+            "0.00",
+            "-800.00",
+            "2026-10-02 15:30:00 UTC",
+            "",
+            "人工核实",
+            ""
+          ],
+          [
+            "c6475e1d0a5e4729ab25c977f9532862",
+            "期货成交",
+            "CLZ6",
+            "-1",
+            "72",
+            "5.00",
+            "-5.00",
+            "2026-11-10 15:00:00 UTC",
+            "",
+            "人工核实",
+            ""
+          ],
+          [
+            "e953db59f6994217ad55ca2b36bb4e3f",
+            "期货成交",
+            "CLF7",
+            "1",
+            "72.5",
+            "5.00",
+            "-5.00",
+            "2026-11-10 15:00:01 UTC",
+            "",
+            "人工核实",
+            ""
+          ],
+          [
+            "ba8676df8ed14d86a4db903810e06311",
+            "期货成交",
+            "CLF7",
+            "1",
+            "72.5",
+            "5.00",
+            "-5.00",
+            "2026-11-10 17:00:00 UTC",
+            "交易所交易日 2026-11-10",
+            "人工核实",
+            ""
+          ],
+          [
+            "be9bb656d977416bb8fc5727f20b399f",
+            "期权成交",
+            "LOF7 C8000",
+            "-1",
+            "1.5",
+            "2.50",
+            "1497.50",
+            "2026-11-12 15:00:00 UTC",
+            "",
+            "人工核实",
+            ""
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "one previewed request, sent at each confirmation",
+        "pass": true,
+        "actual": 2,
+        "expected": 2
+      }
+    ],
+    "sent": [
+      "append_cost_basis_event",
+      "append_cost_basis_event",
+      "list_cost_basis_events",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots"
+    ]
+  },
+  {
+    "phase": "binding",
+    "failures": 0,
+    "results": [
+      {
+        "name": "the manually attested option can be asked about",
+        "pass": true,
+        "actual": [
+          "选择期权",
+          "LOF7 C8000 · 人工核实"
+        ],
+        "expected": true
+      },
+      {
+        "name": "without a resolver there is no evidence and no adoption",
+        "pass": true,
+        "actual": "这个后端不能向券商查询合约（例如历史回放后端）；没有证据，也不会生成证据。",
+        "expected": true
+      },
+      {
+        "name": "two candidates: nothing is chosen for the user",
+        "pass": true,
+        "actual": "不能采纳：券商没有证明对应期货（unresolved：券商返回了多张候选合约，不能自动选择（ambiguous: 9003, 9004））。不猜交割月，也不自动选主力合约。",
+        "expected": true
+      },
+      {
+        "name": "the preview lists the binding revision and the term it fills in",
+        "pass": true,
+        "actual": [
+          "绑定LOF7 C8000 → CLF7（交割月 202701）：人工核实 → 券商验证（修订 1 → 2）",
+          "证据IB: LOF7 C8000 -> underConId 556 CLF7 contractMonth 202701",
+          "期权条款补全 conId（修订 1 → 2）"
+        ],
+        "expected": true
+      },
+      {
+        "name": "asking wrote nothing",
+        "pass": true,
+        "actual": [],
+        "expected": []
+      },
+      {
+        "name": "the option is now bound on broker evidence",
+        "pass": true,
+        "actual": [
+          [
+            "2026-11-17",
+            "C",
+            "75",
+            "LO",
+            "-1",
+            "CLZ6",
+            "报表验证",
+            "1200.00",
+            "未取报价",
+            "未知：缺报价",
+            "旧月期权：对应期货未持有"
+          ],
+          [
+            "2026-11-17",
+            "P",
+            "65",
+            "LO",
+            "1",
+            "CLZ6",
+            "报表验证",
+            "-800.00",
+            "未取报价",
+            "未知：缺报价",
+            "旧月期权：对应期货未持有"
+          ],
+          [
+            "2026-12-16",
+            "C",
+            "80",
+            "LO",
+            "-1",
+            "CLF7",
+            "券商验证",
+            "1497.50",
+            "未取报价",
+            "未知：缺报价",
+            ""
+          ]
+        ],
+        "expected": true
+      },
+      {
+        "name": "after the adoption no confirmation is offered (as rendered)",
+        "pass": true,
+        "actual": "none",
+        "expected": "none"
+      },
+      {
+        "name": "one adoption was sent",
+        "pass": true,
+        "actual": [
+          "commit_cost_basis_fop_metadata"
+        ],
+        "expected": [
+          "commit_cost_basis_fop_metadata"
+        ]
+      }
+    ],
+    "sent": [
+      "request_cost_basis_fop_contract_details",
+      "request_cost_basis_fop_contract_details",
+      "request_cost_basis_fop_contract_details",
+      "commit_cost_basis_fop_metadata",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots"
+    ]
+  },
+  {
+    "phase": "reconcile",
+    "failures": 0,
+    "results": [
+      {
+        "name": "an account TWS does not manage is not reconciled",
+        "pass": true,
+        "actual": "未核对",
+        "expected": "未核对"
+      },
+      {
+        "name": "quantity, AvgCost, binding and cash apart",
+        "pass": true,
+        "actual": [
+          "数量一致",
+          "一致（旁证）",
+          "完整",
+          "未核对"
+        ],
+        "expected": [
+          "数量一致",
+          "一致（旁证）",
+          "完整",
+          "未核对"
+        ]
+      },
+      {
+        "name": "every contract matched",
+        "pass": true,
+        "actual": [
+          [
+            "CLF7",
+            "2",
+            "2",
+            "数量一致"
+          ],
+          [
+            "LOF7 C8000",
+            "-1",
+            "-1",
+            "数量一致"
+          ],
+          [
+            "LOZ6 C7500",
+            "-1",
+            "-1",
+            "数量一致"
+          ],
+          [
+            "LOZ6 P6500",
+            "1",
+            "1",
+            "数量一致"
+          ]
+        ],
+        "expected": [
+          [
+            "CLF7",
+            "2",
+            "2",
+            "数量一致"
+          ],
+          [
+            "LOF7 C8000",
+            "-1",
+            "-1",
+            "数量一致"
+          ],
+          [
+            "LOZ6 C7500",
+            "-1",
+            "-1",
+            "数量一致"
+          ],
+          [
+            "LOZ6 P6500",
+            "1",
+            "1",
+            "数量一致"
+          ]
+        ]
+      },
+      {
+        "name": "reconciled on matching positions; no economic change",
+        "pass": true,
+        "actual": "已保存快照 2e131d8bdd5e：数量已与 TWS 对上；经济流水未改变。",
+        "expected": true
+      },
+      {
+        "name": "a snapshot changes no ledger version",
+        "pass": true,
+        "actual": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c",
+        "expected": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c"
+      },
+      {
+        "name": "the snapshot reads back with its version and comparisons",
+        "pass": true,
+        "actual": "这份快照对应当前账本版本。项目状态数量完整期初成本完整期权绑定完整行情未核对报表覆盖不完整现金未核对报价批次无已对账是快照没有报价。合约账本数量TWS 数量数量AvgCost说明CLF722数量一致一致（旁证）AvgCost：IB AvgCost 含佣金、账本期货均价不含费用；差 0.005LOF7 C8000-1-1数量一致一致（旁证）AvgCost：两边都含佣金；差 0LOZ6 C7500-1-1数量一致一致（旁证）AvgCost：两边都含佣金；差 0LOZ6 P650011数量一致一致（旁证）AvgCost：两边都含佣金；差 0",
+        "expected": true
+      },
+      {
+        "name": "a mismatch is kept, never reconciled",
+        "pass": true,
+        "actual": [
+          "数量不一致",
+          "一致（旁证）",
+          "否"
+        ],
+        "expected": [
+          "数量不一致",
+          "一致（旁证）",
+          "否"
+        ]
+      },
+      {
+        "name": "a conId conflict is two contracts, never one match",
+        "pass": true,
+        "actual": [
+          [
+            "2",
+            "0",
+            "数量不一致"
+          ],
+          [
+            "0",
+            "2",
+            "数量不一致"
+          ]
+        ],
+        "expected": [
+          [
+            "2",
+            "0",
+            "数量不一致"
+          ],
+          [
+            "0",
+            "2",
+            "数量不一致"
+          ]
+        ]
+      },
+      {
+        "name": "the conflict names both conIds",
+        "pass": true,
+        "actual": "身份冲突：TWS 的 CLF7 是 conId 999999，账本的 CLF7 是 conId 556：本地代码相同也不是同一张合约，先核对合约",
+        "expected": true
+      },
+      {
+        "name": "a conflict is never reconciled",
+        "pass": true,
+        "actual": "数量不一致",
+        "expected": "数量不一致"
+      },
+      {
+        "name": "a partly comparable AvgCost is partial, the quantities still agree",
+        "pass": true,
+        "actual": [
+          "数量一致",
+          "部分一致、部分不可比"
+        ],
+        "expected": [
+          "数量一致",
+          "部分一致、部分不可比"
+        ]
+      },
+      {
+        "name": "the partial AvgCost is kept as it was shown",
+        "pass": true,
+        "actual": [
+          "数量一致",
+          "部分一致、部分不可比",
+          "是"
+        ],
+        "expected": [
+          "数量一致",
+          "部分一致、部分不可比",
+          "是"
+        ]
+      },
+      {
+        "name": "one save per confirmation",
+        "pass": true,
+        "actual": 3,
+        "expected": 3
+      }
+    ],
+    "sent": [
+      "request_cost_basis_fop_positions",
+      "request_cost_basis_fop_positions",
+      "request_cost_basis_fop_positions",
+      "save_cost_basis_snapshot",
+      "list_cost_basis_snapshots",
+      "request_cost_basis_fop_positions",
+      "save_cost_basis_snapshot",
+      "list_cost_basis_snapshots",
+      "request_cost_basis_fop_positions",
+      "request_cost_basis_fop_positions",
+      "save_cost_basis_snapshot",
+      "list_cost_basis_snapshots"
+    ]
+  },
+  {
+    "phase": "actions",
+    "failures": 0,
+    "results": [
+      {
+        "name": "actions outside the FOP page catalogue",
+        "pass": true,
+        "actual": [],
+        "expected": []
+      },
+      {
+        "name": "forbidden actions",
+        "pass": true,
+        "actual": [],
+        "expected": []
+      },
+      {
+        "name": "the writes the backend received",
+        "pass": true,
+        "actual": [
+          "create_cost_basis_book",
+          "import_cost_basis_events",
+          "import_cost_basis_events",
+          "restore_cost_basis_backup",
+          "import_cost_basis_events",
+          "import_cost_basis_events",
+          "append_cost_basis_event",
+          "append_cost_basis_event",
+          "commit_cost_basis_fop_metadata",
+          "save_cost_basis_snapshot",
+          "save_cost_basis_snapshot",
+          "save_cost_basis_snapshot"
+        ],
+        "expected": [
+          "create_cost_basis_book",
+          "import_cost_basis_events",
+          "import_cost_basis_events",
+          "restore_cost_basis_backup",
+          "import_cost_basis_events",
+          "import_cost_basis_events",
+          "append_cost_basis_event",
+          "append_cost_basis_event",
+          "commit_cost_basis_fop_metadata",
+          "save_cost_basis_snapshot",
+          "save_cost_basis_snapshot",
+          "save_cost_basis_snapshot"
+        ]
+      }
+    ],
+    "received": [
+      "request_cost_basis_status",
+      "list_cost_basis_books",
+      "create_cost_basis_book",
+      "request_cost_basis_status",
+      "list_cost_basis_books",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots",
+      "request_cost_basis_fop_statement_bindings",
+      "import_cost_basis_events",
+      "request_cost_basis_fop_statement_bindings",
+      "import_cost_basis_events",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots",
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot",
+      "request_cost_basis_fop_market_snapshot",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots",
+      "request_cost_basis_status",
+      "list_cost_basis_books",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots",
+      "export_cost_basis_backup",
+      "request_cost_basis_reset_plan",
+      "request_cost_basis_reset_plan",
+      "restore_cost_basis_backup",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots",
+      "import_cost_basis_events",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots",
+      "import_cost_basis_events",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots",
+      "append_cost_basis_event",
+      "append_cost_basis_event",
+      "list_cost_basis_events",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots",
+      "request_cost_basis_fop_contract_details",
+      "request_cost_basis_fop_contract_details",
+      "request_cost_basis_fop_contract_details",
+      "commit_cost_basis_fop_metadata",
+      "list_cost_basis_events",
+      "export_cost_basis_backup",
+      "list_cost_basis_events",
+      "list_cost_basis_import_batches",
+      "list_cost_basis_snapshots",
+      "request_cost_basis_fop_positions",
+      "request_cost_basis_fop_positions",
+      "request_cost_basis_fop_positions",
+      "save_cost_basis_snapshot",
+      "list_cost_basis_snapshots",
+      "request_cost_basis_fop_positions",
+      "save_cost_basis_snapshot",
+      "list_cost_basis_snapshots",
+      "request_cost_basis_fop_positions",
+      "request_cost_basis_fop_positions",
+      "save_cost_basis_snapshot",
+      "list_cost_basis_snapshots"
+    ]
+  }
+]

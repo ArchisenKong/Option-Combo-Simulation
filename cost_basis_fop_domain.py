@@ -17,6 +17,7 @@ orders the same way and computes the economics;
 nothing here computes economics. check_graph proves a whole backup graph
 before a restore writes it.
 """
+import hashlib
 import json
 import math
 import re
@@ -101,6 +102,36 @@ def require_shape(type_name, value, label=None):
 def canonical_json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'),
                       allow_nan=False)
+
+
+def _numbers_as_parsed(value):
+    """value with every whole float written as the integer a JSON parser reads."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _numbers_as_parsed(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_numbers_as_parsed(item) for item in value]
+    return value
+
+
+def backup_digest(payload):
+    """The sha256 of a backup payload, the same after any JSON parser reads it back.
+
+    A browser that downloads a backup parses it and writes it again: 70.0
+    comes back as 70. The digest therefore reads every whole number as an
+    integer; every other number keeps its exact value (JSON parsers restore
+    the same double), so no figure can change unnoticed.
+    """
+    return hashlib.sha256(canonical_json(_numbers_as_parsed(payload)).encode()).hexdigest()
+
+
+def backup_digest_matches(payload, digest):
+    """backup_digest, or the P2-P4 digest over Python's own number text."""
+    return digest in (backup_digest(payload),
+                      hashlib.sha256(canonical_json(payload).encode()).hexdigest())
 
 
 def parse_instant(text):

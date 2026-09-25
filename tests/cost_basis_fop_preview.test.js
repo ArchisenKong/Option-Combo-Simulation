@@ -18,7 +18,7 @@ const statements = require('./helpers/cost_basis_fop_statements');
 const ROOT = path.resolve(__dirname, '..');
 const CAPABILITIES = JSON.parse(fs.readFileSync(path.join(ROOT, 'cost_basis_fop_capabilities.json'), 'utf8'));
 const SCRIPTS = ['js/cost_basis_common.js', 'js/cost_basis_import_common.js', 'js/cost_basis_fop_core.js',
-    'js/cost_basis_fop_import.js', 'js/cost_basis_fop.js'];
+    'js/cost_basis_fop_import.js', 'js/cost_basis_fop_messages.js', 'js/cost_basis_fop.js'];
 const NOW = new Date(Date.UTC(2027, 2, 1, 14, 15, 0));
 
 // The plan §9.6 history (New York account time): three rolls and a short call
@@ -88,6 +88,7 @@ function loadPage() {
         localStorage: { getItem: (key) => (key === 'optionComboWsPort' ? '8799' : null) },
         WebSocket: FakeWebSocket,
         location: { search: '', replace() {} },
+        setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
     });
     const socket = sockets[0];
     const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -189,7 +190,10 @@ module.exports = {
                     'Trades,Data,Order,Futures,USD,CLZ6,"2026-10-01, 10:00:00"',
                     'Trades,Data,Adjustment,Futures,USD,CLZ6,"2026-10-01, 10:00:00"'));
                 const [problem] = texts(page.node('preview-problems'));
-                assert.match(problem, /^第 \d+ 行：the CLZ6 row has DataDiscriminator "Adjustment"/);
+                // In words, with its next step and code (plan §19 P5-C6); the original stays beside it.
+                assert.match(problem, /^第 \d+ 行：无法判断这一行是订单、成交还是明细。下一步：.*\[row_kind_unknown\]$/);
+                assert.match(page.node('preview-problems').children[0].children[0].textContent,
+                    /原文：the CLZ6 row has DataDiscriminator "Adjustment"/);
                 assert.equal(page.node('preview-results').children.length, 0);
                 assert.deepEqual(page.socket.sent.map((message) => message.action),
                     ['request_cost_basis_status', 'list_cost_basis_books']);

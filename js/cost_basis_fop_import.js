@@ -38,7 +38,9 @@
  *   server's revision check; the same fill in another format is matched one
  *   to one by its content, also across order and execution granularity; a
  *   TWS execution the statement repeats is superseded, never kept beside it.
- *   A possible duplicate that cannot be proven blocks the batch.
+ *   A possible duplicate that cannot be proven blocks the batch until the
+ *   user decides it is a stored fill or another one, stating the check; the
+ *   request carries the decision and the server checks it again.
  */
 (function attachCostBasisFopImport(globalScope) {
     'use strict';
@@ -512,6 +514,11 @@
             sourceRecords: [], events: [], duplicates: [], supersede: [], quantityProof: [],
             openings: [], problems: statement.problems.slice(), warnings: [], timeZone: null,
             period: statement.period, checks: {}, rules,
+            // Possible duplicates, what the user decided about them, and the
+            // decisions the request carries (plan §19 P5-C1).
+            duplicateReviews: [], decisions: [],
+            decisionsGiven: new Map((context.duplicateDecisions || []).map((decision) => [
+                `${decision.namespace}|${decision.sourceRef}`, decision])),
         };
         const fail = (code, message, line) => plan.problems.push(problem(code, message, line, true));
         const warn = (code, message, line) => plan.warnings.push(problem(code, message, line, false));
@@ -593,6 +600,7 @@
 
         // Against the ledger: repeats, other formats, TWS executions.
         matchLedger(events, ledger, plan, fail, warn);
+        plan.realizedEvidence = realizedEvidence(readings, mapping);
 
         // Quantity proof and a baseline when the history starts before the file.
         proveQuantities(statement, events, ledger, plan, contracts, rules, book, context, mapping, fail, warn);
@@ -655,9 +663,24 @@
     function ledgerIndex(graph, book) {
         const index = {
             contracts: [], contractById: new Map(), bindings: new Map(), events: [], sources: new Map(),
-            historyScope: book.fop.historyScope,
+            historyScope: book.fop.historyScope, recordedDecisions: new Map(),
         };
         if (!graph) return index;
+        // Same-fill decisions earlier imports recorded (their answers in the request log).
+        for (const request of graph.requests || []) {
+            if (request.action !== 'import') continue;
+            let answer = null;
+            try {
+                answer = JSON.parse(request.resultJson);
+            } catch (_) {
+                continue;
+            }
+            for (const decision of (answer && answer.duplicateDecisions) || []) {
+                if (decision.decision !== 'same_fill') continue;
+                index.recordedDecisions.set(`${decision.namespace}|${decision.sourceRef}`, Object.assign({
+                    importBatchId: answer.importBatchId || null, recordedAtUtc: request.createdAtUtc }, decision));
+            }
+        }
         for (const stored of graph.contracts || []) {
             if (stored.supersededByRevision === null || stored.supersededByRevision === undefined) {
                 index.contracts.push(stored.record);
@@ -708,6 +731,20 @@
         }
         return ['FOP', record.root, record.exchange, record.currency, record.tradingClass || '',
             record.optionRight, String(Number(record.optionStrike)), record.optionExpiry].join('|');
+    }
+
+    /**
+     * A new contract's record id: readable (its root and month, or option
+     * terms) and scoped to its ledger. Record ids are unique across every
+     * ledger of a database, while two accounts hold the same real contract.
+     */
+    function contractIdFor(book, record) {
+        const base = record.secType === 'FUT'
+            ? `fut-${tokenPart(record.root)}-${record.futureContractMonth}`
+            : `fop-${tokenPart(record.root)}-${tokenPart(record.tradingClass || 'x')}-`
+                + `${record.optionExpiry.replace(/-/g, '')}-${record.optionRight.toLowerCase()}`
+                + `${strikeText(record.optionStrike)}`;
+        return `${base}-${Common.hash16(`ledger|${book.bookId || ''}`).slice(0, 6)}`;
     }
 
     function contractResolver(plan, ledger, evidence, rules, book, context, fail, warn) {
@@ -769,11 +806,7 @@
                     observedAtUtc,
                 }, candidate);
                 delete record.evidenceNote;
-                record.contractId = candidate.secType === 'FUT'
-                    ? `fut-${tokenPart(rules.root)}-${candidate.futureContractMonth}`
-                    : `fop-${tokenPart(rules.root)}-${tokenPart(candidate.tradingClass || 'x')}-`
-                        + `${candidate.optionExpiry.replace(/-/g, '')}-${candidate.optionRight.toLowerCase()}`
-                        + `${strikeText(candidate.optionStrike)}`;
+                record.contractId = contractIdFor(book, record);
                 if (ledger.contracts.some((stored) => stored.contractId === record.contractId)) {
                     record.contractId = `${record.contractId}-${Common.hash16(key).slice(0, 6)}`;
                 }
@@ -945,10 +978,51 @@
         }
         const time = timeFacts(entry, statement, plan, rules, line, fail);
         if (!time) return null;
+        // The realized P&L the statement states for the row: evidence beside
+        // the ledger, never a figure of it (plan §19 P5-C4). Blank is no value.
+        const realizedText = String(fields.realizedPnl === undefined ? '' : fields.realizedPnl).trim();
         return {
             quantity: Math.round(quantity), price, fees: Math.abs(commission || 0), commission: commission || 0,
-            proceeds, time,
+            proceeds, time, realizedPnl: realizedText === '' ? null : number(realizedText),
+            realizedColumn: fields.realizedPnl !== undefined,
         };
+    }
+
+    /**
+     * What the statement says it realized, per contract of this ledger, for
+     * its period (plan §19 P5-C4): the sum of its rows' stated realized P&L,
+     * the closing rows that state none, and whether the file names its lot
+     * method (a Flex FifoPnlRealized column is FIFO; an Activity Realized
+     * P/L column does not say). Evidence only: it is compared with the
+     * ledger, never written into it.
+     */
+    function realizedEvidence(readings, mapping) {
+        const byContract = new Map();
+        const closing = new Set([mapping.codes.close, mapping.codes.expiry, mapping.codes.assignment,
+            mapping.codes.exercise].map(upper));
+        for (const reading of readings) {
+            // A file without the column states nothing to compare.
+            if (!reading.contract || !reading.facts || !reading.facts.realizedColumn) continue;
+            const id = reading.contract.contractId;
+            if (!byContract.has(id)) {
+                byContract.set(id, { contractId: id, localSymbol: reading.contract.localSymbol || id,
+                    secType: reading.contract.secType, statementRealized: null, stated: 0, missing: 0,
+                    method: 'unspecified', lines: [] });
+            }
+            const entry = byContract.get(id);
+            const headers = Object.keys(reading.raw || {}).map((name) => normalizeHeader(name.replace(/#\d+$/, '')));
+            if (headers.includes('fifopnlrealized')) entry.method = 'fifo';
+            const value = reading.facts.realizedPnl;
+            const closes = reading.codes.some((code) => closing.has(upper(code))) || reading.event !== 'trade';
+            if (value === null || value === undefined) {
+                if (closes) entry.missing += 1;
+                continue;
+            }
+            entry.statementRealized = (entry.statementRealized || 0) + value;
+            entry.stated += 1;
+            entry.lines.push(reading.line);
+        }
+        return [...byContract.values()].filter((entry) => entry.stated || entry.missing);
     }
 
     function timeFacts(entry, statement, plan, rules, line, fail) {
@@ -1307,14 +1381,19 @@
         if (Math.abs(cash[0] - cash[1]) > FEE_TOLERANCE) {
             differences.push(`cash (${money(cash[1])} stored, ${money(cash[0])} in this file)`);
         }
-        const intent = [stated(incoming.map((item) => item.openClose)), stated(stored.map((item) => item.openClose))];
-        if (intent[0].length === 1 && intent[1].length === 1 && intent[0][0] !== intent[1][0]) {
-            differences.push(`open/close (${intent[1][0]} stored, ${intent[0][0]} in this file)`);
+        // The intents each side states together (an opening and a closing part are CO) and the
+        // trade dates each side states, as same_fill_total_mismatches reads them on the server.
+        const together = (list) => openCloseOf(stated(list.map((item) => item.openClose)).join('').split(''));
+        const intent = [together(incoming), together(stored)];
+        if (intent[0] && intent[1] && intent[0] !== intent[1]) {
+            differences.push(`open/close (${intent[1]} stored, ${intent[0]} in this file)`);
         }
-        const dates = [stated(incoming.map((item) => item.time.exchangeTradeDate)),
-            stated(stored.map((item) => item.time.exchangeTradeDate))];
-        if (dates[0].length === 1 && dates[1].length === 1 && dates[0][0] !== dates[1][0]) {
-            differences.push(`exchange trade date (${dates[1][0]} stored, ${dates[0][0]} in this file)`);
+        const dates = [stated(incoming.map((item) => item.time.exchangeTradeDate)).sort(),
+            stated(stored.map((item) => item.time.exchangeTradeDate)).sort()];
+        if (dates[0].length && dates[1].length && dates[0].join() !== dates[1].join()) {
+            const other = dates[0].filter((date) => !dates[1].includes(date));
+            differences.push(`exchange trade date (${dates[1].join(', ')} stored, `
+                + `${(other.length ? other : dates[0]).join(', ')} in this file)`);
         }
         if (incoming.length === 1 && stored.length === 1 && incoming[0].delivered) {
             if (identityKey(incoming[0].delivered) !== stored[0].deliveredKey
@@ -1408,17 +1487,7 @@
         }
         matchOrders(open.filter((event) => event.disposition === 'new'), statementLive, orders, claimed, ledger,
             conflict);
-        for (const event of open) {
-            if (event.disposition !== 'new') continue;
-            const near = statementLive.filter((item) => !claimed.has(item) && !distinctOrders(event, orders.get(item))
-                && overlaps(event, storedView(item)));
-            if (near.length) {
-                fail('possible_duplicate', `line ${event.line}: ${near.length} stored fill(s) of the same contract, `
-                    + `direction and day (${near.map((item) => item.row.eventId).join(', ')}) may be this one `
-                    + 'at another granularity or reference; nothing proves it is the same fill or another one',
-                event.line);
-            }
-        }
+        reviewPossibleDuplicates(open, statementLive, orders, claimed, ledger, plan, fail);
         // A TWS execution inside the statement period that the statement does
         // not list (plan §9.1: a month without statement trades still checks TWS).
         if (plan.timeZone && plan.period.from && plan.period.through) {
@@ -1434,8 +1503,8 @@
         for (const event of events) {
             for (const reading of event.readings) {
                 reading.row.disposition = event.disposition === 'new' ? 'event'
-                    : (event.disposition === 'repeat' ? 'duplicate'
-                        : (event.disposition === 'other_format' ? 'duplicate' : 'problem'));
+                    : (['repeat', 'other_format', 'confirmed_same'].includes(event.disposition) ? 'duplicate'
+                        : 'problem');
                 if (event.supersedes) reading.row.supersedes = event.supersedes;
                 if (event.storedEventId) reading.row.storedEventId = event.storedEventId;
             }
@@ -1445,6 +1514,163 @@
             } else if (event.disposition === 'repeat') {
                 plan.duplicates.push({ line: event.line, reason: 'this row is already stored',
                     storedEventId: event.storedEventId });
+            } else if (event.disposition === 'confirmed_same') {
+                plan.duplicates.push({ line: event.line, reason: event.confirmation === 'recorded'
+                    ? 'confirmed by hand as the stored fill by an earlier import'
+                    : 'confirmed by hand as the stored fill', storedEventId: event.storedEventId,
+                attestation: event.attestation });
+            }
+        }
+    }
+
+    // Trades are the only rows a person may decide to be a stored fill or
+    // another one; a delivery or an expiry is corrected by a void or a rebuild.
+    const DECIDABLE_KINDS = Object.freeze(new Set(['futures_trade', 'option_trade']));
+
+    function sourceKeyOf(event) {
+        const primary = event.sources[0];
+        return primary ? `${primary.namespace}|${primary.sourceRef}` : `line|${event.line}`;
+    }
+
+    /** What the page shows of a stored fill a row may repeat. */
+    function candidateOf(item) {
+        const view = storedView(item);
+        return {
+            eventId: view.eventId, kind: view.kind, contractId: view.contractId,
+            localSymbol: item.contract ? item.contract.localSymbol || item.contract.contractId : null,
+            quantity: view.quantity, price: view.price, fees: view.fees, cashAmount: view.cashAmount,
+            openClose: view.openClose || null, time: view.time,
+            sources: item.sources.map((source) => `${source.namespace}:${source.sourceRef}`),
+        };
+    }
+
+    /**
+     * A stored statement fill of the same contract, direction and day that
+     * nothing proves equal or distinct (plan §9.1) blocks the batch until the
+     * user decides, stating the check the decision rests on (plan §19 P5-C1):
+     *
+     * - same_fill: the row is (part of) one stored fill. The rows named the
+     *   same as one fill must add up to it in quantity and average price, and
+     *   agree in fees, cash, intent, trade date and binding, or the batch
+     *   stays blocked. The row is left out; nothing is written for it;
+     * - distinct_fill: the row is another fill than every candidate. It is
+     *   written once, and its note keeps the check.
+     *
+     * A same-fill decision an earlier import recorded (its request's answer,
+     * in the ledger's request log) still holds for the same row while that
+     * fill is live. A decision never lifts another problem: row type,
+     * account, contract, binding and opening checks stay, and the server
+     * checks each decision again against its own reading of the row.
+     */
+    function reviewPossibleDuplicates(open, statementLive, orders, claimed, ledger, plan, fail) {
+        const given = plan.decisionsGiven;
+        const same = new Map();
+        for (const event of open) {
+            if (event.disposition !== 'new') continue;
+            const near = statementLive.filter((item) => !claimed.has(item) && !distinctOrders(event, orders.get(item))
+                && overlaps(event, storedView(item)));
+            if (!near.length) continue;
+            const key = sourceKeyOf(event);
+            const primary = event.sources[0] || {};
+            const ids = near.map((item) => item.row.eventId);
+            const earlier = ledger.recordedDecisions.get(key);
+            const decision = given.get(key) || (earlier && ids.includes(earlier.eventIds[0])
+                ? Object.assign({ recorded: true }, earlier) : null);
+            const review = {
+                line: event.line, sourceKey: key, namespace: primary.namespace || null,
+                sourceRef: primary.sourceRef || null, kind: event.kind,
+                localSymbol: event.contract.localSymbol || event.contract.contractId,
+                quantity: signedQuantity(event), price: event.price === undefined ? null : event.price,
+                fees: event.fees || 0, cashAmount: event.cashAmount, time: event.time,
+                candidates: near.map(candidateOf), decidable: DECIDABLE_KINDS.has(event.kind),
+                decision: decision ? { decision: decision.decision, eventIds: (decision.eventIds || []).slice(),
+                    attestation: decision.attestation || '', recorded: Boolean(decision.recorded) } : null,
+                status: 'undecided',
+            };
+            plan.duplicateReviews.push(review);
+            const blocked = (code, message) => {
+                review.status = code === 'possible_duplicate' ? 'undecided' : 'incomplete';
+                fail(code, `line ${event.line}: ${message}`, event.line);
+            };
+            if (!review.decidable) {
+                blocked('possible_duplicate', `${near.length} stored ${event.kind} event(s) (${ids.join(', ')}) may be `
+                    + 'this one; a delivery or an expiry is not decided by hand: void the stored one or rebuild');
+                continue;
+            }
+            if (!decision) {
+                blocked('possible_duplicate', `${near.length} stored fill(s) of the same contract, direction and day `
+                    + `(${ids.join(', ')}) may be this one at another granularity or reference; nothing proves it is `
+                    + 'the same fill or another one');
+                continue;
+            }
+            const attestation = String(decision.attestation || '').trim();
+            if (!attestation) {
+                blocked('duplicate_decision_incomplete', 'a decision on a possible duplicate states the check it '
+                    + 'rests on');
+                continue;
+            }
+            if (decision.decision === 'distinct_fill') {
+                const named = new Set(decision.eventIds || []);
+                const unchecked = ids.filter((id) => !named.has(id));
+                if (unchecked.length) {
+                    blocked('duplicate_decision_incomplete', `another fill than which? It is also near `
+                        + `${unchecked.join(', ')}; compare it with every candidate`);
+                    continue;
+                }
+                event.note = `人工核实为另一笔成交（不同于 ${ids.join('、')}）：${attestation}`.slice(0, 500);
+                review.status = 'distinct';
+                plan.decisions.push({ decision: 'distinct_fill', namespace: primary.namespace,
+                    sourceRef: primary.sourceRef, eventIds: ids.slice().sort(), attestation, source: null });
+                continue;
+            }
+            if (decision.decision !== 'same_fill' || (decision.eventIds || []).length !== 1
+                    || !ids.includes(decision.eventIds[0])) {
+                blocked('duplicate_decision_incomplete', `a same-fill decision names exactly one of the stored `
+                    + `fills ${ids.join(', ')}`);
+                continue;
+            }
+            const target = near.find((item) => item.row.eventId === decision.eventIds[0]);
+            if (!same.has(target)) same.set(target, []);
+            same.get(target).push({ event, review, decision, attestation });
+        }
+        for (const [item, members] of same) {
+            claimed.add(item);
+            const view = storedView(item);
+            const incoming = members.map((member) => member.event);
+            const quantity = incoming.reduce((total, event) => total + signedQuantity(event), 0);
+            const notional = incoming.reduce((total, event) => total + signedQuantity(event) * event.price, 0);
+            const differences = [];
+            if (Math.abs(quantity - view.quantity) > EPSILON) {
+                differences.push(`quantity (${view.quantity} stored, ${quantity} in the rows named the same fill)`);
+            } else if (Math.abs(notional / quantity - Number(view.price)) > PRICE_TOLERANCE) {
+                differences.push(`average price (${view.price} stored, ${money(notional / quantity)} in this file)`);
+            }
+            differences.push(...contentDifferences(incoming, [view], ledger));
+            for (const member of members) {
+                const event = member.event;
+                if (differences.length) {
+                    member.review.status = 'conflict';
+                    fail('duplicate_decision_conflict', `line ${event.line}: named the same fill as ${view.eventId}, `
+                        + `but ${differences.join('; ')}`, event.line);
+                    continue;
+                }
+                event.disposition = 'confirmed_same';
+                event.storedEventId = view.eventId;
+                event.confirmation = member.decision.recorded ? 'recorded' : 'given';
+                event.attestation = member.attestation;
+                member.review.status = 'same';
+                if (member.decision.recorded) continue;
+                const reading = event.readings[0];
+                plan.decisions.push({
+                    decision: 'same_fill', namespace: reading.namespace, sourceRef: reading.sourceRef,
+                    eventIds: [view.eventId], attestation: member.attestation,
+                    source: {
+                        account: plan.account, namespace: reading.namespace, sourceRef: reading.sourceRef,
+                        capabilityKey: reading.key, format: plan.format, section: reading.section,
+                        rawFields: reading.raw, statedQuantity: Math.abs(reading.facts.quantity),
+                        statedFees: reading.facts.fees,
+                    },
+                });
             }
         }
     }
@@ -1571,13 +1797,16 @@
      * with a gap has no complete-history result there (plan §1 item 7,
      * §9.5 item 5). Events after the last statement are the current period.
      */
-    function checkCoverage(plan, context, ledger, events, warn) {
-        // Without a ledger (a read-only preview) nothing else is registered.
-        plan.coverage = { known: Array.isArray(context.coverage) || !context.graph, ranges: [], gaps: [],
-            complete: false };
-        if (!plan.period.from || !plan.period.through) return;
-        const ranges = (context.coverage || []).filter((item) => item && item.periodFrom && item.periodThrough)
-            .map((item) => [item.periodFrom, item.periodThrough]).concat([[plan.period.from, plan.period.through]])
+    /**
+     * Statement coverage of a history (pure): periods [{periodFrom,
+     * periodThrough}] merged into ranges, and the gaps from the first covered
+     * day (or an earlier event day) to the last covered day. days are the
+     * account-local days of the history's events, in any order. The page's
+     * ledger view uses it with the registered periods alone.
+     */
+    function coverageOf(periods, days) {
+        const ranges = (periods || []).filter((item) => item && item.periodFrom && item.periodThrough)
+            .map((item) => [item.periodFrom, item.periodThrough])
             .sort((a, b) => (a[0] < b[0] ? -1 : (a[0] > b[0] ? 1 : 0)));
         const merged = [];
         for (const [from, through] of ranges) {
@@ -1588,26 +1817,37 @@
                 merged.push({ from, through });
             }
         }
-        const zone = plan.timeZone ? plan.timeZone.name : 'Etc/UTC';
-        const days = ledger.events.filter((item) => item.live && item.row.kind !== 'opening_balance')
-            .map((item) => localDay(item.row.fop.time, zone))
-            .concat(events.map((event) => localDay(event.time, zone))).filter(Boolean).sort();
+        const sorted = (days || []).filter(Boolean).slice().sort();
         const gaps = [];
-        if (days.length && days[0] < merged[0].from) {
-            gaps.push({ from: days[0], through: addDays(merged[0].from, -1) });
+        if (merged.length && sorted.length && sorted[0] < merged[0].from) {
+            gaps.push({ from: sorted[0], through: addDays(merged[0].from, -1) });
         }
         for (let index = 1; index < merged.length; index += 1) {
             gaps.push({ from: addDays(merged[index - 1].through, 1), through: addDays(merged[index].from, -1) });
         }
-        plan.coverage.ranges = merged;
-        plan.coverage.gaps = gaps;
-        plan.coverage.complete = plan.coverage.known && !gaps.length;
+        return { ranges: merged, gaps };
+    }
+
+    function checkCoverage(plan, context, ledger, events, warn) {
+        // Without a ledger (a read-only preview) nothing else is registered.
+        plan.coverage = { known: Array.isArray(context.coverage) || !context.graph, ranges: [], gaps: [],
+            complete: false };
+        if (!plan.period.from || !plan.period.through) return;
+        const zone = plan.timeZone ? plan.timeZone.name : 'Etc/UTC';
+        const days = ledger.events.filter((item) => item.live && item.row.kind !== 'opening_balance')
+            .map((item) => localDay(item.row.fop.time, zone))
+            .concat(events.map((event) => localDay(event.time, zone)));
+        const coverage = coverageOf((context.coverage || []).concat([{ periodFrom: plan.period.from,
+            periodThrough: plan.period.through }]), days);
+        plan.coverage.ranges = coverage.ranges;
+        plan.coverage.gaps = coverage.gaps;
+        plan.coverage.complete = plan.coverage.known && !coverage.gaps.length;
         plan.checks.coverageContinuous = plan.coverage.complete;
         if (!plan.coverage.known && ledger.events.length) {
             warn('coverage_unknown', 'the ledger\'s registered statement periods were not read, so gaps in its '
                 + 'history cannot be checked');
         }
-        for (const gap of gaps) {
+        for (const gap of coverage.gaps) {
             warn('coverage_gap', `${gap.from} to ${gap.through} is covered by no statement: the history there is `
                 + 'unproven, so the results are not complete-history conclusions; import that period\'s '
                 + 'statement, even one without trades (plan §9.5)');
@@ -1938,7 +2178,8 @@
             externalRef: event.sources.length ? event.sources[0].sourceRef : null,
             packageKey: `pk-${String(index + 1).padStart(5, '0')}`,
             note: event.kind === 'opening_balance'
-                ? `opening quantity from ${plan.statement.fileName || 'the statement'} (${plan.period.from})` : '',
+                ? `opening quantity from ${plan.statement.fileName || 'the statement'} (${plan.period.from})`
+                : (event.note || ''),
             time, sources: event.sources.map((source) => Object.assign({}, source)),
             kind: event.kind,
             contractRef: { contractId: event.contract.contractId, revision: event.contract.revision },
@@ -2034,20 +2275,24 @@
      */
     function buildImportRequest(plan, request) {
         assertWritable(plan);
-        return {
+        return Object.assign({
             requestId: request.requestId, bookId: request.bookId,
             expectedLedgerVersion: request.expectedLedgerVersion, bookIdentity: request.bookIdentity,
             action: 'import_cost_basis_events', importBatchId: request.importBatchId,
             clientTokenPrefix: request.clientTokenPrefix, statement: statementOf(plan, request),
             supersedeTwsEventIds: plan.supersede.slice(),
             fopPackage: plan.events.length ? packageOf(plan, request.engineVersion) : null,
-        };
+        }, (plan.decisions || []).length ? { duplicateDecisions: plan.decisions.map((item) => Object.assign({}, item)) }
+            : {});
     }
 
     /** request as buildImportRequest, plus confirmation, clientToken, reason, revokeBoundaries. */
     function buildRebuildRequest(plan, request) {
         assertWritable(plan);
         if (!plan.events.length) throw new Error('a rebuild replaces the history with this statement, which has no events');
+        if ((plan.decisions || []).length) {
+            throw new Error('a rebuild replaces the stored fills the duplicate decisions name; decide nothing for it');
+        }
         if (plan.supersede.length) {
             throw new Error('a rebuild replaces the whole history; it supersedes no TWS execution');
         }
@@ -2073,7 +2318,8 @@
             const lineSet = (plan.plannedEvents[plan.events.indexOf(event)].readings || []).map((reading) => reading.line);
             if (!lineSet.some((line) => wanted.has(line))) return event;
             return Object.assign({}, event, { source: 'manual',
-                note: attestation || 'manually verified against the statement row' });
+                note: [event.note, attestation || 'manually verified against the statement row']
+                    .filter(Boolean).join('；').slice(0, 500) });
         });
         return Object.assign({}, plan, { events });
     }
@@ -2134,6 +2380,10 @@
                     bindings,
                     supersede: plan.supersede.filter((id) => planned.some((event) => event.supersedes === id)),
                     period: { from, through, fromRows: plan.period.fromRows },
+                    // A same-fill decision writes nothing and goes with the first
+                    // batch; a distinct-fill one with the row it writes.
+                    decisions: (plan.decisions || []).filter((item) => (item.decision === 'same_fill'
+                        ? number === 0 : refs.has(`${item.namespace}|${item.sourceRef}`))),
                 }),
             };
         });
@@ -2219,6 +2469,9 @@
         splitPlan,
         previewGraph,
         localToUtc,
+        localDay,
+        coverageOf,
+        contractIdFor,
         _internal: Object.freeze({ monthFromCode, dayRange, identityKey }),
     });
 })(typeof window !== 'undefined' ? window : globalThis);

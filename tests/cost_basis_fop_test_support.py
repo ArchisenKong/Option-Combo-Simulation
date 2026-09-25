@@ -99,14 +99,15 @@ def package(*events, contracts=(), bindings=(), sources=(), engine=1):
 class FopLedger:
     """A temporary FOP ledger with FOP writes enabled, written through the store."""
 
-    def __init__(self, db_path, *, history_scope='full_history', **store_options):
+    def __init__(self, db_path, *, history_scope='full_history', account=ACCOUNT, **store_options):
         self.db_path = db_path
         self.options = dict(store_options)
         self.store = CostBasisStore(db_path, fop_writes_enabled=True, **store_options).initialize()
-        self.book = self.store.create_fop_book(account=ACCOUNT, symbol='CL',
+        self.book = self.store.create_fop_book(account=account, symbol='CL',
                                                start_date='2026-01-01',
                                                fop=dict(FOP_META, historyScope=history_scope))
         self.book_id = self.book['bookId']
+        self.identity = dict(IDENTITY, account=account)
 
     def version(self):
         return self.store.ledger_version(self.book_id)

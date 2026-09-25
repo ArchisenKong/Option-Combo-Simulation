@@ -26,6 +26,7 @@ import logging
 import os
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 
 import cost_basis_fop_broker
@@ -74,6 +75,8 @@ SERVER_ACTIONS = {
     'commit_cost_basis_fop_metadata': 'cost_basis_fop_metadata_committed',
     'request_cost_basis_fop_contract_details': 'cost_basis_fop_contract_details',
     'request_cost_basis_fop_statement_bindings': 'cost_basis_fop_statement_bindings',
+    'request_cost_basis_fop_market_snapshot': 'cost_basis_fop_market_snapshot',
+    'request_cost_basis_fop_positions': 'cost_basis_fop_positions',
 }
 
 COST_BASIS_CLIENT_ACTIONS = frozenset(SERVER_ACTIONS)
@@ -363,6 +366,10 @@ async def build_cost_basis_response(store_env, websocket, data, *,
                     'productRules': sorted(cost_basis_fop_domain.SUPPORTED_PRODUCT_RULES),
                     'writesReleased': bool(getattr(store, '_fop_writes_enabled', False)),
                     'contractDetails': callable(store_env.get('fetch_fop_contract_details')),
+                    # One-shot quotes (plan §10.2); the historical server has none.
+                    'marketSnapshot': callable(store_env.get('fetch_fop_market_snapshot')),
+                    # TWS positions of the ledger's account (plan §19 P5-C3).
+                    'positions': callable(store_env.get('fetch_fop_positions')),
                     # The statement row types and their mapping (plan §9.7):
                     # the page hands this document to the FOP importer.
                     'importCapabilities': store._fop_capability_list().document,
@@ -413,6 +420,61 @@ async def build_cost_basis_response(store_env, websocket, data, *,
         response = {'action': server_action, 'requestId': request_id, 'success': True,
                     'bookId': book['bookId'], 'results': results}
         _log_result(action, request_id, data, started, result={'results': len(results)})
+        return response
+
+    if action == 'request_cost_basis_fop_market_snapshot':
+        fetcher = store_env.get('fetch_fop_market_snapshot')
+        if not callable(fetcher):
+            return _error_response(
+                server_action, request_id, 'fop_market_snapshot_unavailable',
+                'this backend cannot take FOP quotes')
+        try:
+            _fop_message(data, 'MarketSnapshotRequest')
+            scope = await asyncio.to_thread(store.fop_quote_scope, data['bookId'])
+            observed_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            result = await cost_basis_fop_broker.snapshot_fop_quotes(
+                scope, data['contractIds'], market_snapshot=fetcher, observed_at=observed_at,
+                batch_id=f'quotes-{uuid.uuid4().hex}')
+        except cost_basis_fop_broker.BrokerResolutionError as exc:
+            return _error_response(server_action, request_id, exc.code, str(exc))
+        except CostBasisStoreError as exc:
+            _log_result(action, request_id, data, started, error=exc.code)
+            return _error_response(server_action, request_id, exc.code, str(exc))
+        response = {'action': server_action, 'requestId': request_id, 'success': True,
+                    'bookId': data['bookId'], **result}
+        _log_result(action, request_id, data, started, result={'quotes': len(result['quotes'])})
+        return response
+
+    if action == 'request_cost_basis_fop_positions':
+        fetcher = store_env.get('fetch_fop_positions')
+        if not callable(fetcher):
+            return _error_response(
+                server_action, request_id, 'fop_positions_unavailable',
+                'this backend has no TWS positions to reconcile against')
+        try:
+            _fop_message(data, 'FopPositionsRequest')
+            book = await asyncio.to_thread(store.get_book, data['bookId'])
+            if book.get('fop') is None:
+                raise InvalidRequestError('positions are reconciled for FOP ledgers only')
+            snapshot = await fetcher()
+            observed_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            connected, ready, positions = cost_basis_fop_broker.position_evidence(book, snapshot)
+            version = await asyncio.to_thread(store.ledger_version, book['bookId'])
+            credential = store.issue_positions_credential(
+                book['bookId'], ledger_version=version, observed_at=observed_at, account=book['account'],
+                positions=positions) if ready else None
+        except CostBasisStoreError as exc:
+            _log_result(action, request_id, data, started, error=exc.code)
+            return _error_response(server_action, request_id, exc.code, str(exc))
+        except Exception:
+            logger.exception('TWS position read failed')
+            return _error_response(server_action, request_id, 'fop_positions_failed',
+                                   'failed to read the TWS positions')
+        response = {'action': server_action, 'requestId': request_id, 'success': True,
+                    'bookId': book['bookId'], 'account': book['account'], 'observedAtUtc': observed_at,
+                    'ledgerVersion': version, 'accountConnected': connected, 'positionsReady': ready,
+                    'positions': positions, 'evidenceCredential': credential}
+        _log_result(action, request_id, data, started, result={'positions': len(positions)})
         return response
 
     if action == 'request_cost_basis_executions':
@@ -706,7 +768,8 @@ async def _dispatch_store_call(store, action, data):
                 import_batch_id=data['importBatchId'], client_token_prefix=data['clientTokenPrefix'],
                 supersede_tws_event_ids=data['supersedeTwsEventIds'],
                 expected_ledger_version=data['expectedLedgerVersion'],
-                book_identity=data['bookIdentity']))
+                book_identity=data['bookIdentity'],
+                duplicate_decisions=data.get('duplicateDecisions') or []))
         events = data.get('events')
         supersede_tws_event_ids = data.get('supersedeTwsEventIds', [])
         supersede_prior_stub_event_ids = data.get('supersedePriorStubEventIds', [])
@@ -843,6 +906,16 @@ async def _dispatch_store_call(store, action, data):
             )
         )
         return {'resets': resets}
+
+    if action == 'save_cost_basis_snapshot' and 'expectedLedgerVersion' in data:
+        # A FOP ledger's reconciliation snapshot (SnapshotRequest, plan §10.3).
+        _fop_message(data, 'SnapshotRequest')
+        snapshot = await asyncio.to_thread(lambda: store.save_fop_snapshot(
+            data['bookId'], expected_ledger_version=data['expectedLedgerVersion'],
+            book_identity=data['bookIdentity'], as_of_date=data['asOfDate'], summary=data['summary'],
+            account_scope=data['accountScope'], tws_snapshot=data['twsSnapshot'],
+            reconciled=data['reconciled'], note=data['note']))
+        return {'snapshot': snapshot, 'idempotentReplay': snapshot.pop('idempotentReplay')}
 
     if action == 'save_cost_basis_snapshot':
         snapshot = await asyncio.to_thread(

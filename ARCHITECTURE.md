@@ -1047,6 +1047,66 @@ vectors in `tests/fixtures/cost_basis_fop/core_vectors.json` are reproduced by a
 independent rational model (`tests/helpers/cost_basis_fop_model.py`), by the core
 and, written through the real store, by the core again.
 
+The FOP page (`cost_basis_fop.html`, controller `js/cost_basis_fop.js`) reads a
+ledger as its version, its exported graph and its version again (equal digests
+mean the graph is that version) plus the registered statement periods, and
+replays the graph with the core. `js/cost_basis_fop_view.js` turns the output
+into panels that name the contracts and events behind every figure;
+`js/cost_basis_fop_forms.js` builds manual entries, voids and cycle operations
+as the frozen requests and runs the delivery preview on a copy of the graph in
+memory, with a quantity per option (a path that holds or delivers a FUT past
+its last trade date, leaves an option open past its expiry, or starts before
+the last recorded event, stops; both dates are exchange dates). Quotes are one
+batch at a time
+(`request_cost_basis_fop_market_snapshot`): the server quotes only the
+ledger's own stored contracts, reads their terms from the records and reports
+each contract's evidence as the broker gave it (`cost_basis_fop_broker.py`; a
+-1 without a size is no quote, an option price is never negative, a FUT may
+be); `js/cost_basis_fop_quotes.js` values it in the plan's fixed order, a mid,
+else the side a position would close against, else a dated settlement or
+close as a labelled reference, else nothing, with the broker's observation
+time aged against 60 s batch sync and 120 s freshness; the summary names the
+lowest level used. The page re-ages a batch at the moment its first current
+quote stops being fresh (redrawing the figures only, never the forms being
+filled in), and a lost connection retires it at once. A batch, a reload or an
+import preview is used only for the ledger, request and version it was made
+for; an import is sent against the version it was previewed on. `ib_server.py` takes quotes through the bounded, self-cancelling
+`_request_cost_basis_snapshot_tickers` and runs one FOP batch at a time;
+`historical_server.py` has no adapter and answers with the same action and a
+capability error. A FOP backup's digest reads whole numbers as integers, so a
+backup a browser downloaded and wrote again still proves itself.
+
+The P5 closeout (plan §19) adds the workflows around that view. A statement row
+that may repeat a stored fill blocks until a person decides it is that fill or
+another one and states the check; the import request carries the decisions
+(`duplicateDecisions`), the store reads each same-fill row from its own raw
+fields (row type, contract, direction, day, price, commission, the future it
+names against the option's binding), makes the rows named the same as one fill
+add up to it in quantity, average price, fees and cash with its open/close
+intent and exchange trade date, and keeps the decisions in the import's answer
+in the request log, where a later import of the same row finds them. An option whose
+future is unproven is resolved read-only at the broker; `adopt_binding` may
+bring the option's or future's next revision, or the future itself, and the
+binding credential must prove exactly the records they leave. The page reads
+the ledger account's own TWS positions (`request_cost_basis_fop_positions`: this
+account and root only, bound to the ledger version with a server credential)
+and keeps quantity, AvgCost (corroboration only: same unit, one lot price, a
+trade cost; the ledger agrees only when every contract does, else partial or
+not comparable), binding and cash apart. A position is its ledger contract by
+conId, else by local symbol, and a conId on both sides that disagrees is an
+identity conflict, never matched by the symbol. `save_cost_basis_snapshot`
+keeps a FOP snapshot of one version, verifies the positions' credential, holds
+its quantity and AvgCost summaries to its own rows and claims "reconciled" only
+when the store's own quantities match the positions. The core outputs
+the buyer's options apart (`buyerOptions`: settled longs, their own fees, open
+longs), never added to the totals again, and a statement's realized P&L is
+compared on its own basis (FIFO lots with commissions, closes in its period)
+only where that basis is certain. Manual entries are previewed in memory and
+the previewed request is what a confirmation sends. js/cost_basis_fop_messages.js
+puts every stable problem code into Chinese with its next step. New contract
+record ids are readable and scoped to their ledger: two accounts' ledgers in
+one database hold the same real contract.
+
 Schema v9 ties statement coverage to reset archives, checks both archive digests
 on restoration, and invalidates prior coverage after historical changes.
 Import/reset/rebuild/restore require identity and version credentials. Event

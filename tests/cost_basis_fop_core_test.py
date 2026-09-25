@@ -85,6 +85,7 @@ class Bridge:
     def close(self):
         self.process.stdin.close()
         self.process.wait(timeout=10)
+        self.process.stdout.close()
 
 
 def _shifted(text, seconds):
@@ -326,6 +327,9 @@ class _BridgeCase(unittest.TestCase):
                             f'{expected["sellerLens"][field]}')
         self.assertEqual(output['sellerLens']['longExerciseAffectsBreakEven'],
                          expected['sellerLens']['longExerciseAffectsBreakEven'], label)
+        for field, value in expected['buyer'].items():
+            self.assertTrue(close_to(value, output['buyerOptions'][field]['value'], field),
+                            f'{label}: buyerOptions.{field} {output["buyerOptions"][field]} != {value}')
         specs = with_catalogue(vector)['contracts']
         listed = {row['contractId']: row for row in output['futures'] + output['options']}
         self.assertEqual(sorted(listed), sorted(specs[alias]['contractId'] for alias in expected['positions']),
@@ -372,6 +376,8 @@ class ModelTests(unittest.TestCase):
                         self.assertEqual(actual, value, field)
                     else:
                         self.assertTrue(equal(value, actual), f'sellerLens.{field}: {actual}')
+                for field, value in expect.get('buyerOptions', {}).items():
+                    self.assertTrue(equal(value, out['buyer'][field]), f'buyerOptions.{field}: {out["buyer"][field]}')
                 if 'positions' in expect:
                     self.assertEqual(set(expect['positions']), set(out['positions']))
                     for alias, fields in expect['positions'].items():

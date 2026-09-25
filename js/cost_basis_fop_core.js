@@ -21,6 +21,8 @@
     const DELIVERY_KINDS = new Set(['option_assignment', 'option_exercise']);
     const ORDER_EVIDENCE = /^([^#]+)#([0-9]{1,15})$/;
     const SELLER_FEE_CATEGORIES = new Set(['futures', 'short_option']);
+    // A fee of the buyer's options alone (plan §5.3: kept out of the seller lens).
+    const BUYER_FEE_CATEGORY = 'long_option';
 
     // ------------------------------------------------------------------
     // Metrics
@@ -375,7 +377,7 @@
 
     function createBuckets() {
         return { Rf: createSum(), Co: createSum(), E: createSum(), J: createSum(),
-            Rs: createSum(), Es: createSum(), Js: createSum(), longExercise: false };
+            Rs: createSum(), Es: createSum(), Js: createSum(), Rb: createSum(), Eb: createSum(), longExercise: false };
     }
 
     function futureState(record) {
@@ -563,8 +565,9 @@
                 const state = optionOf(record);
                 add('Co', event.cash, cycle, null);
                 const result = applyOptionTrade(state, event.contracts, event.cash);
-                if (result && result.shortSide) {
-                    add('Rs', result.settled, cycle, taintOf(`FOP:${record.contractId}`) || result.reason);
+                if (result) {
+                    add(result.shortSide ? 'Rs' : 'Rb', result.settled, cycle,
+                        taintOf(`FOP:${record.contractId}`) || result.reason);
                 }
                 break;
             }
@@ -573,11 +576,10 @@
             case 'option_exercise': {
                 const state = optionOf(record);
                 const result = applyOptionClose(state, event.contracts);
-                if (result.shortSide) {
-                    add('Rs', result.settled, cycle, taintOf(`FOP:${record.contractId}`) || result.reason);
-                }
+                add(result.shortSide ? 'Rs' : 'Rb', result.settled, cycle,
+                    taintOf(`FOP:${record.contractId}`) || result.reason);
                 add('E', event.fees, cycle, null);
-                if (result.shortSide) add('Es', event.fees, cycle, null);
+                add(result.shortSide ? 'Es' : 'Eb', event.fees, cycle, null);
                 if (DELIVERY_KINDS.has(event.kind) && event.delivered) {
                     const future = futureOf(event.delivered);
                     const realized = applyFuture(future, event.futureContracts, event.price);
@@ -613,8 +615,10 @@
             }
             case 'fee': {
                 if (!event.includeInCost) break;
-                addCash(SELLER_FEE_CATEGORIES.has(event.feeCategory) ? ['E', 'Es'] : ['E'],
-                    -event.cash, target, event.id);
+                let names = ['E'];
+                if (SELLER_FEE_CATEGORIES.has(event.feeCategory)) names = ['E', 'Es'];
+                else if (event.feeCategory === BUYER_FEE_CATEGORY) names = ['E', 'Eb'];
+                addCash(names, -event.cash, target, event.id);
                 break;
             }
             case 'manual_adjust': {
@@ -847,8 +851,11 @@
             } else {
                 const state = economics.options.get(delta.id);
                 const short = state && state.n < 0 && reducing(state.n, delta.delta);
+                const long = state && state.n > 0 && reducing(state.n, delta.delta);
                 if (short || pending.get(delta.key) > 1) names.push('Rs');
+                if (long || pending.get(delta.key) > 1) names.push('Rb');
                 if (short && event.kind !== 'option_trade' && event.fees) names.push('Es');
+                if (long && event.kind !== 'option_trade' && event.fees) names.push('Eb');
             }
         }
         if (event.kind === 'option_trade') names.push('Co');
@@ -857,6 +864,7 @@
         if (event.kind === 'fee' && event.includeInCost) {
             names.push('E');
             if (SELLER_FEE_CATEGORIES.has(event.feeCategory)) names.push('Es');
+            if (event.feeCategory === BUYER_FEE_CATEGORY) names.push('Eb');
         }
         if (event.kind === 'manual_adjust' && event.includeInCost) {
             names.push('J');
@@ -910,8 +918,13 @@
         const cycleRisk = economics.cycles.map(() => ({}));
         const unattributedRisk = {};
         const pending = new Map();
+        // How far unresolved events could still raise each position: only these can make a contract long.
+        const pendingRise = new Map();
         for (const event of unresolved) {
-            for (const delta of event.deltas) pending.set(delta.key, (pending.get(delta.key) || 0) + 1);
+            for (const delta of event.deltas) {
+                pending.set(delta.key, (pending.get(delta.key) || 0) + 1);
+                if (delta.delta > 0) pendingRise.set(delta.key, (pendingRise.get(delta.key) || 0) + delta.delta);
+            }
         }
         for (const event of unresolved) {
             const reason = `${DELIVERY_KINDS.has(event.kind) ? 'delivery' : 'event'}_time_unresolved:${event.id}`;
@@ -980,6 +993,9 @@
         const optionRows = [];
         const Vo = createSum();
         const openShortPremium = createSum();
+        // The open longs apart (plan §5.2): the net premium paid and their value.
+        const openLongPremium = createSum();
+        const openLongValue = createSum();
         let bindingConflict = null;
         for (const state of [...economics.options.values()].sort(byOption)) {
             const key = `FOP:${state.record.contractId}`;
@@ -1014,6 +1030,17 @@
             else addTo(Vo, value.value, null);
             if (qReason) addTo(openShortPremium, 0, qReason);
             else if (state.n < 0) addTo(openShortPremium, premium.value, premium.reason);
+            if (qReason) {
+                // An unknown quantity reaches the buyer's side only if the
+                // events still unresolved could leave the contract long.
+                if (state.n + (pendingRise.get(key) || 0) > EPSILON) {
+                    addTo(openLongPremium, 0, qReason);
+                    addTo(openLongValue, 0, qReason);
+                }
+            } else if (state.n > 0) {
+                addTo(openLongPremium, premium.value, premium.reason);
+                addTo(openLongValue, value.value, value.reason ? `missing_mark:${state.record.contractId}` : null);
+            }
             if (binding && binding.status === 'conflict' && !bindingConflict) {
                 bindingConflict = `binding_conflict:${state.record.contractId}`;
             }
@@ -1119,6 +1146,7 @@
             totals,
             sellerLens: { ...lens, breakEven, breakEvenIfOpenShortsExpire: ifExpire,
                 longExerciseAffectsBreakEven: Boolean(lensBuckets.longExercise) },
+            buyerOptions: buyerOptionsOf(book, bookRisk, openLongPremium, openLongValue, withRisk),
             unattributed: { E: withRisk(economics.unattributed.E, unattributedRisk.E),
                 J: withRisk(economics.unattributed.J, unattributedRisk.J) },
             roll: { groups: options.rolls === false ? [] : deriveRolls(timeline, options.rollRange || null) },
@@ -1130,6 +1158,24 @@
                 groups: groupsOf(timeline), problems: full.problems };
         }
         return output;
+    }
+
+    /**
+     * The buyer's options of the whole ledger (plan §5.2, §5.3), apart from
+     * the seller lens and never added to the totals again: Rb the settled
+     * result of longs that ended (their net cash, commissions included; an
+     * exercise ends the premium, the future it delivers stays in Rf/Uf), Eb
+     * the fees only longs carry (their exercise and expiry fees, long_option
+     * fees; never in Es), the open longs' remaining net premium (paid:
+     * negative) and value, and the result they make together.
+     */
+    function buyerOptionsOf(book, risk, openPremium, openValue, withRisk) {
+        const parts = {
+            Rb: withRisk(book.Rb, risk.Rb), Eb: withRisk(book.Eb, risk.Eb),
+            openPremium: { ...openPremium }, openValue: { ...openValue },
+        };
+        parts.result = combine([[1, parts.Rb], [-1, parts.Eb], [1, parts.openPremium], [1, parts.openValue]]);
+        return parts;
     }
 
     function groupsOf(timeline) {
@@ -1170,6 +1216,9 @@
         }
         for (const name of ['Rs', 'Es', 'Js', 'breakEven', 'breakEvenIfOpenShortsExpire']) {
             note(`sellerLens.${name}`, output.sellerLens[name]);
+        }
+        for (const name of ['Rb', 'Eb', 'openPremium', 'openValue', 'result']) {
+            note(`buyerOptions.${name}`, output.buyerOptions[name]);
         }
         return gaps;
     }

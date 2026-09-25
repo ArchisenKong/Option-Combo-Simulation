@@ -12,14 +12,16 @@ mapping (cost_basis_fop_capabilities.json), to
 - check a manual event that claims a synthetic_only row against that row:
   kind, contract, quantity, price, fees and time (plan §9.7 "例外处理");
 - check the rows a statement binding credential is asked for: they must name
-  the option, its underlying future and that future's delivery month.
+  the option, its underlying future and that future's delivery month;
+- check a row a person named the same fill as a stored trade: its row type,
+  contract, direction and day (plan §19 P5-C1).
 
 Pure: no SQLite, no IB. Refusals are cost_basis_fop_domain.FopDomainError.
 """
 import json
 import pathlib
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 try:
     from zoneinfo import ZoneInfo
@@ -354,6 +356,140 @@ def claim_mismatches(key, record, event, allocation, contract_for, mapping, *, e
         mismatches.append(f'fees ({allocation["fees"]}, the row is {fees:g})')
     mismatches.extend(_time_mismatches(row, event['time'], record.get('format'), exchange_zone))
     return mismatches
+
+
+def row_day(record, mapping):
+    """The date a Trades row states (its local date, else its exchange trade date), or ''."""
+    row = row_values(record.get('rawFields') or {}, mapping)
+    local = local_timestamp(str(row.get('dateTime') or '').strip())
+    if local:
+        return local[:10]
+    return iso_date(row.get('tradeDate')) or iso_date(row.get('dateTime')) or ''
+
+
+def same_fill_mismatches(record, event, contract, mapping, future=None):
+    """How a row a person named the same fill as a stored trade differs from it (plan §19 P5-C1).
+
+    event: {kind, quantity, days} with days the UTC dates the stored fill's
+    time touches; contract: its contract record; future: the contract record
+    the ledger binds an option to, or None. The row must read as a trade row
+    of the same contract, in the same direction, within a day of the fill,
+    with a price and a readable commission, naming no other future than the
+    bound one. Its quantity, price, fees and cash may be a part of the fill at
+    another granularity: same_fill_total_mismatches adds the rows up.
+    """
+    problems = []
+    key = row_key(record, mapping)
+    asset = 'FUT' if event['kind'] == 'futures_trade' else 'FOP'
+    parts = (key or '').split('/')
+    if len(parts) != 4 or parts[2] != asset or parts[3] != 'trade':
+        problems.append(f'row type ({key or "no Trades row"}; the stored fill is a {asset} trade)')
+    row = row_values(record.get('rawFields') or {}, mapping)
+    symbol = upper(row.get('symbol'))
+    con_id = number(row.get('conId'))
+    if not symbol and not con_id:
+        problems.append('contract (the row names none)')
+    if symbol and contract.get('localSymbol') and symbol != upper(contract['localSymbol']):
+        problems.append(f'contract ({contract["localSymbol"]} stored, the row is {symbol})')
+    if con_id and contract.get('conId') and int(con_id) != int(contract['conId']):
+        problems.append(f'conId ({contract["conId"]} stored, the row is {int(con_id)})')
+    quantity = number(row.get('quantity'))
+    if not quantity or (quantity > 0) != (event['quantity'] > 0):
+        problems.append(f'direction ({event["quantity"]:g} stored, the row is {row.get("quantity")})')
+    day = row_day(record, mapping)
+    if not day:
+        problems.append('day (the row has none)')
+    else:
+        stated = date.fromisoformat(day)
+        if not any(abs((stated - date.fromisoformat(other)).days) <= 1 for other in event['days']):
+            problems.append(f'day ({day}; the stored fill is on {", ".join(sorted(event["days"]))})')
+    if number(row.get('price')) is None:
+        problems.append(f'price (the row states {row.get("price")!r})')
+    if number(row.get('commission')) is None and str(row.get('commission') or '').strip():
+        problems.append(f'fees (the row states {row.get("commission")!r})')
+    if future is not None:
+        # The same reading as bindingDifference in js/cost_basis_fop_import.js.
+        underlying = upper(row.get('underlyingSymbol'))
+        underlying_con_id = number(row.get('underlyingConId'))
+        option = contract.get('localSymbol') or contract['contractId']
+        if _FUT_SYMBOL.match(underlying) and future.get('localSymbol') \
+                and underlying != upper(future['localSymbol']):
+            problems.append(f'underlying future ({option} is bound to {future["localSymbol"]}, the row names '
+                            f'{underlying})')
+        elif underlying_con_id and future.get('conId') and int(underlying_con_id) != int(future['conId']):
+            problems.append(f'underlying future ({option} is bound to conId {future["conId"]}, the row names '
+                            f'{int(underlying_con_id)})')
+    return problems
+
+
+def open_close_of(codes):
+    """The open/close intent a row's codes state: O, C, CO or None (openCloseOf in the importer)."""
+    stated = set(codes)
+    if {'O', 'C'} <= stated:
+        return 'CO'
+    return 'C' if 'C' in stated else ('O' if 'O' in stated else None)
+
+
+def same_fill_worth(record, kind, contract, mapping):
+    """What a row named the same fill is worth, read as js/cost_basis_fop_import.js reads it.
+
+    {quantity (signed), price, fees, cash, openClose, tradeDate}: fees are the
+    commission's size; a FUT row's cash is minus its fees, an option row's its
+    proceeds plus commission (or minus quantity x multiplier x price minus
+    fees when it states no proceeds); tradeDate is a Flex exchange trade date.
+    """
+    row = row_values(record.get('rawFields') or {}, mapping)
+    quantity = number(row.get('quantity')) or 0.0
+    price = number(row.get('price')) or 0.0
+    commission = number(row.get('commission')) or 0.0
+    fees = abs(commission)
+    if kind == 'futures_trade':
+        cash = -fees
+    else:
+        proceeds = number(row.get('proceeds'))
+        cash = (-quantity * float(contract['premiumMultiplier']) * price - fees) if proceeds is None \
+            else proceeds + commission
+    return {'quantity': quantity, 'price': price, 'fees': fees, 'cash': cash,
+            'openClose': open_close_of(_codes(row.get('codes'))),
+            'tradeDate': iso_date(row.get('tradeDate')) if record.get('format') == 'flex_csv' else ''}
+
+
+def _amount(value):
+    return f'{round(value, 6):.6f}'.rstrip('0').rstrip('.')
+
+
+def same_fill_total_mismatches(stored, rows):
+    """How the rows named the same fill differ, added up, from the stored fill (plan §19 P5-C1).
+
+    stored: {quantity (signed), price, fees, cash, openClose, exchangeTradeDate}
+    of the fill; rows: same_fill_worth of each row. They must add up to its
+    quantity, then to its average price, fees and cash; the intents they
+    state together must be its intent, and the exchange trade dates they
+    state must be its date, where the fill states one.
+    """
+    problems = []
+    quantity = sum(row['quantity'] for row in rows)
+    if abs(abs(quantity) - abs(stored['quantity'])) > 1e-9:
+        return [f'quantity ({abs(stored["quantity"]):g} stored, {abs(quantity):g} in the rows named the same fill)']
+    average = sum(row['quantity'] * row['price'] for row in rows) / quantity
+    if stored['price'] is None or abs(average - float(stored['price'])) > _PRICE_TOLERANCE:
+        problems.append(f'average price ({_amount(stored["price"] or 0)} stored, {_amount(average)} in the rows '
+                        'named the same fill)')
+    for name in ('fees', 'cash'):
+        total = sum(row[name] for row in rows)
+        if abs(total - float(stored[name] or 0)) > _FEE_TOLERANCE:
+            problems.append(f'{name} ({_amount(float(stored[name] or 0))} stored, {_amount(total)} in the rows '
+                            'named the same fill)')
+    intents = [row['openClose'] for row in rows if row['openClose']]
+    intent = open_close_of([code for stated in intents for code in stated]) if intents else None
+    if intent and stored['openClose'] and intent != stored['openClose']:
+        problems.append(f'open/close ({stored["openClose"]} stored, {intent} in the rows named the same fill)')
+    dates = {row['tradeDate'] for row in rows if row['tradeDate']}
+    if dates and stored['exchangeTradeDate'] and dates != {stored['exchangeTradeDate']}:
+        other = sorted(dates - {stored['exchangeTradeDate']})
+        problems.append(f'exchange trade date ({stored["exchangeTradeDate"]} stored, {", ".join(other)} in the '
+                        'rows named the same fill)')
+    return problems
 
 
 def _time_mismatches(row, time, source_format, exchange_zone):

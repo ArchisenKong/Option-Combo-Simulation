@@ -148,5 +148,103 @@ class BrokerResolutionTests(unittest.TestCase):
         self.assertEqual(stock_query['status'], 'unresolved', 'only options are resolved')
 
 
+
+class QuoteSnapshotTests(unittest.TestCase):
+    """P5: one quote batch for the ledger's own contracts (plan §10.2, §10.3)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.ledger = FopLedger(pathlib.Path(self._tmp.name) / 'cost_basis.db')
+        self.ledger.append(at(example_event('FUT trade: cash is minus fees, notional stays out'),
+                              '2026-10-01T14:30:05.000000Z'), contracts=[CLZ6])
+
+    def snapshot(self, contract_ids, adapter):
+        scope = self.ledger.store.fop_quote_scope(self.ledger.book_id)
+        return asyncio.run(broker.snapshot_fop_quotes(scope, contract_ids, market_snapshot=adapter,
+                                                      observed_at=OBSERVED, batch_id='quotes-test-0001'))
+
+    def test_the_queries_come_from_the_stored_records_and_the_answer_is_evidence_only(self):
+        seen = []
+
+        async def adapter(queries):
+            seen.extend(queries)
+            return [{'contractId': CLZ6['contractId'], 'conId': 555, 'localSymbol': 'CLZ6', 'secType': 'FUT',
+                     'bid': -1.25, 'bidSize': 3, 'ask': float('nan'), 'askSize': 0, 'last': -1, 'lastSize': 0,
+                     'close': -1.5, 'closeDate': None, 'settlement': None, 'settlementDate': None,
+                     'observedAtUtc': '2026-10-02T14:30:05.120000Z', 'marketDataType': 1}]
+
+        version = self.ledger.version()
+        batch = self.snapshot([CLZ6['contractId']], adapter)
+        self.assertEqual(seen, [{'contractId': CLZ6['contractId'], 'secType': 'FUT', 'conId': 555, 'symbol': 'CL',
+                                 'exchange': 'NYMEX', 'currency': 'USD', 'tradingClass': 'CL',
+                                 'localSymbol': 'CLZ6', 'contractMonth': '202612'}])
+        [quote] = batch['quotes']
+        # A negative FUT bid with a size is a price; -1 without a size is IB's "no quote".
+        self.assertEqual((quote['status'], quote['bid'], quote['ask'], quote['last']), ('ok', -1.25, None, None))
+        self.assertEqual((quote['close'], quote['closeDate']), (-1.5, None))
+        self.assertEqual(batch['ledgerVersion'], version)
+        self.assertEqual(self.ledger.version(), version, 'a quote batch writes nothing')
+
+    def test_prices_the_broker_did_not_give_are_not_invented(self):
+        option = {'contractId': 'x', 'secType': 'FOP', 'conId': 9001, 'localSymbol': 'LOZ6 C7500'}
+        evidence = broker.quote_evidence(option, {'bid': 0, 'bidSize': 5, 'ask': -1, 'askSize': 0, 'last': -0.5,
+                                                  'lastSize': 1, 'close': 0.4, 'closeDate': '2026-10-01',
+                                                  'observedAtUtc': 'yesterday', 'marketDataType': True})
+        # A zero bid is reported with its size; an option price is never negative.
+        self.assertEqual((evidence['bid'], evidence['bidSize'], evidence['ask'], evidence['last']), (0, 5, None, None))
+        self.assertEqual((evidence['close'], evidence['closeDate']), (0.4, '2026-10-01'))
+        self.assertEqual((evidence['observedAtUtc'], evidence['marketDataType']), (None, None))
+        conflict = broker.quote_evidence(option, {'conId': 9002, 'localSymbol': 'LOZ6 C7500', 'bid': 1})
+        self.assertEqual(conflict['status'], 'identity_conflict')
+        self.assertIsNone(conflict['bid'])
+        self.assertEqual(broker.quote_evidence(option, None)['status'], 'no_data')
+        self.assertEqual(broker.quote_evidence(option, {'error': 'qualify failed'})['status'], 'failed')
+
+    def test_a_batch_is_bounded_to_the_ledgers_contracts_and_failures_are_per_contract(self):
+        async def never(queries):
+            raise AssertionError('not asked')
+
+        with self.assertRaises(broker.BrokerResolutionError):
+            self.snapshot(['fut-clz6-9999'], never)
+        with self.assertRaises(broker.BrokerResolutionError):
+            self.snapshot([CLZ6['contractId']] * 2, never)
+        with self.assertRaises(broker.BrokerResolutionError):
+            self.snapshot([f'fut-{index:04d}' for index in range(broker.MAX_QUOTE_CONTRACTS + 1)], never)
+
+        async def broken(queries):
+            raise RuntimeError('TWS is not connected')
+
+        [failed] = self.snapshot([CLZ6['contractId']], broken)['quotes']
+        self.assertEqual((failed['status'], failed['reason']), ('failed', 'broker_error: TWS is not connected'))
+
+        async def slow(queries):
+            await asyncio.sleep(0.2)
+            return []
+
+        with mock.patch.object(broker, 'QUOTE_TIMEOUT_SECONDS', 0.01):
+            [late] = self.snapshot([CLZ6['contractId']], slow)['quotes']
+        self.assertEqual((late['status'], late['reason']), ('failed', 'timeout'))
+
+    def test_an_ib_ticker_is_read_without_rounding_or_re_dating(self):
+        from datetime import datetime, timezone
+
+        class Ticker:
+            bid, bidSize, ask, askSize = -0.05, 2.0, 0.05, 1.0
+            last, lastSize, close = float('nan'), float('nan'), -0.1
+            time = datetime(2026, 10, 2, 14, 30, 5, 120000, tzinfo=timezone.utc)
+            marketDataType = 1
+
+        class Contract:
+            conId, localSymbol, secType = 555, 'CLZ6', 'FUT'
+
+        raw = broker.ticker_quote('fut-clz6-0001', Contract(), Ticker())
+        self.assertEqual(raw['observedAtUtc'], '2026-10-02T14:30:05.120000Z')
+        self.assertIsNone(raw['closeDate'], 'IB states no date for its close tick')
+        evidence = broker.quote_evidence({'contractId': 'fut-clz6-0001', 'secType': 'FUT', 'conId': 555,
+                                          'localSymbol': 'CLZ6'}, raw)
+        self.assertEqual((evidence['bid'], evidence['ask'], evidence['last']), (-0.05, 0.05, None))
+
+
 if __name__ == '__main__':
     unittest.main()

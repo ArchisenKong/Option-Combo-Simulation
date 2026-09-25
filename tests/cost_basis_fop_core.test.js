@@ -75,6 +75,9 @@ function checkVector(vector) {
     for (const [field, value] of Object.entries(expect.sellerLens || {})) {
         metric(output.sellerLens[field], field, value, label);
     }
+    for (const [field, value] of Object.entries(expect.buyerOptions || {})) {
+        metric(output.buyerOptions[field], `buyerOptions.${field}`, value, label);
+    }
     if (expect.positions) {
         const listed = {};
         for (const row of output.futures) listed[row.contractId] = row;
@@ -196,6 +199,42 @@ function comparable(output) {
 module.exports = {
     name: 'cost_basis_fop_core',
     tests: [
+        {
+            name: "the buyer's options are a part of the totals, never added again, and their fees stay out of the seller lens (P5-C4)",
+            run() {
+                let checked = 0;
+                for (const vector of DOCUMENT.vectors) {
+                    if (vector.asOf || (vector.boundaries || []).length) continue;
+                    const output = run(vector, { trace: false });
+                    const buyer = output.buyerOptions;
+                    const known = [output.totals.Co, output.sellerLens.Rs, buyer.Rb, buyer.openPremium]
+                        .concat(output.options.map((row) => row.remainingNetPremium));
+                    if (known.some((metric) => metric.value === null)) continue;
+                    // Co is every option's cash once: settled shorts, settled longs, open shorts, open longs.
+                    const openShort = output.options.filter((row) => row.contracts.value < 0)
+                        .reduce((total, row) => total + row.remainingNetPremium.value, 0);
+                    near(output.totals.Co.value, output.sellerLens.Rs.value + buyer.Rb.value + openShort
+                        + buyer.openPremium.value, 'Co = Rs + Rb + open short + open long premium', vector.name);
+                    if (buyer.openValue.value !== null && output.totals.Vo.value !== null) {
+                        const shortValue = output.options.filter((row) => row.contracts.value < 0)
+                            .reduce((total, row) => total + row.value.value, 0);
+                        near(output.totals.Vo.value, shortValue + buyer.openValue.value, 'Vo = short + long value',
+                            vector.name);
+                    }
+                    checked += 1;
+                }
+                assert.ok(checked >= 20, `${checked} vectors checked`);
+                // The long-option fee of F18 is in E and in Eb, never in Es.
+                const f18 = run(DOCUMENT.vectors.find((vector) => vector.name.startsWith('F18 fees, rebates')),
+                    { trace: false });
+                assert.deepEqual([f18.totals.E.value, f18.sellerLens.Es.value, f18.buyerOptions.Eb.value], [8.5, 4.5, 4]);
+                // A long exercise fee is the buyer's; path A and path B keep one total.
+                const pathA = run(DOCUMENT.vectors.find((vector) => vector.name.includes('path A')), { trace: false });
+                const pathB = run(DOCUMENT.vectors.find((vector) => vector.name.includes('path B')), { trace: false });
+                assert.equal(pathA.totals.economicPnl.value, pathB.totals.economicPnl.value);
+                assert.deepEqual([pathA.buyerOptions.result.value, pathB.buyerOptions.result.value], [4000, 9000]);
+            },
+        },
         {
             name: 'every hand-worked vector gives its figures, step by step',
             run() {

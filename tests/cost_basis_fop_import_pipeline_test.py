@@ -119,7 +119,7 @@ class Ledger:
     def request(self, plan_id, summary, text, *, kind='import', claim=None, batch=None, **extra):
         request = {
             'requestId': token('req'), 'bookId': self.book_id,
-            'expectedLedgerVersion': self.ledger.version(), 'bookIdentity': dict(IDENTITY),
+            'expectedLedgerVersion': self.ledger.version(), 'bookIdentity': dict(self.ledger.identity),
             'importBatchId': batch or token('batch'), 'clientTokenPrefix': token('import'),
             'fileSha256': hashlib.sha256(text.encode('utf-8')).hexdigest(), 'engineVersion': 1, **extra}
         answer = self.node.call(op='request', planId=plan_id, kind=kind, request=request,
@@ -135,7 +135,8 @@ class Ledger:
                 message['bookId'], message['fopPackage'], statement=message['statement'],
                 import_batch_id=message['importBatchId'], client_token_prefix=message['clientTokenPrefix'],
                 supersede_tws_event_ids=message['supersedeTwsEventIds'],
-                expected_ledger_version=message['expectedLedgerVersion'], book_identity=message['bookIdentity'])
+                expected_ledger_version=message['expectedLedgerVersion'], book_identity=message['bookIdentity'],
+                duplicate_decisions=message.get('duplicateDecisions') or [])
         return self.store.rebuild_fop_book(
             message['bookId'], message['fopPackage'], confirmation=message['confirmation'],
             client_token=message['clientToken'], import_batch_id=message['importBatchId'],
@@ -254,8 +255,10 @@ class FullHistoryPathTests(_PipelineCase):
         result, summary = ledger.import_text(activity_for(['2026-10', '2026-11', '2026-12', '2027-01']))
         self.assertEqual(result['inserted'], 9)
         self.assertEqual(result['duplicates'], [])
-        self.assertEqual(summary['bindings'], [{'bindingId': 'bind-fop-cl-lo-20261117-c75',
-                                                'status': 'verified_statement'}])
+        [binding] = summary['bindings']
+        self.assertEqual(binding['status'], 'verified_statement')
+        # Record ids are readable and scoped to their ledger (two accounts hold the same contract).
+        self.assertRegex(binding['bindingId'], r'^bind-fop-cl-lo-20261117-c75-[0-9a-f]{6}$')
         self.assert_96(ledger, 'one statement')
         # The same file again adds nothing (F21).
         again, _summary = ledger.import_text(activity_for(['2026-10', '2026-11', '2026-12', '2027-01']))
@@ -1205,6 +1208,22 @@ class DeliveryTests(_PipelineCase):
         self.assertIn('delivery_leg_missing', [item['code'] for item in summary['problems']])
 
 
+class SharedDatabaseTests(_PipelineCase):
+    """Two accounts' ledgers in one database hold the same real contracts (plan §4.2)."""
+
+    def test_two_accounts_import_the_same_contracts_into_one_database(self):
+        first = Ledger(self, 'shared')
+        second = Ledger(self, 'shared', account='U2222222')
+        months = ['2026-10', '2026-11', '2026-12', '2027-01']
+        self.assertEqual(first.import_text(activity_for(months))[0]['inserted'], 9)
+        self.assertEqual(second.import_text(activity_for(months, account='U2222222'))[0]['inserted'], 9)
+        self.assert_96(first, 'first account')
+        self.assert_96(second, 'second account')
+        ids = [{stored['record']['contractId'] for stored in ledger.graph()['contracts']} for ledger in (first, second)]
+        self.assertEqual(len(ids[0]), 5)
+        self.assertEqual(ids[0] & ids[1], set(), 'record ids are scoped to their ledger')
+
+
 class ReadOnlyPreviewTests(_PipelineCase):
     """Plan §9.7: a statement previewed without a ledger, or over one, writes nothing."""
 
@@ -1215,10 +1234,11 @@ class ReadOnlyPreviewTests(_PipelineCase):
                                 fileName='preview.csv', context={'book': book, 'graph': None,
                                                                  'observedAtUtc': OBSERVED})
         self.assertFalse(answer['summary']['blocking'], answer['summary']['problems'])
-        contract = next(item['future']['contractId'] for item in answer['summary']['bindingRequests'])
-        self.assertEqual(contract, 'fut-cl-202612')
+        contract = next(item['future'] for item in answer['summary']['bindingRequests'])
+        self.assertEqual(contract['localSymbol'], 'CLZ6')
+        self.assertRegex(contract['contractId'], r'^fut-cl-202612-[0-9a-f]{6}$')
         output = self.node.call(op='preview', planId=answer['planId'], graph=None, book=book,
-                                options={'marks': {'fut-cl-202703': 71.8}})['output']
+                                options={'marks': {contract['contractId'].replace('202612', '202703'): 71.8}})['output']
         for name, value in EXPECTED_96.items():
             self.assertAlmostEqual(output['totals'][name]['value'], value, places=7, msg=name)
 
@@ -1227,10 +1247,334 @@ class ReadOnlyPreviewTests(_PipelineCase):
         ledger.import_text(activity_for(['2026-10']))
         before = ledger_state(ledger)
         plan_id, _summary = ledger.plan(activity_for(['2026-11', '2026-12', '2027-01']))
+        clh7 = f'fut-cl-202703-{contract_scope(ledger.book_id)}'
         output = self.node.call(op='preview', planId=plan_id, graph=ledger.graph(), book=ledger.book(),
-                                options={'marks': {'fut-cl-202703': 71.8}})['output']
+                                options={'marks': {clh7: 71.8}})['output']
         self.assertAlmostEqual(output['totals']['economicPnl']['value'], 1670, places=7)
         self.assertEqual(ledger_state(ledger), before)
+
+
+
+def contract_scope(book_id):
+    """The ledger scope js/cost_basis_fop_import.js puts on a new contract's record id."""
+    script = ("const c = require('./tests/helpers/load-browser-scripts').loadBrowserScripts("
+              "['js/cost_basis_import_common.js']).OptionComboCostBasisImportCommon;"
+              "process.stdout.write(c.hash16('ledger|' + process.argv[1]).slice(0, 6));")
+    return subprocess.check_output(['node', '-e', script, book_id], cwd=REPO_ROOT, text=True)
+
+
+def decisions_for(summary, decision, attestation='checked against the broker\'s trade confirmations', *,
+                  event_ids=None):
+    """The decisions a person makes on every possible duplicate of a preview (plan §19 P5-C1)."""
+    return [{'namespace': review['namespace'], 'sourceRef': review['sourceRef'], 'decision': decision,
+             'eventIds': event_ids if event_ids is not None
+             else [candidate['eventId'] for candidate in review['candidates']][:1 if decision == 'same_fill' else None],
+             'attestation': attestation} for review in summary['duplicateReviews']]
+
+
+class DuplicateDecisionTests(_PipelineCase):
+    """Plan §19 P5-C1: a possible duplicate stays blocked until a person decides, and the server checks it."""
+
+    # One order of 3 CLZ6 in October, stored first from an Activity order row
+    # without an order reference; the same order's two executions arrive
+    # later in a Flex export that names no order either.
+    EXECUTIONS = [dict(fill, tradeId=str(900 + index)) for index, fill in enumerate(CrossFormatTests.GRANULAR)]
+
+    def stored_order(self, name, **options):
+        ledger = Ledger(self, token(name), **options)
+        period = {'from': '2026-10-01', 'through': '2026-10-31'}
+        ledger.import_text(statement('activity', period=period, fills=[CrossFormatTests.ORDER],
+                                     openPositions=[{'symbol': 'CLZ6', 'quantity': 3, 'costPrice': 212 / 3}]))
+        [event] = [stored['row'] for stored in ledger.graph()['events']]
+        return ledger, event['eventId']
+
+    def plan(self, ledger, text, decisions=None):
+        return ledger.plan(text, timeZone='America/New_York', duplicateDecisions=decisions or [])
+
+    def test_an_undecided_possible_duplicate_writes_nothing(self):
+        ledger, stored = self.stored_order('undecided')
+        before = ledger_state(ledger)
+        text = statement('flex', fills=self.EXECUTIONS)
+        plan_id, summary = self.plan(ledger, text)
+        self.assertTrue(summary['blocking'])
+        self.assertEqual([item['code'] for item in summary['problems']], ['possible_duplicate'] * 2)
+        self.assertEqual([(review['status'], [c['eventId'] for c in review['candidates']])
+                          for review in summary['duplicateReviews']], [('undecided', [stored])] * 2)
+        review = summary['duplicateReviews'][0]
+        self.assertEqual((review['localSymbol'], review['quantity'], review['price'], review['fees']),
+                         ('CLZ6', 1, 70, 1))
+        self.assertEqual(review['candidates'][0]['quantity'], 3)
+        with self.assertRaises(PipelineError):
+            ledger.request(plan_id, summary, text)
+        self.assertEqual(ledger_state(ledger), before)
+
+    def test_rows_named_the_same_fill_count_once_and_the_decision_is_kept(self):
+        ledger, stored = self.stored_order('same')
+        text = statement('flex', fills=self.EXECUTIONS)
+        _plan_id, first = self.plan(ledger, text)
+        plan_id, summary = self.plan(ledger, text, decisions_for(first, 'same_fill'))
+        self.assertFalse(summary['blocking'], summary['problems'])
+        self.assertEqual(summary['events'], 0)
+        self.assertEqual([review['status'] for review in summary['duplicateReviews']], ['same', 'same'])
+        self.assertEqual([row['disposition'] for row in summary['rows'] if row.get('storedEventId')],
+                         ['duplicate', 'duplicate'])
+        message = ledger.request(plan_id, summary, text)
+        self.assertEqual(message['fopPackage'], None)
+        self.assertEqual(message['statement']['confirmedDuplicates'], 2)
+        self.assertEqual([(item['decision'], item['eventIds'], item['source']['sourceRef'])
+                          for item in message['duplicateDecisions']],
+                         [('same_fill', [stored], '900'), ('same_fill', [stored], '901')])
+        result = ledger.send(message)
+        self.assertEqual(result['inserted'], 0)
+        self.assertEqual([item['sourceRef'] for item in result['duplicateDecisions']], ['900', '901'])
+        [row] = ledger.output({'CLZ6': 71})['futures']
+        self.assertEqual(row['contracts']['value'], 3)
+        # The same request again is its first answer; nothing moves.
+        before = ledger_state(ledger)
+        again = ledger.send(message)
+        self.assertTrue(again['idempotentReplay'])
+        self.assertEqual(ledger_state(ledger), before)
+        # Read back: the request log keeps the decision with its row, and the
+        # same file previewed again needs no new decision.
+        [kept] = [json.loads(item['resultJson']) for item in ledger.graph()['requests']
+                  if json.loads(item['resultJson']).get('duplicateDecisions')]
+        self.assertEqual(kept['duplicateDecisions'][0]['attestation'],
+                         "checked against the broker's trade confirmations")
+        self.assertEqual(kept['duplicateDecisions'][0]['source']['rawFields']['TradeID'], '900')
+        _plan_id, later = self.plan(ledger, text)
+        self.assertFalse(later['blocking'], later['problems'])
+        self.assertEqual(later['decisions'], [])
+        self.assertTrue(all(item['reason'].endswith('by an earlier import') for item in later['duplicates']))
+
+    def test_rows_that_do_not_add_up_to_the_fill_stay_blocked(self):
+        ledger, stored = self.stored_order('partial')
+        # Only one of the two executions: 1 of the 3 contracts.
+        text = statement('flex', fills=self.EXECUTIONS[:1])
+        _plan_id, first = self.plan(ledger, text)
+        _plan_id, summary = self.plan(ledger, text, decisions_for(first, 'same_fill'))
+        self.assertEqual([item['code'] for item in summary['problems']], ['duplicate_decision_conflict'])
+        self.assertIn('quantity (3 stored, 1 in the rows named the same fill)', summary['problems'][0]['message'])
+        # Other fees are another fill's content, never absorbed.
+        dearer = [dict(self.EXECUTIONS[0], commission=-4), self.EXECUTIONS[1]]
+        text = statement('flex', fills=dearer)
+        _plan_id, first = self.plan(ledger, text)
+        _plan_id, summary = self.plan(ledger, text, decisions_for(first, 'same_fill'))
+        self.assertEqual({item['code'] for item in summary['problems']}, {'duplicate_decision_conflict'})
+        self.assertIn('fees (3 stored, 6 in this file)', summary['problems'][0]['message'])
+        # The server adds the rows up itself: a request that leaves one out is refused.
+        full = statement('flex', fills=self.EXECUTIONS)
+        _plan_id, first = self.plan(ledger, full)
+        plan_id, summary = self.plan(ledger, full, decisions_for(first, 'same_fill'))
+        message = ledger.request(plan_id, summary, full)
+        message['duplicateDecisions'] = message['duplicateDecisions'][:1]
+        before = ledger_state(ledger)
+        with self.assertRaisesRegex(InvalidRequestError, 'add up to 1 contracts; it is 3'):
+            ledger.send(message)
+        self.assertEqual(ledger_state(ledger), before)
+
+    def test_a_row_decided_to_be_another_fill_is_written_once_with_its_check(self):
+        ledger = Ledger(self, 'distinct')
+        eleven = {'symbol': 'CLZ6', 'local': '2026-10-01T11:00:00', 'qty': 1, 'price': 70, 'codes': 'O'}
+        ledger.import_text(statement('flex', fills=[dict(eleven, tradeId='1')]), timeZone='America/New_York')
+        [stored] = [item['row']['eventId'] for item in ledger.graph()['events']]
+        text = statement('flex', fills=[dict(eleven, local='2026-10-01T10:00:00', tradeId='2')])
+        _plan_id, first = self.plan(ledger, text)
+        # A decision without its check, or one that leaves a candidate out, is not a decision.
+        _plan_id, silent = self.plan(ledger, text, decisions_for(first, 'distinct_fill', attestation='  '))
+        self.assertEqual([item['code'] for item in silent['problems']], ['duplicate_decision_incomplete'])
+        _plan_id, partial = self.plan(ledger, text, decisions_for(first, 'distinct_fill', event_ids=['evt-other']))
+        self.assertEqual([item['code'] for item in partial['problems']], ['duplicate_decision_incomplete'])
+        plan_id, summary = self.plan(ledger, text, decisions_for(first, 'distinct_fill',
+                                                                 attestation='two confirmations, 10:00 and 11:00'))
+        self.assertFalse(summary['blocking'], summary['problems'])
+        self.assertEqual(summary['events'], 1)
+        self.assertIn('two confirmations, 10:00 and 11:00', summary['notes'][0])
+        result = ledger.send(ledger.request(plan_id, summary, text))
+        self.assertEqual(result['inserted'], 1)
+        self.assertEqual(result['duplicateDecisions'][0]['eventIds'], [stored])
+        self.assertEqual(ledger.output({'CLZ6': 70})['futures'][0]['contracts']['value'], 2)
+        written = next(item['row'] for item in ledger.graph()['events'] if item['row']['eventId'] == result['eventIds'][0])
+        self.assertIn(stored, written['note'])
+        self.assertIn('two confirmations, 10:00 and 11:00', written['note'])
+        # The same file again: its row is stored now, so nothing is added twice.
+        again, summary = ledger.import_text(text, timeZone='America/New_York')
+        self.assertEqual((again['inserted'], summary['duplicateReviews']), (0, []))
+        self.assertEqual(ledger.output({'CLZ6': 70})['futures'][0]['contracts']['value'], 2)
+
+    def test_a_decision_made_before_the_ledger_moved_is_not_sent(self):
+        ledger, _stored = self.stored_order('moved')
+        text = statement('flex', fills=self.EXECUTIONS)
+        _plan_id, first = self.plan(ledger, text)
+        plan_id, summary = self.plan(ledger, text, decisions_for(first, 'same_fill'))
+        message = ledger.request(plan_id, summary, text)
+        # Something else is written before the confirmation.
+        ledger.import_text(statement('flex', fills=[{'symbol': 'CLF7', 'local': '2026-10-05T10:00:00', 'qty': 1,
+                                                    'price': 69, 'codes': 'O', 'tradeId': '950'}]),
+                           timeZone='America/New_York')
+        before = ledger_state(ledger)
+        with self.assertRaises(cost_basis_store.LedgerChangedError):
+            ledger.send(message)
+        self.assertEqual(ledger_state(ledger), before)
+
+    def test_the_server_reads_a_same_fill_row_itself(self):
+        ledger, stored = self.stored_order('server')
+        text = statement('flex', fills=self.EXECUTIONS)
+        _plan_id, first = self.plan(ledger, text)
+        plan_id, summary = self.plan(ledger, text, decisions_for(first, 'same_fill'))
+        good = ledger.request(plan_id, summary, text)
+        before = ledger_state(ledger)
+
+        def refused(change, error, pattern):
+            message = copy.deepcopy(good)
+            change(message['duplicateDecisions'])
+            with self.assertRaisesRegex(error, pattern):
+                ledger.send(message)
+            self.assertEqual(ledger_state(ledger), before)
+
+        def other_contract(decisions):
+            for decision in decisions:
+                decision['source']['rawFields']['Symbol'] = 'CLF7'
+                decision['source']['rawFields']['Conid'] = '556'
+        refused(other_contract, InvalidRequestError, 'differ in contract')
+
+        def other_day(decisions):
+            for decision in decisions:
+                decision['source']['rawFields']['DateTime'] = '20261020;100000'
+                decision['source']['rawFields']['TradeDate'] = '20261020'
+        refused(other_day, InvalidRequestError, r'differ in day \(2026-10-20')
+
+        def missing_fill(decisions):
+            for decision in decisions:
+                decision['eventIds'] = ['evt-nosuchfill']
+        refused(missing_fill, InvalidRequestError, 'not a live trade of this ledger')
+
+        def other_account(decisions):
+            decisions[0]['source']['account'] = 'U2222222'
+        refused(other_account, InvalidRequestError, 'belongs to account U2222222')
+
+        def as_cash_settled(decisions):
+            for decision in decisions:
+                decision['source']['rawFields']['AssetClass'] = 'FOP'
+                decision['source']['rawFields']['SettlementType'] = 'Cash'
+                decision['source']['capabilityKey'] = 'flex/trades/FOP.cash_settled/any'
+        refused(as_cash_settled, cost_basis_store.FopUnsupportedRowError, 'does not support')
+
+        def twice(decisions):
+            decisions.append(copy.deepcopy(decisions[0]))
+        refused(twice, InvalidRequestError, 'decided twice')
+        # Unchanged, it goes through.
+        self.assertEqual(ledger.send(good)['inserted'], 0)
+        self.assertEqual(stored, good['duplicateDecisions'][0]['eventIds'][0])
+
+    def decided(self, ledger, text):
+        """The request that sends every possible duplicate of text as the same fill."""
+        _plan_id, first = self.plan(ledger, text)
+        plan_id, summary = self.plan(ledger, text, decisions_for(first, 'same_fill'))
+        self.assertFalse(summary['blocking'], summary['problems'])
+        return ledger.request(plan_id, summary, text)
+
+    def refuses_each(self, ledger, good, changes):
+        """Each change to the rows a request names the same fill is refused, and nothing moves."""
+        before = ledger_state(ledger)
+        for name, (change, pattern) in changes.items():
+            with self.subTest(change=name):
+                message = copy.deepcopy(good)
+                change([decision['source']['rawFields'] for decision in message['duplicateDecisions']])
+                with self.assertRaisesRegex(InvalidRequestError, pattern):
+                    ledger.send(message)
+                self.assertEqual(ledger_state(ledger), before)
+
+    def test_the_server_checks_what_a_same_fill_row_is_worth(self):
+        # Review P5-C1: the rows named the same fill carry its price, fees and intent, not only its size.
+        ledger, stored = self.stored_order('worth')
+        good = self.decided(ledger, statement('flex', fills=self.EXECUTIONS))
+
+        def edit(field, value, rows=(0,)):
+            def change(raws):
+                for index in rows:
+                    raws[index][field] = value
+            return change
+
+        self.refuses_each(ledger, good, {
+            'commission': (edit('IBCommission', '-400'), r'differ in fees \(3 stored, 402 in the rows'),
+            'price': (edit('TradePrice', '75'), r'differ in average price \(70\.666667 stored, 72\.333333 in'),
+            'intent': (edit('Notes/Codes', 'C', rows=(0, 1)), r'differ in open/close \(O stored, C in the rows'),
+            'part closes': (edit('Notes/Codes', 'C'), r'differ in open/close \(O stored, CO in the rows'),
+        })
+        self.assertEqual(ledger.send(good)['inserted'], 0)
+        self.assertEqual(good['duplicateDecisions'][0]['eventIds'], [stored])
+
+    def test_the_preview_adds_up_intents_and_dates_as_the_server_does(self):
+        # One execution closes: together the rows open and close, which the stored opening fill does not.
+        ledger, _stored = self.stored_order('intents')
+        mixed = [self.EXECUTIONS[0], dict(self.EXECUTIONS[1], codes='C')]
+        text = statement('flex', fills=mixed)
+        _plan_id, first = self.plan(ledger, text)
+        _plan_id, summary = self.plan(ledger, text, decisions_for(first, 'same_fill'))
+        self.assertEqual({item['code'] for item in summary['problems']}, {'duplicate_decision_conflict'})
+        self.assertIn('open/close (O stored, CO in this file)', summary['problems'][0]['message'])
+        # A Flex fill of 2026-10-01: rows stating another exchange trade date are another fill's.
+        option = Ledger(self, token('dates'))
+        short = {'symbol': 'LOZ6 C7500', 'local': '2026-10-01T11:00:00', 'qty': -2, 'price': 1.2, 'codes': 'O'}
+        option.import_text(statement('flex', fills=[dict(short, tradeId='1')]), timeZone='America/New_York')
+        halves = [dict(short, qty=-1, tradeId='2'),
+                  dict(short, local='2026-10-01T11:00:05', qty=-1, tradeId='3', tradeDate='2026-10-02')]
+        text = statement('flex', fills=halves)
+        _plan_id, first = self.plan(option, text)
+        _plan_id, summary = self.plan(option, text, decisions_for(first, 'same_fill'))
+        self.assertEqual({item['code'] for item in summary['problems']}, {'duplicate_decision_conflict'})
+        self.assertIn('exchange trade date (2026-10-01 stored, 2026-10-02 in this file)',
+                      summary['problems'][0]['message'])
+
+    def test_the_server_checks_a_same_fill_option_row_for_cash_date_and_future(self):
+        ledger = Ledger(self, token('option'))
+        short = {'symbol': 'LOZ6 C7500', 'local': '2026-10-01T11:00:00', 'qty': -2, 'price': 1.2,
+                 'commission': -5, 'codes': 'O'}
+        # With its future in the same file, the statement binds the option to CLZ6 (conId 555).
+        future = {'symbol': 'CLZ6', 'local': '2026-10-01T10:00:00', 'qty': 1, 'price': 70, 'codes': 'O'}
+        ledger.import_text(statement('flex', fills=[dict(future, tradeId='0'), dict(short, tradeId='1')]),
+                           timeZone='America/New_York')
+        self.assertEqual([item['status'] for item in ledger.graph()['bindings']], ['verified_statement'])
+        [stored] = [item['row']['eventId'] for item in ledger.graph()['events'] if item['row']['kind'] == 'option_trade']
+        halves = [dict(short, qty=-1, commission=-2.5, tradeId='2'),
+                  dict(short, local='2026-10-01T11:00:05', qty=-1, commission=-2.5, tradeId='3')]
+        good = self.decided(ledger, statement('flex', fills=halves))
+        self.refuses_each(ledger, good, {
+            'cash': (lambda raws: raws[0].update(Proceeds='1300'), r'differ in cash \(2395 stored, 2495 in the rows'),
+            'trade date': (lambda raws: raws[0].update(TradeDate='20261002'),
+                           r'differ in exchange trade date \(2026-10-01 stored, 2026-10-02 in the rows'),
+            'future': (lambda raws: raws[1].update(UnderlyingConid='556'),
+                       r'differ in underlying future \(LOZ6 C7500 is bound to conId 555, the row names 556'),
+            'future symbol': (lambda raws: raws[1].update(UnderlyingSymbol='CLF7'),
+                              r'differ in underlying future \(LOZ6 C7500 is bound to CLZ6, the row names CLF7'),
+            'no price': (lambda raws: raws[0].update(TradePrice=''), r"differ in price \(the row states ''\)"),
+            'unreadable fees': (lambda raws: raws[0].update(IBCommission='n/a'),
+                                r"differ in fees \(the row states 'n/a'\)"),
+        })
+        self.assertEqual(ledger.send(good)['inserted'], 0)
+        self.assertEqual(good['duplicateDecisions'][0]['eventIds'], [stored])
+
+    def test_a_decision_does_not_verify_a_row_type(self):
+        # With the shipped row-type list every economic row is synthetic_only:
+        # a row decided to be another fill still needs a claim (plan §9.7).
+        ledger = Ledger(self, 'unverified', capabilities=None)
+        eleven = {'symbol': 'CLZ6', 'local': '2026-10-01T11:00:00', 'qty': 1, 'price': 70, 'codes': 'O'}
+        first_text = statement('flex', fills=[dict(eleven, tradeId='1')])
+        plan_id, summary = ledger.plan(first_text, timeZone='America/New_York')
+        ledger.send(ledger.request(plan_id, summary, first_text, claim={'lines': event_lines(summary),
+                                                                        'attestation': 'checked by hand'}))
+        text = statement('flex', fills=[dict(eleven, local='2026-10-01T10:00:00', tradeId='2')])
+        _plan_id, first = self.plan(ledger, text)
+        plan_id, summary = self.plan(ledger, text, decisions_for(first, 'distinct_fill'))
+        self.assertFalse(summary['blocking'], summary['problems'])
+        with self.assertRaises(FopCapabilityNotVerifiedError):
+            ledger.send(ledger.request(plan_id, summary, text))
+        result = ledger.send(ledger.request(plan_id, summary, text, claim={
+            'lines': event_lines(summary), 'attestation': 'the 10:00 confirmation'}))
+        written = next(item['row'] for item in ledger.graph()['events'] if item['row']['eventId'] == result['eventIds'][0])
+        self.assertEqual(written['source'], 'manual')
+        self.assertIn("checked against the broker's trade confirmations", written['note'])
+        self.assertIn('the 10:00 confirmation', written['note'])
 
 
 if __name__ == '__main__':

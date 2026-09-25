@@ -61,12 +61,12 @@
       "name": "cost_basis_fop_identity",
       "cases": [
         { "name": "the common catalogue keeps the stock page action list exactly", "requirements": ["F28 (stock page actions unchanged)", "F27 (P1 part)"] },
-        { "name": "the FOP page may only read the status and the ledger list", "requirements": ["F27 (P1 part)", "F38 (P1 part: no FOP writes)"] },
-        { "name": "write flags agree with the P0 freeze and with the server coverage file", "requirements": ["F38 (P1 part)"] },
+        { "name": "the FOP page sends ledger reads, one-shot quotes and FOP ledger writes, nothing else", "requirements": ["F27 (P5 part: no order, exercise or subscription action)", "F38 (P5 part: FOP writes only as packages)"] },
+        { "name": "write flags agree with the P0 freeze and with the server coverage file", "requirements": ["F27 (P5 part)", "F38 (P1 part)"] },
         { "name": "a ledger routes by the type the backend reports, never by the URL", "requirements": ["F01 (routing)", "F02 (P1 part: same root, separate pages)"] },
         { "name": "a bookId is read from the URL only when it is a well-formed token", "requirements": ["F01 (bookmarks)"] },
         { "name": "the request client enforces its allowlist and settles every request once", "requirements": ["F27 (P1 part)", "F23 (P1 part: one settlement per request)"] },
-        { "name": "the FOP page loads the common layer, the FOP importer and core, and its own controller", "requirements": ["F27 (P1 part)", "P4 step 6 (the read-only preview loads the importer and core)"] },
+        { "name": "the FOP page loads the common layer, the FOP importer, core, quotes, messages, views, forms and reconciliation, and its controller", "requirements": ["F27 (P1 part)", "P4 step 6 (the read-only preview loads the importer and core)", "P5 step 1"] },
         { "name": "a stock ledger opened on the FOP page is sent back before anything renders", "requirements": ["F01 (wrong page)", "F02 (P1 part)"] },
         { "name": "a FUT ledger shows only its identity and the way to the legacy view", "requirements": ["F01 (P1 part)", "F38 (P1 part)"] },
         { "name": "a FOP ledger is not described as a legacy ledger", "requirements": ["F01 (P2 part)"] },
@@ -160,7 +160,10 @@
         { "name": "GraphTests.test_a_round_trip_keeps_each_events_primary_source", "requirements": ["F25 (P2 part: evidence identity survives a round trip)", "F24 (P2 part: one source, several events)"] },
         { "name": "GraphTests.test_a_restored_ledger_answers_retried_requests", "requirements": ["F24 (P2 part: a retry writes once after a restore into a new database)", "F40 (P2 part: same token, other content refused)"] },
         { "name": "MigrationTests.test_a_v11_ledger_rebuilds_only_its_request_log", "requirements": ["P4: schema v12", "F45 (P4 part)"] },
-        { "name": "MigrationTests.test_a_failed_v12_step_leaves_the_v11_file", "requirements": ["P4: schema v12", "F45 (P4 part)"] }
+        { "name": "MigrationTests.test_a_failed_v12_step_leaves_the_v11_file", "requirements": ["P4: schema v12", "F45 (P4 part)"] },
+        { "name": "GraphTests.test_a_backup_a_browser_parsed_and_wrote_again_still_restores", "requirements": ["F25 (P5 part: a downloaded backup restores)", "P5 step 4 (backup and restore)"] },
+        { "name": "MetadataTests.test_an_adoption_brings_the_future_the_broker_proved", "requirements": ["P5-C2 (adoption adds the proved future; refusals write nothing; retry idempotent)"] },
+        { "name": "MetadataTests.test_an_adoption_fills_in_the_option_terms_the_broker_proved", "requirements": ["P5-C2 (supplement proved terms; affected references exact)"] }
       ]
     },
     {
@@ -192,7 +195,11 @@
         { "name": "FopProtocolTests.test_contract_details_are_served_only_where_a_resolver_exists", "requirements": ["F26 (P2 part: historical backend)", "F05 (P2 part)"] },
         { "name": "FopProtocolTests.test_one_failing_request_answers_its_own_request_id", "requirements": ["F26 (P2 part)"] },
         { "name": "FopProtocolTests.test_every_fop_write_names_the_engine_it_was_prepared_for", "requirements": ["F38 (P2 part: every write names its engine)", "F26 (P2 part)"] },
-        { "name": "FopProtocolTests.test_a_statement_import_and_its_bindings_go_through_the_protocol", "requirements": ["F26 (P4 part)", "F44", "P4 step 2"] }
+        { "name": "FopProtocolTests.test_a_statement_import_and_its_bindings_go_through_the_protocol", "requirements": ["F26 (P4 part)", "F44", "P4 step 2"] },
+        { "name": "FopProtocolTests.test_one_quote_batch_for_the_ledgers_own_contracts", "requirements": ["F26 (P5 part: live and historical shapes)", "plan §10.2", "P5 step 2"] },
+        { "name": "FopProtocolTests.test_positions_are_only_the_ledger_account_and_root", "requirements": ["P5-C3 (account and root isolation; offline and unread positions; historical backend unavailable)"] },
+        { "name": "FopProtocolTests.test_a_reconciliation_snapshot_is_held_to_its_evidence", "requirements": ["P5-C3 (snapshot bound to its version and evidence; reconciled only on matching quantities; idempotent; writes closed)"] },
+        { "name": "FopProtocolTests.test_a_conid_conflict_or_a_partial_avg_cost_is_never_saved_as_agreeing", "requirements": ["P5-C3 (review: a conId conflict is never reconciled by the local symbol; summaries follow their rows, partial AvgCost)"] }
       ]
     },
     {
@@ -204,7 +211,11 @@
         { "name": "BrokerResolutionTests.test_a_weekly_option_follows_its_underconid_not_its_expiry_month", "requirements": ["F04 (P2 part)"] },
         { "name": "BrokerResolutionTests.test_without_a_contract_month_the_pair_stays_unresolved", "requirements": ["F03 (P2 part)", "F05 (P2 part)"] },
         { "name": "BrokerResolutionTests.test_conflicts_and_ambiguity_are_reported_not_guessed", "requirements": ["F05 (P2 part)"] },
-        { "name": "BrokerResolutionTests.test_resolution_is_bounded_and_writes_nothing", "requirements": ["P2 item 3 (bounded read-only resolution)", "F26 (P2 part)"] }
+        { "name": "BrokerResolutionTests.test_resolution_is_bounded_and_writes_nothing", "requirements": ["P2 item 3 (bounded read-only resolution)", "F26 (P2 part)"] },
+        { "name": "QuoteSnapshotTests.test_the_queries_come_from_the_stored_records_and_the_answer_is_evidence_only", "requirements": ["plan §10.2 (quotes by bookId)", "F16 (P5 part: negative FUT, sentinels)", "P5 step 2"] },
+        { "name": "QuoteSnapshotTests.test_prices_the_broker_did_not_give_are_not_invented", "requirements": ["F16 (P5 part)", "F43 (P5 part: valid zero bid)", "plan §10.3"] },
+        { "name": "QuoteSnapshotTests.test_a_batch_is_bounded_to_the_ledgers_contracts_and_failures_are_per_contract", "requirements": ["plan §10.2 (bounded)", "plan §10.3 (failures per contract)", "P5 step 2"] },
+        { "name": "QuoteSnapshotTests.test_an_ib_ticker_is_read_without_rounding_or_re_dating", "requirements": ["plan §10.3 (sampling time, no re-dating)", "F16 (P5 part)"] }
       ]
     },
     {
@@ -220,7 +231,8 @@
         { "name": "ROLL groups and their query range never change a figure", "requirements": ["F09", "F30"] },
         { "name": "the same history under other ids and entry order gives the same results", "requirements": ["F41 (P3 part)", "P3 step 5"] },
         { "name": "no step is rounded: a repeating average stays exact to 1e-9", "requirements": ["F47"] },
-        { "name": "the core is pure: no clock, DOM, network or randomness", "requirements": ["plan §3 invariant 8"] }
+        { "name": "the core is pure: no clock, DOM, network or randomness", "requirements": ["plan §3 invariant 8"] },
+        { "name": "the buyer's options are a part of the totals, never added again, and their fees stay out of the seller lens (P5-C4)", "requirements": ["P5-C4 (buyer split: no double counting; Eb never in Es)", "F18 (P5 part)"] }
       ]
     },
     {
@@ -293,6 +305,48 @@
       ]
     },
     {
+      "stage": "P5",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_quotes.test.js",
+      "name": "cost_basis_fop_quotes",
+      "cases": [
+        { "name": "a two-sided, current and synchronised book is valued at its mid", "requirements": ["F16", "plan §10.3"] },
+        { "name": "a single side is used only for the direction that would close against it (F43)", "requirements": ["F43", "plan §10.3"] },
+        { "name": "a zero bid counts only with a size, and a negative FUT price is a price (F16)", "requirements": ["F16", "F43", "plan §6.4"] },
+        { "name": "a crossed book or a stale, delayed or unsynchronised quote falls to a dated reference", "requirements": ["F16", "F23 (P5 part: stale quotes)", "plan §10.3 (60 s sync, 120 s freshness)"] },
+        { "name": "the lowest level governs the batch and failed contracts are unavailable", "requirements": ["F16", "F43 (closed contracts need no price)"] },
+        { "name": "a batch is shown only for the ledger, version and request it answers (F23)", "requirements": ["F23"] }
+      ]
+    },
+    {
+      "stage": "P5",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_page.test.js",
+      "name": "cost_basis_fop_page",
+      "cases": [
+        { "name": "the ledger view traces every figure to the core and names the contracts", "requirements": ["P5 step 1 (traceable figures)", "F09 (P5 part: derived ROLL shown)", "F12 (P5 part)"] },
+        { "name": "an old-month option beside a new-month FUT is flagged and never covered by it (F08)", "requirements": ["F08"] },
+        { "name": "no single break-even where the plan forbids one, and no division by zero (F13)", "requirements": ["F13", "F33 (P5 part: break-even card)"] },
+        { "name": "a late fee stays in its trade's closed cycle and the book total counts it once (F36)", "requirements": ["F36", "plan §13.2"] },
+        { "name": "manual entries build requests the frozen contract accepts, and refuse what it cannot", "requirements": ["plan §1.4 (manual as the exception)", "F15 (P5 part: form keeps negative FUT prices)", "F03 (P5 part: delivery month, never a date)"] },
+        { "name": "the delivery preview replays a copy in memory and stops where the plan stops it", "requirements": ["P5 step 3", "plan §12.1", "F06 (P5 part: delivery preview)"] },
+        { "name": "a late answer for an older reload, or a quote batch for an older version, is dropped (F23)", "requirements": ["F23"] },
+        { "name": "an import previewed against an older version is not sent, and closed writes send nothing", "requirements": ["F23", "F38 (P5 part: writes closed)", "F44 (P5 part: import from the page)"] },
+        { "name": "an import is sent against the version it was previewed on, even if the page reloads meanwhile (F23)", "requirements": ["F23"] },
+        { "name": "a lost connection retires the quotes at once, and a quote stops being current at 120 s", "requirements": ["plan §10.3 (disconnect and freshness)", "P5 step 2"] },
+        { "name": "the quote re-check leaves the delivery inputs alone, and a reload keeps what was typed", "requirements": ["P5 step 3", "plan §12.1"] },
+        { "name": "a delivery preview takes a quantity per option, within what is open (plan §12.1)", "requirements": ["P5 step 3", "plan §12.1 (quantity per option)"] },
+        { "name": "a delivery path stops at the last trade date of every FUT it holds, and at an option left open past expiry", "requirements": ["P5 step 3", "plan §12.1 (last trade date)"] },
+        { "name": "the summary carries the lowest quote level: a one-sided value is never a plain real-time one (§10.3)", "requirements": ["plan §10.3 (lowest level in the summary)", "F43"] },
+        { "name": "a possible duplicate is decided row by row with its check, and the decision travels (P5-C1)", "requirements": ["P5-C1 (page: review, decide, re-preview, send)"] },
+        { "name": "a binding is adopted only from broker evidence, previewed first and sent once (P5-C2)", "requirements": ["P5-C2 (query writes nothing; no guessing; preview; one confirmation; unavailable backend; stale evidence)"] },
+        { "name": "a manual entry is previewed in memory, and only the previewed request is confirmed (P5-C5)", "requirements": ["P5-C5 (preview/cancel write nothing; confirm sends the previewed request once; inputs, zone, version and reconnection retire it)", "F15 (P5 part: negative FUT price previewed)"] },
+        { "name": "positions are read, reconciled and kept in a snapshot of their version (P5-C3)", "requirements": ["P5-C3 (page: read, compare, save once, list, view; stale and offline evidence; unavailable backend)"] },
+        { "name": "the buyer's options stand apart, and a statement's realized P&L is compared, never written (P5-C4)", "requirements": ["P5-C4 (page: buyer rows; realized comparison in the import preview)"] },
+        { "name": "a blocked import says why and what to do in Chinese, and following it clears the block (P5-C6)", "requirements": ["P5-C6 (page: blocked, follow the next step, preview again; server refusal in words)"] }
+      ]
+    },
+    {
       "stage": "P4",
       "runtime": "python",
       "file": "tests/cost_basis_fop_import_pipeline_test.py",
@@ -345,7 +399,18 @@
         { "name": "DeliveryTests.test_an_assignment_and_an_exercise_arrive_as_one_event_each", "requirements": ["F06 (P4 part)", "F07 (P4 part)"] },
         { "name": "DeliveryTests.test_a_delivery_without_its_other_row_blocks", "requirements": ["F06 (P4 part)", "F07 (P4 part)"] },
         { "name": "ReadOnlyPreviewTests.test_a_statement_previews_without_a_ledger", "requirements": ["P4 step 6"] },
-        { "name": "ReadOnlyPreviewTests.test_a_preview_over_a_ledger_writes_nothing", "requirements": ["P4 step 6"] }
+        { "name": "ReadOnlyPreviewTests.test_a_preview_over_a_ledger_writes_nothing", "requirements": ["P4 step 6"] },
+        { "name": "DuplicateDecisionTests.test_an_undecided_possible_duplicate_writes_nothing", "requirements": ["P5-C1 (undecided: no economic write)", "F44"] },
+        { "name": "DuplicateDecisionTests.test_rows_named_the_same_fill_count_once_and_the_decision_is_kept", "requirements": ["P5-C1 (same fill: counted once, decision kept, retry idempotent)"] },
+        { "name": "DuplicateDecisionTests.test_rows_that_do_not_add_up_to_the_fill_stay_blocked", "requirements": ["P5-C1 (same fill must add up; server adds up itself)"] },
+        { "name": "DuplicateDecisionTests.test_a_row_decided_to_be_another_fill_is_written_once_with_its_check", "requirements": ["P5-C1 (another fill: written once with its check)"] },
+        { "name": "DuplicateDecisionTests.test_a_decision_made_before_the_ledger_moved_is_not_sent", "requirements": ["P5-C1 (version change refuses an older preview)", "F23"] },
+        { "name": "DuplicateDecisionTests.test_the_server_reads_a_same_fill_row_itself", "requirements": ["P5-C1 (server reads the row: contract, day, account, row type)"] },
+        { "name": "DuplicateDecisionTests.test_a_decision_does_not_verify_a_row_type", "requirements": ["P5-C1 (no real_verified upgrade)", "F44"] },
+        { "name": "SharedDatabaseTests.test_two_accounts_import_the_same_contracts_into_one_database", "requirements": ["plan §4.2 (record ids scoped to their ledger; found in the P5 closeout)"] },
+        { "name": "DuplicateDecisionTests.test_the_server_checks_what_a_same_fill_row_is_worth", "requirements": ["P5-C1 (review: the server adds up price, fees and intent; refused requests write nothing)"] },
+        { "name": "DuplicateDecisionTests.test_the_preview_adds_up_intents_and_dates_as_the_server_does", "requirements": ["P5-C1 (review: the preview holds mixed intents and dates as the server does)"] },
+        { "name": "DuplicateDecisionTests.test_the_server_checks_a_same_fill_option_row_for_cash_date_and_future", "requirements": ["P5-C1 (review: option cash, exchange trade date and the bound future; refused requests write nothing)"] }
       ]
     },
     {
@@ -366,6 +431,32 @@
         { "name": "DatedClaimTests.test_the_range_of_an_exchange_trade_date_is_the_servers_own", "requirements": ["F44", "plan §9.2", "P4 review 5"] },
         { "name": "DatedClaimTests.test_an_activity_date_covers_its_own_day_in_the_stated_zone", "requirements": ["F44", "plan §9.2", "P4 review 5"] },
         { "name": "DatedClaimTests.test_day_ranges_match_the_browser", "requirements": ["plan §9.2", "P4 review 5"] }
+      ]
+    },
+    {
+      "stage": "P5",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_reconcile.test.js",
+      "name": "cost_basis_fop_reconcile",
+      "cases": [
+        { "name": "matching positions reconcile contract by contract, AvgCost as corroboration only (P5-C3)", "requirements": ["P5-C3 (Qty/AvgCost/binding/cash apart)"] },
+        { "name": "no month is guessed: an old-month option and a new-month future stay two contracts (P5-C3)", "requirements": ["P5-C3 (no cross-month, no cross-account)", "F08 (P5 part: reconciliation)"] },
+        { "name": "an unknown ledger quantity is never matched, and AvgCost needs its unit, one lot price and a cost", "requirements": ["P5-C3 (unknown is not matched; AvgCost unit, lots and baseline)"] },
+        { "name": "positions of an unmanaged account, unread or read for another version reconcile nothing", "requirements": ["P5-C3 (offline, not ready, stale evidence)"] },
+        { "name": "a snapshot keeps the version, quotes, completeness and every comparison in the frozen shape", "requirements": ["P5-C3 (snapshot parts pass the contract; stale evidence dropped)"] },
+        { "name": "a statement's realized P&L is compared on its own basis, and only where that basis is certain (P5-C4)", "requirements": ["P5-C4 (matched, different, missing, method differs; option commissions)"] },
+        { "name": "a conId that disagrees is an identity conflict, never matched by the local symbol (review P5-C3)", "requirements": ["P5-C3 (review: conId conflict shown, never matched; no conId falls back to the symbol)"] },
+        { "name": "AvgCost that is only partly comparable is never summed up as agreeing (review P5-C3)", "requirements": ["P5-C3 (review: partial AvgCost summary; quantity stays independent)"] }
+      ]
+    },
+    {
+      "stage": "P5",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_messages.test.js",
+      "name": "cost_basis_fop_messages",
+      "cases": [
+        { "name": "every code the importer or the store reports has a Chinese reason and a next step (P5-C6)", "requirements": ["P5-C6 (every stable code, from the source)"] },
+        { "name": "a problem names its row, contract, next step and code, and keeps the original (P5-C6)", "requirements": ["P5-C6 (row, contract, next step, code, original; unknown code fallback)"] }
       ]
     }
   ],

@@ -21,23 +21,24 @@
     const PROTOCOL_ACTIONS = Object.freeze([
         { action: 'request_cost_basis_status', writes: false, pages: ['equity', 'fop'] },
         { action: 'list_cost_basis_books', writes: false, pages: ['equity', 'fop'] },
-        { action: 'create_cost_basis_book', writes: true, pages: ['equity'] },
-        { action: 'request_cost_basis_delete_plan', writes: false, pages: ['equity'] },
-        { action: 'delete_cost_basis_book', writes: true, pages: ['equity'] },
-        { action: 'list_cost_basis_events', writes: false, pages: ['equity'] },
-        { action: 'append_cost_basis_event', writes: true, pages: ['equity'] },
-        { action: 'void_cost_basis_event', writes: true, pages: ['equity'] },
+        { action: 'create_cost_basis_book', writes: true, pages: ['equity', 'fop'] },
+        { action: 'request_cost_basis_delete_plan', writes: false, pages: ['equity', 'fop'] },
+        { action: 'delete_cost_basis_book', writes: true, pages: ['equity', 'fop'] },
+        { action: 'list_cost_basis_events', writes: false, pages: ['equity', 'fop'] },
+        { action: 'append_cost_basis_event', writes: true, pages: ['equity', 'fop'] },
+        { action: 'void_cost_basis_event', writes: true, pages: ['equity', 'fop'] },
         { action: 'append_cost_basis_split_group', writes: true, pages: ['equity'] },
         { action: 'void_cost_basis_split_group', writes: true, pages: ['equity'] },
-        { action: 'import_cost_basis_events', writes: true, pages: ['equity'] },
-        { action: 'save_cost_basis_snapshot', writes: true, pages: ['equity'] },
-        { action: 'request_cost_basis_reset_plan', writes: false, pages: ['equity'] },
-        { action: 'rebuild_cost_basis_book', writes: true, pages: ['equity'] },
+        { action: 'import_cost_basis_events', writes: true, pages: ['equity', 'fop'] },
+        { action: 'save_cost_basis_snapshot', writes: true, pages: ['equity', 'fop'] },
+        { action: 'list_cost_basis_snapshots', writes: false, pages: ['fop'] },
+        { action: 'request_cost_basis_reset_plan', writes: false, pages: ['equity', 'fop'] },
+        { action: 'rebuild_cost_basis_book', writes: true, pages: ['equity', 'fop'] },
         { action: 'list_cost_basis_resets', writes: false, pages: ['equity'] },
         { action: 'restore_cost_basis_reset', writes: true, pages: ['equity'] },
-        { action: 'export_cost_basis_backup', writes: false, pages: ['equity'] },
-        { action: 'restore_cost_basis_backup', writes: true, pages: ['equity'] },
-        { action: 'list_cost_basis_import_batches', writes: false, pages: ['equity'] },
+        { action: 'export_cost_basis_backup', writes: false, pages: ['equity', 'fop'] },
+        { action: 'restore_cost_basis_backup', writes: true, pages: ['equity', 'fop'] },
+        { action: 'list_cost_basis_import_batches', writes: false, pages: ['equity', 'fop'] },
         // Read-only corroboration from the live backend. The market-price
         // action is a one-shot TWS snapshot and leaves no live subscription.
         { action: 'request_portfolio_positions_snapshot', writes: false, pages: ['equity'] },
@@ -46,12 +47,16 @@
         { action: 'request_cost_basis_executions', writes: false, pages: ['equity'] },
         { action: 'request_cost_basis_market_price', writes: false, pages: ['equity'] },
         { action: 'request_cost_basis_option_scenario_inputs', writes: false, pages: ['equity'] },
-        // Standalone FOP ledger actions the backend serves since P2. No page
-        // may send them until the FOP page's writes are released (plan §13.3
-        // P5/P6); the FOP page reaches them through FOP packages only.
-        { action: 'commit_cost_basis_fop_metadata', writes: true, pages: [] },
-        { action: 'request_cost_basis_fop_contract_details', writes: false, pages: [] },
-        { action: 'request_cost_basis_fop_statement_bindings', writes: false, pages: [] },
+        // Standalone FOP ledger actions (plan §10.2). The FOP page sends its
+        // writes only as FOP packages; the backend's fop_writes_enabled gate
+        // still refuses every FOP write until the release stage (P6).
+        { action: 'commit_cost_basis_fop_metadata', writes: true, pages: ['fop'] },
+        { action: 'request_cost_basis_fop_contract_details', writes: false, pages: ['fop'] },
+        { action: 'request_cost_basis_fop_statement_bindings', writes: false, pages: ['fop'] },
+        // One quote batch for a ledger's own contracts; no subscription.
+        { action: 'request_cost_basis_fop_market_snapshot', writes: false, pages: ['fop'] },
+        // The TWS positions of the ledger's own account and root (plan §19 P5-C3).
+        { action: 'request_cost_basis_fop_positions', writes: false, pages: ['fop'] },
     ].map((entry) => Object.freeze(Object.assign({}, entry, {
         pages: Object.freeze(entry.pages.slice()),
     }))));

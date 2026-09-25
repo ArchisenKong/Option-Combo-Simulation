@@ -520,6 +520,9 @@
           "items": {
             "ref": "Gap"
           }
+        },
+        "buyerOptions": {
+          "ref": "BuyerOptions"
         }
       },
       "required": [
@@ -533,9 +536,37 @@
         "realizedByContract",
         "totals",
         "sellerLens",
+        "buyerOptions",
         "unattributed",
         "roll",
         "gaps"
+      ]
+    },
+    "BuyerOptions": {
+      "type": "object",
+      "fields": {
+        "Rb": {
+          "ref": "Metric"
+        },
+        "Eb": {
+          "ref": "Metric"
+        },
+        "openPremium": {
+          "ref": "Metric"
+        },
+        "openValue": {
+          "ref": "Metric"
+        },
+        "result": {
+          "ref": "Metric"
+        }
+      },
+      "required": [
+        "Rb",
+        "Eb",
+        "openPremium",
+        "openValue",
+        "result"
       ]
     }
   },
@@ -703,6 +734,28 @@
               "reason": null
             },
             "longExerciseAffectsBreakEven": false
+          },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
           },
           "unattributed": {
             "E": {
@@ -944,6 +997,28 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "unattributed": {
             "E": {
               "value": 0,
@@ -1167,6 +1242,28 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "unattributed": {
             "E": {
               "value": 0,
@@ -1367,6 +1464,28 @@
               "reason": "delivery_time_unresolved:evt-assign-00001"
             },
             "longExerciseAffectsBreakEven": false
+          },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
           },
           "unattributed": {
             "E": {
@@ -1593,6 +1712,28 @@
               "reason": null
             },
             "longExerciseAffectsBreakEven": false
+          },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
           },
           "unattributed": {
             "E": {
@@ -1838,6 +1979,28 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "unattributed": {
             "E": {
               "value": 0,
@@ -2082,6 +2245,28 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "unattributed": {
             "E": {
               "value": 0,
@@ -2300,6 +2485,28 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "unattributed": {
             "E": {
               "value": 0,
@@ -2503,6 +2710,28 @@
               "reason": null
             },
             "longExerciseAffectsBreakEven": false
+          },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
           },
           "unattributed": {
             "E": {
@@ -2746,6 +2975,28 @@
             },
             "longExerciseAffectsBreakEven": false
           },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
+          },
           "unattributed": {
             "E": {
               "value": 0,
@@ -2945,6 +3196,28 @@
               "reason": null
             },
             "longExerciseAffectsBreakEven": false
+          },
+          "buyerOptions": {
+            "Rb": {
+              "value": 0,
+              "reason": null
+            },
+            "Eb": {
+              "value": 0,
+              "reason": null
+            },
+            "openPremium": {
+              "value": 0,
+              "reason": null
+            },
+            "openValue": {
+              "value": 0,
+              "reason": null
+            },
+            "result": {
+              "value": 0,
+              "reason": null
+            }
           },
           "unattributed": {
             "E": {

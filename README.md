@@ -10,7 +10,7 @@ The repo currently has five frontend surfaces:
 2. `chart_lab.html` - shared workspace plus experimental daily-bar projection
 3. `iv_term_structure.html` - standalone live ETF / futures-option IV term-structure monitor
 4. `cost_basis.html` - standalone per-account, per-underlying blended-cost ledger
-   - `cost_basis_fop.html` - the standalone FOP ledger, under construction (routing only for now)
+   - `cost_basis_fop.html` - the standalone FOP ledger (CL futures and options on futures); its writes open at the release stage
 5. `workspace_db_admin.html` - standalone workspace-database and archive admin page
 
 It also has two optional Python WebSocket backends:
@@ -181,13 +181,36 @@ an order or subscribe to market data. Full details in
 
 `cost_basis_fop.html` is the standalone FOP ledger that will replace the frozen
 `FUT` books. It is being built in phases (`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`);
-for now it reads the ledger list, sends a stock ledger to `cost_basis.html`,
-shows a `FUT` ledger's identity, and previews an IBKR statement CSV without a
-ledger: each row's type and status, the events it would add, the problems that
-would block it, the quantity proof and the result the core replays from it,
-all in the browser. It writes nothing yet; importing into a ledger is wired in
-a later stage. Statement rows can only be previewed until a real statement
-accepts each row type (`cost_basis_fop_capabilities.json`).
+it routes a stock ledger to `cost_basis.html` and a legacy `FUT` book to its
+identity, and shows a FOP ledger in full: the economic P&L and its parts, the
+break-even card (only with exactly one FUT contract open), completeness per
+item, the futures months, the options with their bound futures, delivery
+coverage per real FUT, derived rolls, cycles and the event list. It takes one
+quote batch at a time for the open contracts (mid, else the side a position
+would close against, else a dated settlement or close shown as a reference,
+else unavailable), previews assumed deliveries in memory (a quantity per
+option), imports statements, takes manual entries (previewed first, then
+confirmed), voids, cycle boundaries, backups and restores. A statement row that
+may repeat a stored fill blocks until you decide, row by row and with the check
+you rely on, whether it is that fill or another one. An option whose future is
+unproven can be asked about at the broker (read-only) and the proven binding
+adopted after a preview. The page reads the ledger account's TWS positions and
+compares quantity, AvgCost, binding and cash separately (cash is never
+reconciled yet), and can save that comparison as a snapshot of the ledger
+version. It shows the buyer's options apart and puts a statement's own realized
+P&L beside the ledger's (evidence only). Problems are explained in Chinese with
+the next step. The backend refuses every FOP write until the release stage, and
+the page keeps those controls disabled meanwhile. Statement rows write only
+after a real statement accepts each row type (`cost_basis_fop_capabilities.json`)
+or as row-by-row manual claims. Without a ledger it still previews a statement
+CSV.
+
+For a browser check that cannot touch the live backend, run
+`python3 scripts/cost_basis_fop_synthetic_backend.py --ws-port 8799 --http-port 8123`
+(a temporary database and a simulated broker on 127.0.0.1), open
+`http://127.0.0.1:8123/` first (it points the ledger pages at port 8799) and
+then `cost_basis_fop.html`; `scripts/cost_basis_fop_browser_assertions.js`
+holds the page checks.
 
 ### `workspace_db_admin.html`
 

@@ -95,6 +95,7 @@ from ib_server_ws import (
     purge_combo_order_tracking_for_websocket as purge_combo_order_tracking_for_websocket,
     purge_hedge_order_tracking_for_websocket as purge_hedge_order_tracking_for_websocket,
 )
+import cost_basis_fop_broker
 import cost_basis_ws
 from cost_basis_executions import (
     execution_filter_time as cost_basis_execution_filter_time,
@@ -2348,6 +2349,88 @@ async def _request_cost_basis_fop_contract_details(query):
 
 
 cost_basis_store_env['fetch_fop_contract_details'] = _request_cost_basis_fop_contract_details
+
+
+# One FOP quote batch at a time per process: a second one is answered as
+# busy at once instead of queueing more market-data lines (plan §10.3).
+_cost_basis_fop_quote_lock = asyncio.Lock()
+_COST_BASIS_FOP_QUOTE_CONCURRENCY = 4
+
+
+def _cost_basis_fop_quote_contract(query):
+    """A market-data request contract for one ledger FUT/FOP (never used for an order)."""
+    exchange = str(query.get('exchange') or '')
+    currency = str(query.get('currency') or '')
+    if query.get('conId'):
+        return Contract(conId=int(query['conId']), exchange=exchange, currency=currency)
+    if query.get('secType') == 'FUT':
+        return Contract(secType='FUT', symbol=str(query.get('symbol') or ''),
+                        lastTradeDateOrContractMonth=str(query.get('contractMonth') or ''),
+                        tradingClass=str(query.get('tradingClass') or ''),
+                        exchange=exchange, currency=currency)
+    return Contract(secType='FOP', symbol=str(query.get('symbol') or ''),
+                    tradingClass=str(query.get('tradingClass') or ''), right=str(query.get('right') or ''),
+                    strike=float(query.get('strike') or 0),
+                    lastTradeDateOrContractMonth=str(query.get('expiry') or ''),
+                    exchange=exchange, currency=currency)
+
+
+async def _request_cost_basis_fop_market_snapshot(queries):
+    """One-shot quotes for a FOP ledger's own contracts (plan §10.2, §10.3).
+
+    cost_basis_fop_broker builds the queries from the stored records and
+    bounds the batch and its time; this qualifies each contract, reads one
+    short-lived snapshot through _request_cost_basis_snapshot_tickers (which
+    cancels every line before returning) and reports each ticker as the
+    broker gave it. No order, exercise or lasting subscription is involved.
+    """
+    if not ib.isConnected():
+        raise RuntimeError('TWS is not connected')
+    if _cost_basis_fop_quote_lock.locked():
+        raise RuntimeError('another FOP quote batch is running; try again shortly')
+    async with _cost_basis_fop_quote_lock:
+        semaphore = asyncio.Semaphore(_COST_BASIS_FOP_QUOTE_CONCURRENCY)
+
+        async def qualify(query):
+            async with semaphore:
+                contract = _cost_basis_fop_quote_contract(query)
+                try:
+                    qualified = await asyncio.wait_for(ib.qualifyContractsAsync(contract), timeout=8.0)
+                except Exception as exc:  # reported per contract
+                    return query, None, f'qualify failed: {exc}'
+                if not qualified or not getattr(qualified[0], 'conId', 0):
+                    return query, None, 'TWS could not qualify the contract'
+                return query, qualified[0], None
+
+        qualified = await asyncio.gather(*(qualify(query) for query in queries))
+        results = [{'contractId': query['contractId'], 'error': error}
+                   for query, contract, error in qualified if contract is None]
+        ready = [(query, contract) for query, contract, error in qualified if contract is not None]
+        if ready:
+            tickers = await _request_cost_basis_snapshot_tickers(
+                [contract for _query, contract in ready], timeout_seconds=8.0,
+                mark_only_con_ids={int(contract.conId) for _query, contract in ready})
+            for (query, contract), ticker in zip(ready, tickers):
+                results.append(cost_basis_fop_broker.ticker_quote(query['contractId'], contract, ticker))
+        return results
+
+
+cost_basis_store_env['fetch_fop_market_snapshot'] = _request_cost_basis_fop_market_snapshot
+
+
+async def _request_cost_basis_fop_positions():
+    """TWS positions for a FOP ledger's reconciliation (plan §19 P5-C3).
+
+    Read-only: the authoritative position set IB keeps from reqPositions and
+    the managed accounts, with no new subscription. cost_basis_fop_broker
+    keeps only the ledger's account and root.
+    """
+    items = _get_authoritative_portfolio_position_items()
+    return {'connected': ib.isConnected(), 'ready': bool(portfolio_positions_snapshot_ready),
+            'accounts': _get_managed_accounts(), 'items': items}
+
+
+cost_basis_store_env['fetch_fop_positions'] = _request_cost_basis_fop_positions
 
 
 # Identity and matching live in ib_server_market_data so they are unit

@@ -180,7 +180,7 @@ def delivered_futures(vector, event):
 
 
 def _buckets():
-    return {name: Fraction(0) for name in ('Rf', 'Co', 'E', 'J', 'Rs', 'Es', 'Js')}
+    return {name: Fraction(0) for name in ('Rf', 'Co', 'E', 'J', 'Rs', 'Es', 'Js', 'Rb', 'Eb')}
 
 
 def replay(vector, *, as_of=None):
@@ -229,6 +229,8 @@ def replay(vector, *, as_of=None):
     opening_value = Fraction(0)
     opening_known = True
     baseline_at_reference = True
+    # A long option ended with an unknown premium leaves the buyer's settled result unknown.
+    buyer_known = True
     steps = []
 
     def future(alias):
@@ -286,6 +288,9 @@ def replay(vector, *, as_of=None):
                     state.premium_known = True
                 if short:
                     add('Rs', (released or 0) + close_cash, home)
+                else:
+                    add('Rb', (released or 0) + close_cash, home)
+                    buyer_known = buyer_known and released is not None
         elif kind in ('option_expiry',) + DELIVERIES:
             state = option(event['contract'])
             short = state.n < 0
@@ -293,9 +298,11 @@ def replay(vector, *, as_of=None):
             state.n += abs(event['q']) if state.n < 0 else -abs(event['q'])
             if short:
                 add('Rs', released or 0, home)
+            else:
+                add('Rb', released or 0, home)
+                buyer_known = buyer_known and released is not None
             add('E', fees, home)
-            if short:
-                add('Es', fees, home)
+            add('Es' if short else 'Eb', fees, home)
             if kind in DELIVERIES:
                 alias, quantity = delivered_futures(vector, event)
                 strike = rational(vector['contracts'][event['contract']]['strike'])
@@ -326,6 +333,8 @@ def replay(vector, *, as_of=None):
                 add('E', -cash, home)
                 if event.get('category') in ('futures', 'short_option'):
                     add('Es', -cash, home)
+                elif event.get('category') == 'long_option':
+                    add('Eb', -cash, home)
         elif kind == 'manual_adjust':
             if event.get('includeInCost', True):
                 add('J', cash, home)
@@ -345,7 +354,7 @@ def replay(vector, *, as_of=None):
         'book': book, 'cycles': cycles, 'exercised': exercised, 'unattributed': unattributed,
         'incomplete': incomplete, 'seller_incomplete': seller_incomplete,
         'opening_value': opening_value if opening_known else None,
-        'baseline_at_reference': baseline_at_reference,
+        'baseline_at_reference': baseline_at_reference, 'buyer_known': buyer_known,
     }
 
 
@@ -408,7 +417,18 @@ def ledger(vector, *, marks=None, as_of=None):
                               'remainingNetPremium': state.premium if state.premium_known else None}
                       for alias, state in result['options'].items() if state.n})
     realized = {alias: state.realized for alias, state in result['futures'].items() if state.closed_any}
-    return {'totals': totals, 'cycles': cycles, 'sellerLens': lens, 'positions': positions,
+    # The buyer's options (plan §5.2): settled longs, their own fees, the open longs.
+    longs = [(alias, state) for alias, state in result['options'].items() if state.n > 0]
+    open_premium = None if any(not state.premium_known for _alias, state in longs) else \
+        sum((state.premium for _alias, state in longs), Fraction(0))
+    open_value = None if any(marks.get(alias) is None for alias, _state in longs) else \
+        sum((state.n * state.multiplier * marks[alias] for alias, state in longs), Fraction(0))
+    buyer = {'Rb': book['Rb'] if result['buyer_known'] else None, 'Eb': book['Eb'],
+             'openPremium': open_premium, 'openValue': open_value}
+    parts = (buyer['Rb'], buyer['Eb'], open_premium, open_value)
+    buyer['result'] = None if any(part is None for part in parts) else \
+        buyer['Rb'] - buyer['Eb'] + open_premium + open_value
+    return {'totals': totals, 'cycles': cycles, 'sellerLens': lens, 'positions': positions, 'buyer': buyer,
             'realized': realized, 'unattributed': result['unattributed'],
             'steps': result['steps'], 'order': result['order'],
             'openingValue': result['opening_value'] if history == 'since_baseline' else None}

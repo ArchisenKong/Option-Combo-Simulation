@@ -6062,6 +6062,13 @@
         "fopPackage": {
           "ref": "FopPackage",
           "nullable": true
+        },
+        "duplicateDecisions": {
+          "type": "array",
+          "items": {
+            "ref": "DuplicateDecision"
+          },
+          "maxItems": 5000
         }
       },
       "required": [
@@ -6204,6 +6211,13 @@
               "items": {
                 "ref": "ReferenceChange"
               }
+            },
+            "contracts": {
+              "type": "array",
+              "items": {
+                "ref": "ContractRecord"
+              },
+              "maxItems": 2
             }
           },
           "required": [
@@ -6865,7 +6879,7 @@
           "type": "string"
         },
         "twsSnapshot": {
-          "type": "json",
+          "ref": "FopPositionsSnapshot",
           "nullable": true
         },
         "reconciled": {
@@ -8324,6 +8338,570 @@
         "success",
         "bookId",
         "results"
+      ]
+    },
+    "MarketSnapshotRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "request_cost_basis_fop_market_snapshot"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "contractIds": {
+          "type": "array",
+          "items": {
+            "ref": "Token"
+          },
+          "minItems": 1,
+          "maxItems": 40
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId",
+        "contractIds"
+      ]
+    },
+    "MarketQuoteEvidence": {
+      "type": "object",
+      "fields": {
+        "contractId": {
+          "ref": "Token"
+        },
+        "conId": {
+          "type": "integer",
+          "nullable": true
+        },
+        "localSymbol": {
+          "type": "string",
+          "nullable": true
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "no_data",
+            "failed",
+            "identity_conflict"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "nullable": true
+        },
+        "bid": {
+          "type": "number",
+          "nullable": true
+        },
+        "bidSize": {
+          "type": "number",
+          "nullable": true
+        },
+        "ask": {
+          "type": "number",
+          "nullable": true
+        },
+        "askSize": {
+          "type": "number",
+          "nullable": true
+        },
+        "last": {
+          "type": "number",
+          "nullable": true
+        },
+        "lastSize": {
+          "type": "number",
+          "nullable": true
+        },
+        "close": {
+          "type": "number",
+          "nullable": true
+        },
+        "closeDate": {
+          "ref": "IsoDate",
+          "nullable": true
+        },
+        "settlement": {
+          "type": "number",
+          "nullable": true
+        },
+        "settlementDate": {
+          "ref": "IsoDate",
+          "nullable": true
+        },
+        "observedAtUtc": {
+          "ref": "UtcInstant",
+          "nullable": true
+        },
+        "marketDataType": {
+          "type": "integer",
+          "nullable": true
+        }
+      },
+      "required": [
+        "contractId",
+        "conId",
+        "localSymbol",
+        "status",
+        "reason",
+        "bid",
+        "bidSize",
+        "ask",
+        "askSize",
+        "last",
+        "lastSize",
+        "close",
+        "closeDate",
+        "settlement",
+        "settlementDate",
+        "observedAtUtc",
+        "marketDataType"
+      ],
+      "rules": [
+        {
+          "id": "a_failed_quote_says_why",
+          "when": {
+            "field": "status",
+            "in": [
+              "no_data",
+              "failed",
+              "identity_conflict"
+            ]
+          },
+          "require": [
+            "reason"
+          ]
+        }
+      ]
+    },
+    "MarketSnapshotResponse": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "cost_basis_fop_market_snapshot"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "const",
+          "value": true
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "quoteBatchId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestedAtUtc": {
+          "ref": "UtcInstant"
+        },
+        "ledgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "quotes": {
+          "type": "array",
+          "items": {
+            "ref": "MarketQuoteEvidence"
+          }
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "success",
+        "bookId",
+        "quoteBatchId",
+        "requestedAtUtc",
+        "ledgerVersion",
+        "quotes"
+      ]
+    },
+    "DuplicateDecision": {
+      "type": "object",
+      "fields": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "same_fill",
+            "distinct_fill"
+          ]
+        },
+        "namespace": {
+          "type": "string",
+          "enum": [
+            "flex_trade",
+            "ib_exec",
+            "activity_row"
+          ]
+        },
+        "sourceRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "eventIds": {
+          "type": "array",
+          "items": {
+            "ref": "Token"
+          },
+          "minItems": 1,
+          "maxItems": 20
+        },
+        "attestation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "ref": "SourceSubmission",
+          "nullable": true
+        }
+      },
+      "required": [
+        "decision",
+        "namespace",
+        "sourceRef",
+        "eventIds",
+        "attestation",
+        "source"
+      ],
+      "rules": [
+        {
+          "id": "a_same_fill_decision_carries_its_row",
+          "when": {
+            "field": "decision",
+            "in": [
+              "same_fill"
+            ]
+          },
+          "require": [
+            "source"
+          ]
+        },
+        {
+          "id": "a_distinct_fill_row_travels_in_the_package",
+          "when": {
+            "field": "decision",
+            "in": [
+              "distinct_fill"
+            ]
+          },
+          "forbid": [
+            "source"
+          ]
+        }
+      ]
+    },
+    "FopPositionsRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "request_cost_basis_fop_positions"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId"
+      ]
+    },
+    "FopPositionEvidence": {
+      "type": "object",
+      "fields": {
+        "account": {
+          "ref": "Account"
+        },
+        "conId": {
+          "type": "integer",
+          "min": 1,
+          "nullable": true
+        },
+        "secType": {
+          "type": "string",
+          "enum": [
+            "FUT",
+            "FOP"
+          ]
+        },
+        "symbol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "localSymbol": {
+          "type": "string",
+          "nullable": true
+        },
+        "tradingClass": {
+          "type": "string",
+          "nullable": true
+        },
+        "lastTradeDateOrContractMonth": {
+          "type": "string",
+          "nullable": true
+        },
+        "right": {
+          "type": "string",
+          "enum": [
+            "C",
+            "P"
+          ],
+          "nullable": true
+        },
+        "strike": {
+          "type": "number",
+          "nullable": true
+        },
+        "multiplier": {
+          "type": "number",
+          "nullable": true
+        },
+        "currency": {
+          "type": "string",
+          "nullable": true
+        },
+        "position": {
+          "type": "number",
+          "nonzero": true
+        },
+        "averageCost": {
+          "type": "number",
+          "nullable": true
+        }
+      },
+      "required": [
+        "account",
+        "conId",
+        "secType",
+        "symbol",
+        "localSymbol",
+        "tradingClass",
+        "lastTradeDateOrContractMonth",
+        "right",
+        "strike",
+        "multiplier",
+        "currency",
+        "position",
+        "averageCost"
+      ]
+    },
+    "FopPositionsResponse": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "cost_basis_fop_positions"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "const",
+          "value": true
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "account": {
+          "ref": "Account"
+        },
+        "observedAtUtc": {
+          "ref": "UtcInstant"
+        },
+        "ledgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "accountConnected": {
+          "type": "boolean"
+        },
+        "positionsReady": {
+          "type": "boolean"
+        },
+        "positions": {
+          "type": "array",
+          "items": {
+            "ref": "FopPositionEvidence"
+          }
+        },
+        "evidenceCredential": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "success",
+        "bookId",
+        "account",
+        "observedAtUtc",
+        "ledgerVersion",
+        "accountConnected",
+        "positionsReady",
+        "positions",
+        "evidenceCredential"
+      ],
+      "rules": [
+        {
+          "id": "only_read_positions_carry_a_credential",
+          "when": {
+            "field": "positionsReady",
+            "in": [
+              false
+            ]
+          },
+          "forbid": [
+            "evidenceCredential"
+          ]
+        }
+      ]
+    },
+    "FopReconciliationRow": {
+      "type": "object",
+      "fields": {
+        "contractId": {
+          "ref": "Token",
+          "nullable": true
+        },
+        "localSymbol": {
+          "type": "string",
+          "nullable": true
+        },
+        "ledgerQuantity": {
+          "type": "number",
+          "nullable": true
+        },
+        "twsQuantity": {
+          "type": "number"
+        },
+        "quantityStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "mismatch",
+            "unknown"
+          ]
+        },
+        "ledgerAverage": {
+          "type": "number",
+          "nullable": true
+        },
+        "twsAverage": {
+          "type": "number",
+          "nullable": true
+        },
+        "avgCostStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "differs",
+            "not_comparable"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "contractId",
+        "localSymbol",
+        "ledgerQuantity",
+        "twsQuantity",
+        "quantityStatus",
+        "ledgerAverage",
+        "twsAverage",
+        "avgCostStatus",
+        "note"
+      ]
+    },
+    "FopPositionsSnapshot": {
+      "type": "object",
+      "fields": {
+        "kind": {
+          "type": "const",
+          "value": "fop_positions"
+        },
+        "account": {
+          "ref": "Account"
+        },
+        "observedAtUtc": {
+          "ref": "UtcInstant"
+        },
+        "ledgerVersion": {
+          "ref": "LedgerVersion"
+        },
+        "accountConnected": {
+          "type": "boolean"
+        },
+        "positionsReady": {
+          "type": "boolean"
+        },
+        "positions": {
+          "type": "array",
+          "items": {
+            "ref": "FopPositionEvidence"
+          }
+        },
+        "evidenceCredential": {
+          "type": "string",
+          "minLength": 1,
+          "nullable": true
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "ref": "FopReconciliationRow"
+          }
+        },
+        "quantityStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "mismatch",
+            "unknown",
+            "not_checked"
+          ]
+        },
+        "avgCostStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "differs",
+            "partial",
+            "not_comparable",
+            "not_checked"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "account",
+        "observedAtUtc",
+        "ledgerVersion",
+        "accountConnected",
+        "positionsReady",
+        "positions",
+        "evidenceCredential",
+        "rows",
+        "quantityStatus",
+        "avgCostStatus"
       ]
     }
   },
@@ -11126,6 +11704,600 @@
             "currency": "USD"
           },
           "fopPackage": null
+        }
+      },
+      {
+        "type": "MarketSnapshotRequest",
+        "name": "a quote batch names the ledger contracts to quote",
+        "value": {
+          "action": "request_cost_basis_fop_market_snapshot",
+          "requestId": "fop-5-1",
+          "bookId": "fopbook0001",
+          "contractIds": [
+            "fut-cl-202612",
+            "fop-cl-lo-20261117-c75"
+          ]
+        }
+      },
+      {
+        "type": "MarketSnapshotResponse",
+        "name": "a quote batch reports each contract as the broker gave it, a negative FUT included",
+        "value": {
+          "action": "cost_basis_fop_market_snapshot",
+          "requestId": "fop-5-1",
+          "success": true,
+          "bookId": "fopbook0001",
+          "quoteBatchId": "quotes-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "requestedAtUtc": "2026-10-02T14:30:06.000000Z",
+          "ledgerVersion": {
+            "eventCount": 2,
+            "liveEventCount": 2,
+            "maxSeq": 2,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "quotes": [
+            {
+              "contractId": "fut-cl-202612",
+              "conId": 555,
+              "localSymbol": "CLZ6",
+              "status": "ok",
+              "reason": null,
+              "bid": -1.25,
+              "bidSize": 3,
+              "ask": -1.2,
+              "askSize": 2,
+              "last": -1.22,
+              "lastSize": 1,
+              "close": -1.5,
+              "closeDate": null,
+              "settlement": -1.48,
+              "settlementDate": "2026-10-01",
+              "observedAtUtc": "2026-10-02T14:30:05.120000Z",
+              "marketDataType": 1
+            },
+            {
+              "contractId": "fop-cl-lo-20261117-c75",
+              "conId": 9001,
+              "localSymbol": "LOZ6 C7500",
+              "status": "no_data",
+              "reason": "the broker gave no usable price",
+              "bid": null,
+              "bidSize": null,
+              "ask": null,
+              "askSize": null,
+              "last": null,
+              "lastSize": null,
+              "close": null,
+              "closeDate": null,
+              "settlement": null,
+              "settlementDate": null,
+              "observedAtUtc": null,
+              "marketDataType": null
+            }
+          ]
+        }
+      },
+      {
+        "type": "ImportRequest",
+        "name": "an import carries the decisions a person made on possible duplicates",
+        "value": {
+          "action": "import_cost_basis_events",
+          "requestId": "fop-c1-1",
+          "bookId": "fopbook0001",
+          "importBatchId": "batch-0000000001",
+          "clientTokenPrefix": "prefix-00000001",
+          "statement": {
+            "format": "flex_csv",
+            "fileName": "U1111111_2026-10.csv",
+            "fileSha256": "0000000000000000000000000000000000000000000000000000000000000003",
+            "account": "U1111111",
+            "periodFrom": "2026-10-01",
+            "periodThrough": "2026-10-31",
+            "checks": {
+              "accountConfirmed": true,
+              "periodFromBody": true
+            },
+            "confirmedDuplicates": 0
+          },
+          "supersedeTwsEventIds": [],
+          "expectedLedgerVersion": {
+            "eventCount": 3,
+            "liveEventCount": 3,
+            "maxSeq": 3,
+            "digest": "0000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "bookIdentity": {
+            "account": "U1111111",
+            "symbol": "CL",
+            "secType": "FUT",
+            "currency": "USD"
+          },
+          "fopPackage": {
+            "version": 1,
+            "engineVersion": 1,
+            "contracts": [
+              {
+                "secType": "FUT",
+                "contractId": "fut-clz6-0001",
+                "revision": 1,
+                "conId": 555,
+                "root": "CL",
+                "tradingClass": "CL",
+                "localSymbol": "CLZ6",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "futureContractMonth": "202612",
+                "futureLastTradeDate": "2026-11-19",
+                "futureLastTradeAsOf": null,
+                "futurePointValue": 1000,
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_statement",
+                "evidenceSummary": "Flex Financial Instrument row",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              },
+              {
+                "secType": "FOP",
+                "contractId": "fop-loz6-c75-01",
+                "revision": 1,
+                "conId": 9001,
+                "root": "CL",
+                "tradingClass": "LO",
+                "localSymbol": "LOZ6 C7500",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "optionRight": "C",
+                "optionStrike": 75,
+                "optionExpiry": "2026-11-17",
+                "optionExpiryAsOf": null,
+                "premiumMultiplier": 1000,
+                "deliverableFuturesPerOption": 1,
+                "settlementType": "physical_future",
+                "exerciseStyle": "american",
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_statement",
+                "evidenceSummary": "Flex Financial Instrument row",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              }
+            ],
+            "bindings": [],
+            "sourceRecords": [
+              {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567890",
+                "capabilityKey": "flex/trades/FUT/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FUT",
+                  "TradeID": "1234567890",
+                  "Symbol": "CLZ6",
+                  "Quantity": "1",
+                  "TradePrice": "70.12",
+                  "IBCommission": "-2.02",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": 1,
+                "statedFees": 2.02
+              },
+              {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567891",
+                "capabilityKey": "flex/trades/FOP/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FOP",
+                  "TradeID": "1234567891",
+                  "Symbol": "LOZ6 C7500",
+                  "Quantity": "-1",
+                  "TradePrice": "1.2",
+                  "IBCommission": "-2.5",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": -1,
+                "statedFees": 2.5
+              }
+            ],
+            "events": [
+              {
+                "kind": "futures_trade",
+                "account": "U1111111",
+                "source": "csv_import",
+                "externalRef": "1234567890",
+                "packageKey": null,
+                "note": "",
+                "time": {
+                  "exchangeTradeDate": "2026-10-01",
+                  "executedAtUtc": "2026-10-01T14:30:05.000000Z",
+                  "timeRange": null,
+                  "sourceTimeText": "2026-10-01, 10:30:05",
+                  "sourceTimezone": "America/New_York",
+                  "orderEvidence": null
+                },
+                "sources": [
+                  {
+                    "namespace": "flex_trade",
+                    "sourceRef": "1234567890",
+                    "role": "trade",
+                    "quantity": 1,
+                    "fees": 2.02
+                  }
+                ],
+                "contractRef": {
+                  "contractId": "fut-clz6-0001",
+                  "revision": 1
+                },
+                "futureContracts": 1,
+                "price": 70.12,
+                "cashAmount": -2.02,
+                "fees": 2.02,
+                "openClose": "O",
+                "includeInCost": true
+              },
+              {
+                "kind": "option_trade",
+                "account": "U1111111",
+                "source": "csv_import",
+                "externalRef": "1234567891",
+                "packageKey": null,
+                "note": "",
+                "time": {
+                  "exchangeTradeDate": "2026-10-01",
+                  "executedAtUtc": "2026-10-01T14:30:05.000000Z",
+                  "timeRange": null,
+                  "sourceTimeText": "2026-10-01, 10:30:05",
+                  "sourceTimezone": "America/New_York",
+                  "orderEvidence": null
+                },
+                "sources": [
+                  {
+                    "namespace": "flex_trade",
+                    "sourceRef": "1234567891",
+                    "role": "trade",
+                    "quantity": -1,
+                    "fees": 2.5
+                  }
+                ],
+                "contractRef": {
+                  "contractId": "fop-loz6-c75-01",
+                  "revision": 1
+                },
+                "contracts": -1,
+                "price": 1.2,
+                "cashAmount": 1197.5,
+                "fees": 2.5,
+                "openClose": "O",
+                "includeInCost": true
+              }
+            ]
+          },
+          "duplicateDecisions": [
+            {
+              "decision": "same_fill",
+              "namespace": "flex_trade",
+              "sourceRef": "1234567999",
+              "eventIds": [
+                "evt-0000000007"
+              ],
+              "attestation": "the broker confirms one fill of 1 CLZ6 at 70.12 under two trade ids",
+              "source": {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567999",
+                "capabilityKey": "flex/trades/FUT/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FUT",
+                  "TradeID": "1234567999",
+                  "Symbol": "CLZ6",
+                  "Quantity": "1",
+                  "TradePrice": "70.12",
+                  "IBCommission": "-2.02",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": 1,
+                "statedFees": 2.02
+              }
+            },
+            {
+              "decision": "distinct_fill",
+              "namespace": "flex_trade",
+              "sourceRef": "1234567890",
+              "eventIds": [
+                "evt-0000000007"
+              ],
+              "attestation": "two fills: the broker lists both executions",
+              "source": null
+            }
+          ]
+        }
+      },
+      {
+        "type": "MetadataCommitRequest",
+        "name": "a binding adoption brings the future its broker evidence proves",
+        "value": {
+          "action": "commit_cost_basis_fop_metadata",
+          "requestId": "fop-c2-1",
+          "bookId": "fopbook0001",
+          "clientToken": "tok-meta-00001",
+          "expectedLedgerVersion": {
+            "eventCount": 3,
+            "liveEventCount": 3,
+            "maxSeq": 3,
+            "digest": "0000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "bookIdentity": {
+            "account": "U1111111",
+            "symbol": "CL",
+            "secType": "FUT",
+            "currency": "USD"
+          },
+          "engineVersion": 1,
+          "operation": {
+            "kind": "adopt_binding",
+            "binding": {
+              "bindingId": "bind-loz6-c75-1",
+              "revision": 2,
+              "optionContractId": "fop-loz6-c75-01",
+              "futureContractId": "fut-clf7-0001",
+              "status": "verified_broker",
+              "evidenceSummary": "statement underlying CLZ6",
+              "evidenceCredential": "cand-7f3a19c2",
+              "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+            },
+            "affected": [
+              {
+                "eventId": "evt-0000000002",
+                "reference": "binding",
+                "before": {
+                  "id": "bind-loz6-c75-1",
+                  "revision": 1
+                },
+                "after": {
+                  "id": "bind-loz6-c75-1",
+                  "revision": 2
+                }
+              }
+            ],
+            "contracts": [
+              {
+                "secType": "FUT",
+                "contractId": "fut-clf7-0001",
+                "revision": 1,
+                "conId": 556,
+                "root": "CL",
+                "tradingClass": "CL",
+                "localSymbol": "CLF7",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "futureContractMonth": "202701",
+                "futureLastTradeDate": "2026-12-17",
+                "futureLastTradeAsOf": null,
+                "futurePointValue": 1000,
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_broker",
+                "evidenceSummary": "IB contract details via underConId",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "type": "FopPositionsRequest",
+        "name": "positions are read for one ledger",
+        "value": {
+          "action": "request_cost_basis_fop_positions",
+          "requestId": "fop-c3-1",
+          "bookId": "fopbook0001"
+        }
+      },
+      {
+        "type": "FopPositionsResponse",
+        "name": "positions of the ledger's account, bound to the ledger version they were read against",
+        "value": {
+          "action": "cost_basis_fop_positions",
+          "requestId": "fop-c3-1",
+          "success": true,
+          "bookId": "fopbook0001",
+          "account": "U1111111",
+          "observedAtUtc": "2026-11-12T15:00:01.000000Z",
+          "ledgerVersion": {
+            "eventCount": 5,
+            "liveEventCount": 5,
+            "maxSeq": 5,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "accountConnected": true,
+          "positionsReady": true,
+          "positions": [
+            {
+              "account": "U1111111",
+              "conId": 556,
+              "secType": "FUT",
+              "symbol": "CL",
+              "localSymbol": "CLF7",
+              "tradingClass": "CL",
+              "lastTradeDateOrContractMonth": "20261217",
+              "right": null,
+              "strike": null,
+              "multiplier": 1000,
+              "currency": "USD",
+              "position": 1,
+              "averageCost": 72502.02
+            },
+            {
+              "account": "U1111111",
+              "conId": 9001,
+              "secType": "FOP",
+              "symbol": "CL",
+              "localSymbol": "LOZ6 C7500",
+              "tradingClass": "LO",
+              "lastTradeDateOrContractMonth": "20261117",
+              "right": "C",
+              "strike": 75,
+              "multiplier": 1000,
+              "currency": "USD",
+              "position": -1,
+              "averageCost": 1197.5
+            }
+          ],
+          "evidenceCredential": "eyJ2IjoxfQ.c2lnbmF0dXJl"
+        }
+      },
+      {
+        "type": "SnapshotRequest",
+        "name": "a reconciliation snapshot keeps its positions and every comparison",
+        "value": {
+          "action": "save_cost_basis_snapshot",
+          "requestId": "fop-c3-2",
+          "bookId": "fopbook0001",
+          "expectedLedgerVersion": {
+            "eventCount": 3,
+            "liveEventCount": 3,
+            "maxSeq": 3,
+            "digest": "0000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "bookIdentity": {
+            "account": "U1111111",
+            "symbol": "CL",
+            "secType": "FUT",
+            "currency": "USD"
+          },
+          "asOfDate": "2026-10-02",
+          "summary": {
+            "ledgerVersion": {
+              "eventCount": 3,
+              "liveEventCount": 3,
+              "maxSeq": 3,
+              "digest": "0000000000000000000000000000000000000000000000000000000000000001"
+            },
+            "quoteBatchId": "quotes-000001",
+            "quotes": [
+              {
+                "contractId": "fut-clz6-0001",
+                "bid": 70.1,
+                "ask": 70.12,
+                "last": 70.11,
+                "mark": 70.11,
+                "markSource": "mid",
+                "referenceDate": null,
+                "observedAtUtc": "2026-10-02T14:00:00.250000Z",
+                "marketDataType": 1
+              },
+              {
+                "contractId": "fop-loz6-c75-01",
+                "bid": null,
+                "ask": 1.4,
+                "last": null,
+                "mark": 1.4,
+                "markSource": "one_sided_conservative",
+                "referenceDate": null,
+                "observedAtUtc": "2026-10-02T14:00:00.250000Z",
+                "marketDataType": 1
+              },
+              {
+                "contractId": "fut-clf7-0001",
+                "bid": null,
+                "ask": null,
+                "last": null,
+                "mark": 71.02,
+                "markSource": "settlement_reference",
+                "referenceDate": "2026-10-01",
+                "observedAtUtc": null,
+                "marketDataType": null
+              }
+            ],
+            "completeness": {
+              "quantity": "complete",
+              "openingCost": "complete",
+              "binding": "complete",
+              "marketData": "incomplete",
+              "coverage": "complete",
+              "cash": "not_checked"
+            }
+          },
+          "accountScope": "U1111111",
+          "twsSnapshot": {
+            "kind": "fop_positions",
+            "account": "U1111111",
+            "observedAtUtc": "2026-11-12T15:00:01.000000Z",
+            "ledgerVersion": {
+              "eventCount": 5,
+              "liveEventCount": 5,
+              "maxSeq": 5,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "accountConnected": true,
+            "positionsReady": true,
+            "positions": [
+              {
+                "account": "U1111111",
+                "conId": 556,
+                "secType": "FUT",
+                "symbol": "CL",
+                "localSymbol": "CLF7",
+                "tradingClass": "CL",
+                "lastTradeDateOrContractMonth": "20261217",
+                "right": null,
+                "strike": null,
+                "multiplier": 1000,
+                "currency": "USD",
+                "position": 1,
+                "averageCost": 72502.02
+              },
+              {
+                "account": "U1111111",
+                "conId": 9001,
+                "secType": "FOP",
+                "symbol": "CL",
+                "localSymbol": "LOZ6 C7500",
+                "tradingClass": "LO",
+                "lastTradeDateOrContractMonth": "20261117",
+                "right": "C",
+                "strike": 75,
+                "multiplier": 1000,
+                "currency": "USD",
+                "position": -1,
+                "averageCost": 1197.5
+              }
+            ],
+            "evidenceCredential": "eyJ2IjoxfQ.c2lnbmF0dXJl",
+            "rows": [
+              {
+                "contractId": "fut-cl-202701-0a1b2c",
+                "localSymbol": "CLF7",
+                "ledgerQuantity": 1,
+                "twsQuantity": 1,
+                "quantityStatus": "matched",
+                "ledgerAverage": 72.5,
+                "twsAverage": 72.50202,
+                "avgCostStatus": "matched",
+                "note": "IB AvgCost includes commissions"
+              },
+              {
+                "contractId": "fop-cl-lo-20261117-c75-0a1b2c",
+                "localSymbol": "LOZ6 C7500",
+                "ledgerQuantity": -1,
+                "twsQuantity": -1,
+                "quantityStatus": "matched",
+                "ledgerAverage": 1.1975,
+                "twsAverage": 1.1975,
+                "avgCostStatus": "matched",
+                "note": ""
+              }
+            ],
+            "quantityStatus": "matched",
+            "avgCostStatus": "matched"
+          },
+          "reconciled": true,
+          "note": ""
         }
       }
     ],
@@ -17793,6 +18965,1252 @@
         "expect": {
           "path": "",
           "code": "rule:coverage_only_import_names_its_statement"
+        }
+      },
+      {
+        "type": "MarketSnapshotRequest",
+        "name": "a quote batch names at least one contract",
+        "value": {
+          "action": "request_cost_basis_fop_market_snapshot",
+          "requestId": "fop-5-1",
+          "bookId": "fopbook0001",
+          "contractIds": []
+        },
+        "expect": {
+          "path": "contractIds",
+          "code": "minItems"
+        }
+      },
+      {
+        "type": "MarketSnapshotRequest",
+        "name": "a quote batch is bounded",
+        "value": {
+          "action": "request_cost_basis_fop_market_snapshot",
+          "requestId": "fop-5-1",
+          "bookId": "fopbook0001",
+          "contractIds": [
+            "fut-cl-202700",
+            "fut-cl-202701",
+            "fut-cl-202702",
+            "fut-cl-202703",
+            "fut-cl-202704",
+            "fut-cl-202705",
+            "fut-cl-202706",
+            "fut-cl-202707",
+            "fut-cl-202708",
+            "fut-cl-202709",
+            "fut-cl-202710",
+            "fut-cl-202711",
+            "fut-cl-202712",
+            "fut-cl-202713",
+            "fut-cl-202714",
+            "fut-cl-202715",
+            "fut-cl-202716",
+            "fut-cl-202717",
+            "fut-cl-202718",
+            "fut-cl-202719",
+            "fut-cl-202720",
+            "fut-cl-202721",
+            "fut-cl-202722",
+            "fut-cl-202723",
+            "fut-cl-202724",
+            "fut-cl-202725",
+            "fut-cl-202726",
+            "fut-cl-202727",
+            "fut-cl-202728",
+            "fut-cl-202729",
+            "fut-cl-202730",
+            "fut-cl-202731",
+            "fut-cl-202732",
+            "fut-cl-202733",
+            "fut-cl-202734",
+            "fut-cl-202735",
+            "fut-cl-202736",
+            "fut-cl-202737",
+            "fut-cl-202738",
+            "fut-cl-202739",
+            "fut-cl-202740"
+          ]
+        },
+        "expect": {
+          "path": "contractIds",
+          "code": "maxItems"
+        }
+      },
+      {
+        "type": "MarketSnapshotResponse",
+        "name": "a quote without a price says why",
+        "value": {
+          "action": "cost_basis_fop_market_snapshot",
+          "requestId": "fop-5-1",
+          "success": true,
+          "bookId": "fopbook0001",
+          "quoteBatchId": "quotes-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+          "requestedAtUtc": "2026-10-02T14:30:06.000000Z",
+          "ledgerVersion": {
+            "eventCount": 2,
+            "liveEventCount": 2,
+            "maxSeq": 2,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "quotes": [
+            {
+              "contractId": "fut-cl-202612",
+              "conId": 555,
+              "localSymbol": "CLZ6",
+              "status": "ok",
+              "reason": null,
+              "bid": -1.25,
+              "bidSize": 3,
+              "ask": -1.2,
+              "askSize": 2,
+              "last": -1.22,
+              "lastSize": 1,
+              "close": -1.5,
+              "closeDate": null,
+              "settlement": -1.48,
+              "settlementDate": "2026-10-01",
+              "observedAtUtc": "2026-10-02T14:30:05.120000Z",
+              "marketDataType": 1
+            },
+            {
+              "contractId": "fop-cl-lo-20261117-c75",
+              "conId": 9001,
+              "localSymbol": "LOZ6 C7500",
+              "status": "no_data",
+              "reason": null,
+              "bid": null,
+              "bidSize": null,
+              "ask": null,
+              "askSize": null,
+              "last": null,
+              "lastSize": null,
+              "close": null,
+              "closeDate": null,
+              "settlement": null,
+              "settlementDate": null,
+              "observedAtUtc": null,
+              "marketDataType": null
+            }
+          ]
+        },
+        "expect": {
+          "path": "quotes[1]",
+          "code": "rule:a_failed_quote_says_why"
+        }
+      },
+      {
+        "type": "ImportRequest",
+        "name": "a same-fill decision carries the row it leaves out",
+        "value": {
+          "action": "import_cost_basis_events",
+          "requestId": "fop-c1-1",
+          "bookId": "fopbook0001",
+          "importBatchId": "batch-0000000001",
+          "clientTokenPrefix": "prefix-00000001",
+          "statement": {
+            "format": "flex_csv",
+            "fileName": "U1111111_2026-10.csv",
+            "fileSha256": "0000000000000000000000000000000000000000000000000000000000000003",
+            "account": "U1111111",
+            "periodFrom": "2026-10-01",
+            "periodThrough": "2026-10-31",
+            "checks": {
+              "accountConfirmed": true,
+              "periodFromBody": true
+            },
+            "confirmedDuplicates": 0
+          },
+          "supersedeTwsEventIds": [],
+          "expectedLedgerVersion": {
+            "eventCount": 3,
+            "liveEventCount": 3,
+            "maxSeq": 3,
+            "digest": "0000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "bookIdentity": {
+            "account": "U1111111",
+            "symbol": "CL",
+            "secType": "FUT",
+            "currency": "USD"
+          },
+          "fopPackage": {
+            "version": 1,
+            "engineVersion": 1,
+            "contracts": [
+              {
+                "secType": "FUT",
+                "contractId": "fut-clz6-0001",
+                "revision": 1,
+                "conId": 555,
+                "root": "CL",
+                "tradingClass": "CL",
+                "localSymbol": "CLZ6",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "futureContractMonth": "202612",
+                "futureLastTradeDate": "2026-11-19",
+                "futureLastTradeAsOf": null,
+                "futurePointValue": 1000,
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_statement",
+                "evidenceSummary": "Flex Financial Instrument row",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              },
+              {
+                "secType": "FOP",
+                "contractId": "fop-loz6-c75-01",
+                "revision": 1,
+                "conId": 9001,
+                "root": "CL",
+                "tradingClass": "LO",
+                "localSymbol": "LOZ6 C7500",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "optionRight": "C",
+                "optionStrike": 75,
+                "optionExpiry": "2026-11-17",
+                "optionExpiryAsOf": null,
+                "premiumMultiplier": 1000,
+                "deliverableFuturesPerOption": 1,
+                "settlementType": "physical_future",
+                "exerciseStyle": "american",
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_statement",
+                "evidenceSummary": "Flex Financial Instrument row",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              }
+            ],
+            "bindings": [],
+            "sourceRecords": [
+              {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567890",
+                "capabilityKey": "flex/trades/FUT/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FUT",
+                  "TradeID": "1234567890",
+                  "Symbol": "CLZ6",
+                  "Quantity": "1",
+                  "TradePrice": "70.12",
+                  "IBCommission": "-2.02",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": 1,
+                "statedFees": 2.02
+              },
+              {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567891",
+                "capabilityKey": "flex/trades/FOP/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FOP",
+                  "TradeID": "1234567891",
+                  "Symbol": "LOZ6 C7500",
+                  "Quantity": "-1",
+                  "TradePrice": "1.2",
+                  "IBCommission": "-2.5",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": -1,
+                "statedFees": 2.5
+              }
+            ],
+            "events": [
+              {
+                "kind": "futures_trade",
+                "account": "U1111111",
+                "source": "csv_import",
+                "externalRef": "1234567890",
+                "packageKey": null,
+                "note": "",
+                "time": {
+                  "exchangeTradeDate": "2026-10-01",
+                  "executedAtUtc": "2026-10-01T14:30:05.000000Z",
+                  "timeRange": null,
+                  "sourceTimeText": "2026-10-01, 10:30:05",
+                  "sourceTimezone": "America/New_York",
+                  "orderEvidence": null
+                },
+                "sources": [
+                  {
+                    "namespace": "flex_trade",
+                    "sourceRef": "1234567890",
+                    "role": "trade",
+                    "quantity": 1,
+                    "fees": 2.02
+                  }
+                ],
+                "contractRef": {
+                  "contractId": "fut-clz6-0001",
+                  "revision": 1
+                },
+                "futureContracts": 1,
+                "price": 70.12,
+                "cashAmount": -2.02,
+                "fees": 2.02,
+                "openClose": "O",
+                "includeInCost": true
+              },
+              {
+                "kind": "option_trade",
+                "account": "U1111111",
+                "source": "csv_import",
+                "externalRef": "1234567891",
+                "packageKey": null,
+                "note": "",
+                "time": {
+                  "exchangeTradeDate": "2026-10-01",
+                  "executedAtUtc": "2026-10-01T14:30:05.000000Z",
+                  "timeRange": null,
+                  "sourceTimeText": "2026-10-01, 10:30:05",
+                  "sourceTimezone": "America/New_York",
+                  "orderEvidence": null
+                },
+                "sources": [
+                  {
+                    "namespace": "flex_trade",
+                    "sourceRef": "1234567891",
+                    "role": "trade",
+                    "quantity": -1,
+                    "fees": 2.5
+                  }
+                ],
+                "contractRef": {
+                  "contractId": "fop-loz6-c75-01",
+                  "revision": 1
+                },
+                "contracts": -1,
+                "price": 1.2,
+                "cashAmount": 1197.5,
+                "fees": 2.5,
+                "openClose": "O",
+                "includeInCost": true
+              }
+            ]
+          },
+          "duplicateDecisions": [
+            {
+              "decision": "same_fill",
+              "namespace": "flex_trade",
+              "sourceRef": "1234567999",
+              "eventIds": [
+                "evt-0000000007"
+              ],
+              "attestation": "the broker confirms one fill of 1 CLZ6 at 70.12 under two trade ids",
+              "source": null
+            },
+            {
+              "decision": "distinct_fill",
+              "namespace": "flex_trade",
+              "sourceRef": "1234567890",
+              "eventIds": [
+                "evt-0000000007"
+              ],
+              "attestation": "two fills: the broker lists both executions",
+              "source": null
+            }
+          ]
+        },
+        "expect": {
+          "path": "duplicateDecisions[0]",
+          "code": "rule:a_same_fill_decision_carries_its_row"
+        }
+      },
+      {
+        "type": "ImportRequest",
+        "name": "a distinct-fill row is sent once, in the package",
+        "value": {
+          "action": "import_cost_basis_events",
+          "requestId": "fop-c1-1",
+          "bookId": "fopbook0001",
+          "importBatchId": "batch-0000000001",
+          "clientTokenPrefix": "prefix-00000001",
+          "statement": {
+            "format": "flex_csv",
+            "fileName": "U1111111_2026-10.csv",
+            "fileSha256": "0000000000000000000000000000000000000000000000000000000000000003",
+            "account": "U1111111",
+            "periodFrom": "2026-10-01",
+            "periodThrough": "2026-10-31",
+            "checks": {
+              "accountConfirmed": true,
+              "periodFromBody": true
+            },
+            "confirmedDuplicates": 0
+          },
+          "supersedeTwsEventIds": [],
+          "expectedLedgerVersion": {
+            "eventCount": 3,
+            "liveEventCount": 3,
+            "maxSeq": 3,
+            "digest": "0000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "bookIdentity": {
+            "account": "U1111111",
+            "symbol": "CL",
+            "secType": "FUT",
+            "currency": "USD"
+          },
+          "fopPackage": {
+            "version": 1,
+            "engineVersion": 1,
+            "contracts": [
+              {
+                "secType": "FUT",
+                "contractId": "fut-clz6-0001",
+                "revision": 1,
+                "conId": 555,
+                "root": "CL",
+                "tradingClass": "CL",
+                "localSymbol": "CLZ6",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "futureContractMonth": "202612",
+                "futureLastTradeDate": "2026-11-19",
+                "futureLastTradeAsOf": null,
+                "futurePointValue": 1000,
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_statement",
+                "evidenceSummary": "Flex Financial Instrument row",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              },
+              {
+                "secType": "FOP",
+                "contractId": "fop-loz6-c75-01",
+                "revision": 1,
+                "conId": 9001,
+                "root": "CL",
+                "tradingClass": "LO",
+                "localSymbol": "LOZ6 C7500",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "optionRight": "C",
+                "optionStrike": 75,
+                "optionExpiry": "2026-11-17",
+                "optionExpiryAsOf": null,
+                "premiumMultiplier": 1000,
+                "deliverableFuturesPerOption": 1,
+                "settlementType": "physical_future",
+                "exerciseStyle": "american",
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_statement",
+                "evidenceSummary": "Flex Financial Instrument row",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              }
+            ],
+            "bindings": [],
+            "sourceRecords": [
+              {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567890",
+                "capabilityKey": "flex/trades/FUT/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FUT",
+                  "TradeID": "1234567890",
+                  "Symbol": "CLZ6",
+                  "Quantity": "1",
+                  "TradePrice": "70.12",
+                  "IBCommission": "-2.02",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": 1,
+                "statedFees": 2.02
+              },
+              {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567891",
+                "capabilityKey": "flex/trades/FOP/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FOP",
+                  "TradeID": "1234567891",
+                  "Symbol": "LOZ6 C7500",
+                  "Quantity": "-1",
+                  "TradePrice": "1.2",
+                  "IBCommission": "-2.5",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": -1,
+                "statedFees": 2.5
+              }
+            ],
+            "events": [
+              {
+                "kind": "futures_trade",
+                "account": "U1111111",
+                "source": "csv_import",
+                "externalRef": "1234567890",
+                "packageKey": null,
+                "note": "",
+                "time": {
+                  "exchangeTradeDate": "2026-10-01",
+                  "executedAtUtc": "2026-10-01T14:30:05.000000Z",
+                  "timeRange": null,
+                  "sourceTimeText": "2026-10-01, 10:30:05",
+                  "sourceTimezone": "America/New_York",
+                  "orderEvidence": null
+                },
+                "sources": [
+                  {
+                    "namespace": "flex_trade",
+                    "sourceRef": "1234567890",
+                    "role": "trade",
+                    "quantity": 1,
+                    "fees": 2.02
+                  }
+                ],
+                "contractRef": {
+                  "contractId": "fut-clz6-0001",
+                  "revision": 1
+                },
+                "futureContracts": 1,
+                "price": 70.12,
+                "cashAmount": -2.02,
+                "fees": 2.02,
+                "openClose": "O",
+                "includeInCost": true
+              },
+              {
+                "kind": "option_trade",
+                "account": "U1111111",
+                "source": "csv_import",
+                "externalRef": "1234567891",
+                "packageKey": null,
+                "note": "",
+                "time": {
+                  "exchangeTradeDate": "2026-10-01",
+                  "executedAtUtc": "2026-10-01T14:30:05.000000Z",
+                  "timeRange": null,
+                  "sourceTimeText": "2026-10-01, 10:30:05",
+                  "sourceTimezone": "America/New_York",
+                  "orderEvidence": null
+                },
+                "sources": [
+                  {
+                    "namespace": "flex_trade",
+                    "sourceRef": "1234567891",
+                    "role": "trade",
+                    "quantity": -1,
+                    "fees": 2.5
+                  }
+                ],
+                "contractRef": {
+                  "contractId": "fop-loz6-c75-01",
+                  "revision": 1
+                },
+                "contracts": -1,
+                "price": 1.2,
+                "cashAmount": 1197.5,
+                "fees": 2.5,
+                "openClose": "O",
+                "includeInCost": true
+              }
+            ]
+          },
+          "duplicateDecisions": [
+            {
+              "decision": "same_fill",
+              "namespace": "flex_trade",
+              "sourceRef": "1234567999",
+              "eventIds": [
+                "evt-0000000007"
+              ],
+              "attestation": "the broker confirms one fill of 1 CLZ6 at 70.12 under two trade ids",
+              "source": {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567999",
+                "capabilityKey": "flex/trades/FUT/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FUT",
+                  "TradeID": "1234567999",
+                  "Symbol": "CLZ6",
+                  "Quantity": "1",
+                  "TradePrice": "70.12",
+                  "IBCommission": "-2.02",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": 1,
+                "statedFees": 2.02
+              }
+            },
+            {
+              "decision": "distinct_fill",
+              "namespace": "flex_trade",
+              "sourceRef": "1234567890",
+              "eventIds": [
+                "evt-0000000007"
+              ],
+              "attestation": "two fills: the broker lists both executions",
+              "source": {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567890",
+                "capabilityKey": "flex/trades/FUT/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FUT",
+                  "TradeID": "1234567890",
+                  "Symbol": "CLZ6",
+                  "Quantity": "1",
+                  "TradePrice": "70.12",
+                  "IBCommission": "-2.02",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": 1,
+                "statedFees": 2.02
+              }
+            }
+          ]
+        },
+        "expect": {
+          "path": "duplicateDecisions[1]",
+          "code": "rule:a_distinct_fill_row_travels_in_the_package"
+        }
+      },
+      {
+        "type": "ImportRequest",
+        "name": "a duplicate decision states its check",
+        "value": {
+          "action": "import_cost_basis_events",
+          "requestId": "fop-c1-1",
+          "bookId": "fopbook0001",
+          "importBatchId": "batch-0000000001",
+          "clientTokenPrefix": "prefix-00000001",
+          "statement": {
+            "format": "flex_csv",
+            "fileName": "U1111111_2026-10.csv",
+            "fileSha256": "0000000000000000000000000000000000000000000000000000000000000003",
+            "account": "U1111111",
+            "periodFrom": "2026-10-01",
+            "periodThrough": "2026-10-31",
+            "checks": {
+              "accountConfirmed": true,
+              "periodFromBody": true
+            },
+            "confirmedDuplicates": 0
+          },
+          "supersedeTwsEventIds": [],
+          "expectedLedgerVersion": {
+            "eventCount": 3,
+            "liveEventCount": 3,
+            "maxSeq": 3,
+            "digest": "0000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "bookIdentity": {
+            "account": "U1111111",
+            "symbol": "CL",
+            "secType": "FUT",
+            "currency": "USD"
+          },
+          "fopPackage": {
+            "version": 1,
+            "engineVersion": 1,
+            "contracts": [
+              {
+                "secType": "FUT",
+                "contractId": "fut-clz6-0001",
+                "revision": 1,
+                "conId": 555,
+                "root": "CL",
+                "tradingClass": "CL",
+                "localSymbol": "CLZ6",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "futureContractMonth": "202612",
+                "futureLastTradeDate": "2026-11-19",
+                "futureLastTradeAsOf": null,
+                "futurePointValue": 1000,
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_statement",
+                "evidenceSummary": "Flex Financial Instrument row",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              },
+              {
+                "secType": "FOP",
+                "contractId": "fop-loz6-c75-01",
+                "revision": 1,
+                "conId": 9001,
+                "root": "CL",
+                "tradingClass": "LO",
+                "localSymbol": "LOZ6 C7500",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "optionRight": "C",
+                "optionStrike": 75,
+                "optionExpiry": "2026-11-17",
+                "optionExpiryAsOf": null,
+                "premiumMultiplier": 1000,
+                "deliverableFuturesPerOption": 1,
+                "settlementType": "physical_future",
+                "exerciseStyle": "american",
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_statement",
+                "evidenceSummary": "Flex Financial Instrument row",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              }
+            ],
+            "bindings": [],
+            "sourceRecords": [
+              {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567890",
+                "capabilityKey": "flex/trades/FUT/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FUT",
+                  "TradeID": "1234567890",
+                  "Symbol": "CLZ6",
+                  "Quantity": "1",
+                  "TradePrice": "70.12",
+                  "IBCommission": "-2.02",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": 1,
+                "statedFees": 2.02
+              },
+              {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567891",
+                "capabilityKey": "flex/trades/FOP/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FOP",
+                  "TradeID": "1234567891",
+                  "Symbol": "LOZ6 C7500",
+                  "Quantity": "-1",
+                  "TradePrice": "1.2",
+                  "IBCommission": "-2.5",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": -1,
+                "statedFees": 2.5
+              }
+            ],
+            "events": [
+              {
+                "kind": "futures_trade",
+                "account": "U1111111",
+                "source": "csv_import",
+                "externalRef": "1234567890",
+                "packageKey": null,
+                "note": "",
+                "time": {
+                  "exchangeTradeDate": "2026-10-01",
+                  "executedAtUtc": "2026-10-01T14:30:05.000000Z",
+                  "timeRange": null,
+                  "sourceTimeText": "2026-10-01, 10:30:05",
+                  "sourceTimezone": "America/New_York",
+                  "orderEvidence": null
+                },
+                "sources": [
+                  {
+                    "namespace": "flex_trade",
+                    "sourceRef": "1234567890",
+                    "role": "trade",
+                    "quantity": 1,
+                    "fees": 2.02
+                  }
+                ],
+                "contractRef": {
+                  "contractId": "fut-clz6-0001",
+                  "revision": 1
+                },
+                "futureContracts": 1,
+                "price": 70.12,
+                "cashAmount": -2.02,
+                "fees": 2.02,
+                "openClose": "O",
+                "includeInCost": true
+              },
+              {
+                "kind": "option_trade",
+                "account": "U1111111",
+                "source": "csv_import",
+                "externalRef": "1234567891",
+                "packageKey": null,
+                "note": "",
+                "time": {
+                  "exchangeTradeDate": "2026-10-01",
+                  "executedAtUtc": "2026-10-01T14:30:05.000000Z",
+                  "timeRange": null,
+                  "sourceTimeText": "2026-10-01, 10:30:05",
+                  "sourceTimezone": "America/New_York",
+                  "orderEvidence": null
+                },
+                "sources": [
+                  {
+                    "namespace": "flex_trade",
+                    "sourceRef": "1234567891",
+                    "role": "trade",
+                    "quantity": -1,
+                    "fees": 2.5
+                  }
+                ],
+                "contractRef": {
+                  "contractId": "fop-loz6-c75-01",
+                  "revision": 1
+                },
+                "contracts": -1,
+                "price": 1.2,
+                "cashAmount": 1197.5,
+                "fees": 2.5,
+                "openClose": "O",
+                "includeInCost": true
+              }
+            ]
+          },
+          "duplicateDecisions": [
+            {
+              "decision": "same_fill",
+              "namespace": "flex_trade",
+              "sourceRef": "1234567999",
+              "eventIds": [
+                "evt-0000000007"
+              ],
+              "attestation": "the broker confirms one fill of 1 CLZ6 at 70.12 under two trade ids",
+              "source": {
+                "account": "U1111111",
+                "namespace": "flex_trade",
+                "sourceRef": "1234567999",
+                "capabilityKey": "flex/trades/FUT/trade",
+                "format": "flex_csv",
+                "section": "Trades",
+                "rawFields": {
+                  "AssetClass": "FUT",
+                  "TradeID": "1234567999",
+                  "Symbol": "CLZ6",
+                  "Quantity": "1",
+                  "TradePrice": "70.12",
+                  "IBCommission": "-2.02",
+                  "TradeDate": "20261001",
+                  "Notes/Codes": "O"
+                },
+                "statedQuantity": 1,
+                "statedFees": 2.02
+              }
+            },
+            {
+              "decision": "distinct_fill",
+              "namespace": "flex_trade",
+              "sourceRef": "1234567890",
+              "eventIds": [
+                "evt-0000000007"
+              ],
+              "attestation": "",
+              "source": null
+            }
+          ]
+        },
+        "expect": {
+          "path": "duplicateDecisions[1].attestation",
+          "code": "minLength"
+        }
+      },
+      {
+        "type": "MetadataCommitRequest",
+        "name": "a binding adoption brings at most its option and future",
+        "value": {
+          "action": "commit_cost_basis_fop_metadata",
+          "requestId": "fop-c2-1",
+          "bookId": "fopbook0001",
+          "clientToken": "tok-meta-00001",
+          "expectedLedgerVersion": {
+            "eventCount": 3,
+            "liveEventCount": 3,
+            "maxSeq": 3,
+            "digest": "0000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "bookIdentity": {
+            "account": "U1111111",
+            "symbol": "CL",
+            "secType": "FUT",
+            "currency": "USD"
+          },
+          "engineVersion": 1,
+          "operation": {
+            "kind": "adopt_binding",
+            "binding": {
+              "bindingId": "bind-loz6-c75-1",
+              "revision": 2,
+              "optionContractId": "fop-loz6-c75-01",
+              "futureContractId": "fut-clf7-0001",
+              "status": "verified_broker",
+              "evidenceSummary": "statement underlying CLZ6",
+              "evidenceCredential": "cand-7f3a19c2",
+              "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+            },
+            "affected": [
+              {
+                "eventId": "evt-0000000002",
+                "reference": "binding",
+                "before": {
+                  "id": "bind-loz6-c75-1",
+                  "revision": 1
+                },
+                "after": {
+                  "id": "bind-loz6-c75-1",
+                  "revision": 2
+                }
+              }
+            ],
+            "contracts": [
+              {
+                "secType": "FUT",
+                "contractId": "fut-clf7-0001",
+                "revision": 1,
+                "conId": 556,
+                "root": "CL",
+                "tradingClass": "CL",
+                "localSymbol": "CLF7",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "futureContractMonth": "202701",
+                "futureLastTradeDate": "2026-12-17",
+                "futureLastTradeAsOf": null,
+                "futurePointValue": 1000,
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_broker",
+                "evidenceSummary": "IB contract details via underConId",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              },
+              {
+                "secType": "FUT",
+                "contractId": "fut-clf7-0002",
+                "revision": 1,
+                "conId": 556,
+                "root": "CL",
+                "tradingClass": "CL",
+                "localSymbol": "CLF7",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "futureContractMonth": "202701",
+                "futureLastTradeDate": "2026-12-17",
+                "futureLastTradeAsOf": null,
+                "futurePointValue": 1000,
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_broker",
+                "evidenceSummary": "IB contract details via underConId",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              },
+              {
+                "secType": "FUT",
+                "contractId": "fut-clf7-0003",
+                "revision": 1,
+                "conId": 556,
+                "root": "CL",
+                "tradingClass": "CL",
+                "localSymbol": "CLF7",
+                "exchange": "NYMEX",
+                "currency": "USD",
+                "futureContractMonth": "202701",
+                "futureLastTradeDate": "2026-12-17",
+                "futureLastTradeAsOf": null,
+                "futurePointValue": 1000,
+                "ruleVersion": "NYMEX-CL-v1",
+                "evidenceStatus": "verified_broker",
+                "evidenceSummary": "IB contract details via underConId",
+                "observedAtUtc": "2026-10-01T15:00:00.000000Z"
+              }
+            ]
+          }
+        },
+        "expect": {
+          "path": "operation.contracts",
+          "code": "maxItems"
+        }
+      },
+      {
+        "type": "FopPositionsResponse",
+        "name": "positions not yet read carry no credential",
+        "value": {
+          "action": "cost_basis_fop_positions",
+          "requestId": "fop-c3-1",
+          "success": true,
+          "bookId": "fopbook0001",
+          "account": "U1111111",
+          "observedAtUtc": "2026-11-12T15:00:01.000000Z",
+          "ledgerVersion": {
+            "eventCount": 5,
+            "liveEventCount": 5,
+            "maxSeq": 5,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "accountConnected": true,
+          "positionsReady": false,
+          "positions": [
+            {
+              "account": "U1111111",
+              "conId": 556,
+              "secType": "FUT",
+              "symbol": "CL",
+              "localSymbol": "CLF7",
+              "tradingClass": "CL",
+              "lastTradeDateOrContractMonth": "20261217",
+              "right": null,
+              "strike": null,
+              "multiplier": 1000,
+              "currency": "USD",
+              "position": 1,
+              "averageCost": 72502.02
+            },
+            {
+              "account": "U1111111",
+              "conId": 9001,
+              "secType": "FOP",
+              "symbol": "CL",
+              "localSymbol": "LOZ6 C7500",
+              "tradingClass": "LO",
+              "lastTradeDateOrContractMonth": "20261117",
+              "right": "C",
+              "strike": 75,
+              "multiplier": 1000,
+              "currency": "USD",
+              "position": -1,
+              "averageCost": 1197.5
+            }
+          ],
+          "evidenceCredential": "eyJ2IjoxfQ.c2lnbmF0dXJl"
+        },
+        "expect": {
+          "path": "",
+          "code": "rule:only_read_positions_carry_a_credential"
+        }
+      },
+      {
+        "type": "FopPositionsResponse",
+        "name": "a position is never zero",
+        "value": {
+          "action": "cost_basis_fop_positions",
+          "requestId": "fop-c3-1",
+          "success": true,
+          "bookId": "fopbook0001",
+          "account": "U1111111",
+          "observedAtUtc": "2026-11-12T15:00:01.000000Z",
+          "ledgerVersion": {
+            "eventCount": 5,
+            "liveEventCount": 5,
+            "maxSeq": 5,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "accountConnected": true,
+          "positionsReady": true,
+          "positions": [
+            {
+              "account": "U1111111",
+              "conId": 556,
+              "secType": "FUT",
+              "symbol": "CL",
+              "localSymbol": "CLF7",
+              "tradingClass": "CL",
+              "lastTradeDateOrContractMonth": "20261217",
+              "right": null,
+              "strike": null,
+              "multiplier": 1000,
+              "currency": "USD",
+              "position": 0,
+              "averageCost": 72502.02
+            },
+            {
+              "account": "U1111111",
+              "conId": 9001,
+              "secType": "FOP",
+              "symbol": "CL",
+              "localSymbol": "LOZ6 C7500",
+              "tradingClass": "LO",
+              "lastTradeDateOrContractMonth": "20261117",
+              "right": "C",
+              "strike": 75,
+              "multiplier": 1000,
+              "currency": "USD",
+              "position": -1,
+              "averageCost": 1197.5
+            }
+          ],
+          "evidenceCredential": "eyJ2IjoxfQ.c2lnbmF0dXJl"
+        },
+        "expect": {
+          "path": "positions[0].position",
+          "code": "nonzero"
+        }
+      },
+      {
+        "type": "SnapshotRequest",
+        "name": "a snapshot keeps positions only in their frozen shape",
+        "value": {
+          "action": "save_cost_basis_snapshot",
+          "requestId": "fop-c3-2",
+          "bookId": "fopbook0001",
+          "expectedLedgerVersion": {
+            "eventCount": 3,
+            "liveEventCount": 3,
+            "maxSeq": 3,
+            "digest": "0000000000000000000000000000000000000000000000000000000000000001"
+          },
+          "bookIdentity": {
+            "account": "U1111111",
+            "symbol": "CL",
+            "secType": "FUT",
+            "currency": "USD"
+          },
+          "asOfDate": "2026-10-02",
+          "summary": {
+            "ledgerVersion": {
+              "eventCount": 3,
+              "liveEventCount": 3,
+              "maxSeq": 3,
+              "digest": "0000000000000000000000000000000000000000000000000000000000000001"
+            },
+            "quoteBatchId": "quotes-000001",
+            "quotes": [
+              {
+                "contractId": "fut-clz6-0001",
+                "bid": 70.1,
+                "ask": 70.12,
+                "last": 70.11,
+                "mark": 70.11,
+                "markSource": "mid",
+                "referenceDate": null,
+                "observedAtUtc": "2026-10-02T14:00:00.250000Z",
+                "marketDataType": 1
+              },
+              {
+                "contractId": "fop-loz6-c75-01",
+                "bid": null,
+                "ask": 1.4,
+                "last": null,
+                "mark": 1.4,
+                "markSource": "one_sided_conservative",
+                "referenceDate": null,
+                "observedAtUtc": "2026-10-02T14:00:00.250000Z",
+                "marketDataType": 1
+              },
+              {
+                "contractId": "fut-clf7-0001",
+                "bid": null,
+                "ask": null,
+                "last": null,
+                "mark": 71.02,
+                "markSource": "settlement_reference",
+                "referenceDate": "2026-10-01",
+                "observedAtUtc": null,
+                "marketDataType": null
+              }
+            ],
+            "completeness": {
+              "quantity": "complete",
+              "openingCost": "complete",
+              "binding": "complete",
+              "marketData": "incomplete",
+              "coverage": "complete",
+              "cash": "not_checked"
+            }
+          },
+          "accountScope": "U1111111",
+          "twsSnapshot": {
+            "account": "U1111111",
+            "observedAtUtc": "2026-11-12T15:00:01.000000Z",
+            "ledgerVersion": {
+              "eventCount": 5,
+              "liveEventCount": 5,
+              "maxSeq": 5,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "accountConnected": true,
+            "positionsReady": true,
+            "positions": [
+              {
+                "account": "U1111111",
+                "conId": 556,
+                "secType": "FUT",
+                "symbol": "CL",
+                "localSymbol": "CLF7",
+                "tradingClass": "CL",
+                "lastTradeDateOrContractMonth": "20261217",
+                "right": null,
+                "strike": null,
+                "multiplier": 1000,
+                "currency": "USD",
+                "position": 1,
+                "averageCost": 72502.02
+              },
+              {
+                "account": "U1111111",
+                "conId": 9001,
+                "secType": "FOP",
+                "symbol": "CL",
+                "localSymbol": "LOZ6 C7500",
+                "tradingClass": "LO",
+                "lastTradeDateOrContractMonth": "20261117",
+                "right": "C",
+                "strike": 75,
+                "multiplier": 1000,
+                "currency": "USD",
+                "position": -1,
+                "averageCost": 1197.5
+              }
+            ],
+            "evidenceCredential": "eyJ2IjoxfQ.c2lnbmF0dXJl",
+            "rows": [
+              {
+                "contractId": "fut-cl-202701-0a1b2c",
+                "localSymbol": "CLF7",
+                "ledgerQuantity": 1,
+                "twsQuantity": 1,
+                "quantityStatus": "matched",
+                "ledgerAverage": 72.5,
+                "twsAverage": 72.50202,
+                "avgCostStatus": "matched",
+                "note": "IB AvgCost includes commissions"
+              },
+              {
+                "contractId": "fop-cl-lo-20261117-c75-0a1b2c",
+                "localSymbol": "LOZ6 C7500",
+                "ledgerQuantity": -1,
+                "twsQuantity": -1,
+                "quantityStatus": "matched",
+                "ledgerAverage": 1.1975,
+                "twsAverage": 1.1975,
+                "avgCostStatus": "matched",
+                "note": ""
+              }
+            ],
+            "quantityStatus": "matched",
+            "avgCostStatus": "matched"
+          },
+          "reconciled": true,
+          "note": ""
+        },
+        "expect": {
+          "path": "twsSnapshot.kind",
+          "code": "missing"
         }
       }
     ]

@@ -1,0 +1,440 @@
+[
+  {
+    "snapshot_id": "2e131d8bdd5e42f5a9a053821af6c5d5",
+    "events_sha256": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c",
+    "reconciled": 1,
+    "summary": {
+      "completeness": {
+        "binding": "complete",
+        "cash": "not_checked",
+        "coverage": "incomplete",
+        "marketData": "not_checked",
+        "openingCost": "complete",
+        "quantity": "complete"
+      },
+      "ledgerVersion": {
+        "digest": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c",
+        "eventCount": 7,
+        "liveEventCount": 7,
+        "maxSeq": 7
+      },
+      "quoteBatchId": null,
+      "quotes": []
+    },
+    "twsSnapshot": {
+      "account": "U1111111",
+      "accountConnected": true,
+      "avgCostStatus": "matched",
+      "kind": "fop_positions",
+      "ledgerVersion": {
+        "digest": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c",
+        "eventCount": 7,
+        "liveEventCount": 7,
+        "maxSeq": 7
+      },
+      "observedAtUtc": "2026-09-25T15:18:07.405742Z",
+      "positions": [
+        {
+          "account": "U1111111",
+          "averageCost": 72505,
+          "conId": 556,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "CLF7",
+          "multiplier": 1000,
+          "position": 2,
+          "right": null,
+          "secType": "FUT",
+          "strike": null,
+          "symbol": "CL",
+          "tradingClass": null
+        },
+        {
+          "account": "U1111111",
+          "averageCost": 1497.5,
+          "conId": 9003,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "LOF7 C8000",
+          "multiplier": 1000,
+          "position": -1,
+          "right": "C",
+          "secType": "FOP",
+          "strike": 0,
+          "symbol": "CL",
+          "tradingClass": null
+        },
+        {
+          "account": "U1111111",
+          "averageCost": 1200,
+          "conId": 9001,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "LOZ6 C7500",
+          "multiplier": 1000,
+          "position": -1,
+          "right": "C",
+          "secType": "FOP",
+          "strike": 0,
+          "symbol": "CL",
+          "tradingClass": null
+        },
+        {
+          "account": "U1111111",
+          "averageCost": 800,
+          "conId": 9002,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "LOZ6 P6500",
+          "multiplier": 1000,
+          "position": 1,
+          "right": "C",
+          "secType": "FOP",
+          "strike": 0,
+          "symbol": "CL",
+          "tradingClass": null
+        }
+      ],
+      "positionsReady": true,
+      "quantityStatus": "matched",
+      "rows": [
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fut-cl-202701-8f8222",
+          "ledgerAverage": 72.5,
+          "ledgerQuantity": 2,
+          "localSymbol": "CLF7",
+          "note": "AvgCost：IB AvgCost 含佣金、账本期货均价不含费用；差 0.005",
+          "quantityStatus": "matched",
+          "twsAverage": 72.505,
+          "twsQuantity": 2
+        },
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fop-cl-lo-20261216-c80-8f8222",
+          "ledgerAverage": 1.4975,
+          "ledgerQuantity": -1,
+          "localSymbol": "LOF7 C8000",
+          "note": "AvgCost：两边都含佣金；差 0",
+          "quantityStatus": "matched",
+          "twsAverage": 1.4975,
+          "twsQuantity": -1
+        },
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fop-cl-lo-20261117-c75-8f8222",
+          "ledgerAverage": 1.2,
+          "ledgerQuantity": -1,
+          "localSymbol": "LOZ6 C7500",
+          "note": "AvgCost：两边都含佣金；差 0",
+          "quantityStatus": "matched",
+          "twsAverage": 1.2,
+          "twsQuantity": -1
+        },
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fop-cl-lo-20261117-p65-8f8222",
+          "ledgerAverage": 0.8,
+          "ledgerQuantity": 1,
+          "localSymbol": "LOZ6 P6500",
+          "note": "AvgCost：两边都含佣金；差 0",
+          "quantityStatus": "matched",
+          "twsAverage": 0.8,
+          "twsQuantity": 1
+        }
+      ]
+    }
+  },
+  {
+    "snapshot_id": "0f2a754fa97b430890bd96c5d21c086d",
+    "events_sha256": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c",
+    "reconciled": 0,
+    "summary": {
+      "completeness": {
+        "binding": "complete",
+        "cash": "not_checked",
+        "coverage": "incomplete",
+        "marketData": "not_checked",
+        "openingCost": "complete",
+        "quantity": "complete"
+      },
+      "ledgerVersion": {
+        "digest": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c",
+        "eventCount": 7,
+        "liveEventCount": 7,
+        "maxSeq": 7
+      },
+      "quoteBatchId": null,
+      "quotes": []
+    },
+    "twsSnapshot": {
+      "account": "U1111111",
+      "accountConnected": true,
+      "avgCostStatus": "matched",
+      "kind": "fop_positions",
+      "ledgerVersion": {
+        "digest": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c",
+        "eventCount": 7,
+        "liveEventCount": 7,
+        "maxSeq": 7
+      },
+      "observedAtUtc": "2026-09-25T15:18:07.614644Z",
+      "positions": [
+        {
+          "account": "U1111111",
+          "averageCost": 72505,
+          "conId": 556,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "CLF7",
+          "multiplier": 1000,
+          "position": 1,
+          "right": null,
+          "secType": "FUT",
+          "strike": null,
+          "symbol": "CL",
+          "tradingClass": null
+        },
+        {
+          "account": "U1111111",
+          "averageCost": 1497.5,
+          "conId": 9003,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "LOF7 C8000",
+          "multiplier": 1000,
+          "position": -1,
+          "right": "C",
+          "secType": "FOP",
+          "strike": 0,
+          "symbol": "CL",
+          "tradingClass": null
+        },
+        {
+          "account": "U1111111",
+          "averageCost": 1200,
+          "conId": 9001,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "LOZ6 C7500",
+          "multiplier": 1000,
+          "position": -1,
+          "right": "C",
+          "secType": "FOP",
+          "strike": 0,
+          "symbol": "CL",
+          "tradingClass": null
+        },
+        {
+          "account": "U1111111",
+          "averageCost": 800,
+          "conId": 9002,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "LOZ6 P6500",
+          "multiplier": 1000,
+          "position": 1,
+          "right": "C",
+          "secType": "FOP",
+          "strike": 0,
+          "symbol": "CL",
+          "tradingClass": null
+        }
+      ],
+      "positionsReady": true,
+      "quantityStatus": "mismatch",
+      "rows": [
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fut-cl-202701-8f8222",
+          "ledgerAverage": 72.5,
+          "ledgerQuantity": 2,
+          "localSymbol": "CLF7",
+          "note": "AvgCost：IB AvgCost 含佣金、账本期货均价不含费用；差 0.005",
+          "quantityStatus": "mismatch",
+          "twsAverage": 72.505,
+          "twsQuantity": 1
+        },
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fop-cl-lo-20261216-c80-8f8222",
+          "ledgerAverage": 1.4975,
+          "ledgerQuantity": -1,
+          "localSymbol": "LOF7 C8000",
+          "note": "AvgCost：两边都含佣金；差 0",
+          "quantityStatus": "matched",
+          "twsAverage": 1.4975,
+          "twsQuantity": -1
+        },
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fop-cl-lo-20261117-c75-8f8222",
+          "ledgerAverage": 1.2,
+          "ledgerQuantity": -1,
+          "localSymbol": "LOZ6 C7500",
+          "note": "AvgCost：两边都含佣金；差 0",
+          "quantityStatus": "matched",
+          "twsAverage": 1.2,
+          "twsQuantity": -1
+        },
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fop-cl-lo-20261117-p65-8f8222",
+          "ledgerAverage": 0.8,
+          "ledgerQuantity": 1,
+          "localSymbol": "LOZ6 P6500",
+          "note": "AvgCost：两边都含佣金；差 0",
+          "quantityStatus": "matched",
+          "twsAverage": 0.8,
+          "twsQuantity": 1
+        }
+      ]
+    }
+  },
+  {
+    "snapshot_id": "d72e737ff0d94e5ea36e8fe5e8b3534f",
+    "events_sha256": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c",
+    "reconciled": 1,
+    "summary": {
+      "completeness": {
+        "binding": "complete",
+        "cash": "not_checked",
+        "coverage": "incomplete",
+        "marketData": "not_checked",
+        "openingCost": "complete",
+        "quantity": "complete"
+      },
+      "ledgerVersion": {
+        "digest": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c",
+        "eventCount": 7,
+        "liveEventCount": 7,
+        "maxSeq": 7
+      },
+      "quoteBatchId": null,
+      "quotes": []
+    },
+    "twsSnapshot": {
+      "account": "U1111111",
+      "accountConnected": true,
+      "avgCostStatus": "partial",
+      "kind": "fop_positions",
+      "ledgerVersion": {
+        "digest": "a9781dfbd84190451e719e281ca62e3d6fd11d328a1feeda5e66857b602b736c",
+        "eventCount": 7,
+        "liveEventCount": 7,
+        "maxSeq": 7
+      },
+      "observedAtUtc": "2026-09-25T15:18:07.923119Z",
+      "positions": [
+        {
+          "account": "U1111111",
+          "averageCost": 72505,
+          "conId": 556,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "CLF7",
+          "multiplier": null,
+          "position": 2,
+          "right": null,
+          "secType": "FUT",
+          "strike": null,
+          "symbol": "CL",
+          "tradingClass": null
+        },
+        {
+          "account": "U1111111",
+          "averageCost": 1497.5,
+          "conId": 9003,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "LOF7 C8000",
+          "multiplier": 1000,
+          "position": -1,
+          "right": "C",
+          "secType": "FOP",
+          "strike": 0,
+          "symbol": "CL",
+          "tradingClass": null
+        },
+        {
+          "account": "U1111111",
+          "averageCost": 1200,
+          "conId": 9001,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "LOZ6 C7500",
+          "multiplier": 1000,
+          "position": -1,
+          "right": "C",
+          "secType": "FOP",
+          "strike": 0,
+          "symbol": "CL",
+          "tradingClass": null
+        },
+        {
+          "account": "U1111111",
+          "averageCost": 800,
+          "conId": 9002,
+          "currency": null,
+          "lastTradeDateOrContractMonth": null,
+          "localSymbol": "LOZ6 P6500",
+          "multiplier": 1000,
+          "position": 1,
+          "right": "C",
+          "secType": "FOP",
+          "strike": 0,
+          "symbol": "CL",
+          "tradingClass": null
+        }
+      ],
+      "positionsReady": true,
+      "quantityStatus": "matched",
+      "rows": [
+        {
+          "avgCostStatus": "not_comparable",
+          "contractId": "fut-cl-202701-8f8222",
+          "ledgerAverage": null,
+          "ledgerQuantity": 2,
+          "localSymbol": "CLF7",
+          "note": "AvgCost：单位不明：TWS 乘数 缺失，账本 1000",
+          "quantityStatus": "matched",
+          "twsAverage": null,
+          "twsQuantity": 2
+        },
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fop-cl-lo-20261216-c80-8f8222",
+          "ledgerAverage": 1.4975,
+          "ledgerQuantity": -1,
+          "localSymbol": "LOF7 C8000",
+          "note": "AvgCost：两边都含佣金；差 0",
+          "quantityStatus": "matched",
+          "twsAverage": 1.4975,
+          "twsQuantity": -1
+        },
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fop-cl-lo-20261117-c75-8f8222",
+          "ledgerAverage": 1.2,
+          "ledgerQuantity": -1,
+          "localSymbol": "LOZ6 C7500",
+          "note": "AvgCost：两边都含佣金；差 0",
+          "quantityStatus": "matched",
+          "twsAverage": 1.2,
+          "twsQuantity": -1
+        },
+        {
+          "avgCostStatus": "matched",
+          "contractId": "fop-cl-lo-20261117-p65-8f8222",
+          "ledgerAverage": 0.8,
+          "ledgerQuantity": 1,
+          "localSymbol": "LOZ6 P6500",
+          "note": "AvgCost：两边都含佣金；差 0",
+          "quantityStatus": "matched",
+          "twsAverage": 0.8,
+          "twsQuantity": 1
+        }
+      ]
+    }
+  }
+]

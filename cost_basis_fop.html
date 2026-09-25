@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>FOP 成本账本 — Option Combo Simulator</title>
-    <link rel="stylesheet" href="cost_basis_fop.css?v=297831611007">
+    <link rel="stylesheet" href="cost_basis_fop.css?v=e911c3da4838">
 </head>
 <body>
     <header class="fop-header">
@@ -32,18 +32,316 @@
             <p id="message-text"></p>
         </section>
 
-        <section class="fop-card" id="book-view" hidden aria-labelledby="book-title">
-            <h2 id="book-title"></h2>
-            <dl class="fop-identity" id="book-identity"></dl>
-            <p class="fop-state" id="book-state"></p>
-            <p><a id="book-legacy-link" href="cost_basis.html">在旧页面查看、导出或删除</a></p>
-        </section>
+        <div class="fop-stack" id="book-view" hidden>
+            <section class="fop-card" aria-labelledby="book-title">
+                <h2 id="book-title"></h2>
+                <dl class="fop-identity" id="book-identity"></dl>
+                <p class="fop-state" id="book-state"></p>
+                <p><a id="book-legacy-link" href="cost_basis.html">在旧页面查看、导出或删除</a></p>
+                <div class="fop-actions" id="ledger-actions" hidden>
+                    <button type="button" id="ledger-reload">重新读取账本</button>
+                    <button type="button" id="quote-refresh">取一次报价</button>
+                    <label class="fop-inline" for="ledger-zone">账户时区
+                        <input type="text" id="ledger-zone" list="preview-zones" autocomplete="off" spellcheck="false"
+                            placeholder="如 America/New_York"></label>
+                </div>
+                <p class="fop-state" id="ledger-status" role="status"></p>
+                <p class="fop-state fop-warning" id="writes-note" hidden></p>
+            </section>
+
+            <div class="fop-stack" id="ledger-view" hidden>
+                <section class="fop-card" aria-labelledby="overview-title">
+                    <h2 id="overview-title">总览</h2>
+                    <p class="fop-headline"><span id="overview-label"></span> <strong id="overview-value"></strong>
+                        <span class="fop-tag" id="overview-tag"></span></p>
+                    <p class="fop-state" id="overview-scope"></p>
+                    <div class="fop-table-wrap" id="overview-table"></div>
+                    <p class="fop-state" id="overview-identity"></p>
+                    <h3>买方期权（已含在上面的 Co、Vo、E 中，不重复计入）</h3>
+                    <div class="fop-table-wrap" id="overview-buyer"></div>
+                </section>
+
+                <section class="fop-card" aria-labelledby="breakeven-title">
+                    <h2 id="breakeven-title">回本价</h2>
+                    <div class="fop-table-wrap" id="breakeven-table"></div>
+                    <p class="fop-state" id="breakeven-note"></p>
+                    <p class="fop-state fop-warning" id="breakeven-hint" hidden></p>
+                </section>
+
+                <section class="fop-card" aria-labelledby="integrity-title">
+                    <h2 id="integrity-title">完整性</h2>
+                    <div class="fop-table-wrap" id="integrity-table"></div>
+                    <p class="fop-state">完整性只说明账本自身的数据是否齐全，不代表已与 TWS 或券商对账；对账结果见“持仓对账”。</p>
+                </section>
+
+                <section class="fop-card" aria-labelledby="reconcile-title">
+                    <h2 id="reconcile-title">持仓对账（TWS）</h2>
+                    <p class="fop-state">按账户与完整合约核对账本与 TWS 持仓。数量、AvgCost、期权绑定、现金分开判断：AvgCost 只是旁证，现金首版固定为未核对。读取和保存快照都不改变经济流水。</p>
+                    <div class="fop-actions"><button type="button" id="reconcile-read">读取 TWS 持仓</button></div>
+                    <p class="fop-state" id="reconcile-status" role="status"></p>
+                    <div class="fop-table-wrap" id="reconcile-summary"></div>
+                    <div class="fop-table-wrap" id="reconcile-table"></div>
+                    <div class="fop-form">
+                        <label for="snapshot-note">快照备注</label>
+                        <input type="text" id="snapshot-note" autocomplete="off" placeholder="例如：11 月 12 日收盘后">
+                        <span></span><button type="button" id="snapshot-save" data-writes>保存对账快照</button>
+                    </div>
+                    <p class="fop-state" id="snapshot-status" role="status"></p>
+                    <h3>已保存的快照</h3>
+                    <div class="fop-table-wrap" id="snapshot-list"></div>
+                    <div class="fop-form">
+                        <label for="snapshot-pick">查看快照</label>
+                        <select id="snapshot-pick"></select>
+                    </div>
+                    <div id="snapshot-detail"></div>
+                </section>
+
+                <section class="fop-card" aria-labelledby="futures-title">
+                    <h2 id="futures-title">期货月份</h2>
+                    <div class="fop-table-wrap" id="futures-table"></div>
+                    <p class="fop-state" id="futures-note"></p>
+                </section>
+
+                <section class="fop-card" aria-labelledby="options-title">
+                    <h2 id="options-title">期权</h2>
+                    <div class="fop-table-wrap" id="options-table"></div>
+                </section>
+
+                <section class="fop-card" aria-labelledby="binding-title">
+                    <h2 id="binding-title">期权绑定证据</h2>
+                    <p class="fop-state">对应期货待补全或只是人工核实的期权，可以向券商查询它交割的真实期货。查询不写入；采纳前列出将补全的合约条款、受影响的事件与引用修订，确认后才提交。</p>
+                    <div class="fop-form">
+                        <label for="binding-option">期权</label>
+                        <select id="binding-option"></select>
+                        <span></span><button type="button" id="binding-query">向券商查询</button>
+                    </div>
+                    <p class="fop-state" id="binding-status" role="status"></p>
+                    <div id="binding-result"></div>
+                    <div class="fop-form" id="binding-confirm" hidden>
+                        <span></span><button type="button" id="binding-adopt" data-writes>确认采纳</button>
+                    </div>
+                </section>
+
+                <section class="fop-card" aria-labelledby="coverage-title">
+                    <h2 id="coverage-title">交割覆盖</h2>
+                    <div class="fop-table-wrap" id="coverage-table"></div>
+                    <p class="fop-state" id="coverage-note"></p>
+                </section>
+
+                <section class="fop-card" aria-labelledby="roll-title">
+                    <h2 id="roll-title">换月（ROLL）</h2>
+                    <p class="fop-state">由真实成交在读取时推导，不写入账本，也不产生损益。</p>
+                    <div class="fop-table-wrap" id="roll-table"></div>
+                </section>
+
+                <section class="fop-card" aria-labelledby="cycles-title">
+                    <h2 id="cycles-title">记账周期</h2>
+                    <div class="fop-table-wrap" id="cycles-table"></div>
+                    <p class="fop-state" id="cycles-note"></p>
+                    <div class="fop-form">
+                        <label for="cycle-anchor">在此事件后结束周期</label>
+                        <select id="cycle-anchor"></select>
+                        <label for="cycle-label">周期说明</label>
+                        <input type="text" id="cycle-label" autocomplete="off">
+                        <span></span><button type="button" id="cycle-close" data-writes>结束当前周期</button>
+                        <label for="cycle-revoke-id">撤销周期边界</label>
+                        <select id="cycle-revoke-id"></select>
+                        <span></span><button type="button" id="cycle-revoke" data-writes>撤销所选边界</button>
+                    </div>
+                </section>
+
+                <section class="fop-card" aria-labelledby="events-title">
+                    <h2 id="events-title">流水</h2>
+                    <div class="fop-table-wrap" id="events-table"></div>
+                    <div class="fop-form">
+                        <label for="void-event">冲销事件</label>
+                        <select id="void-event"></select>
+                        <label for="void-reason">冲销原因</label>
+                        <input type="text" id="void-reason" autocomplete="off">
+                        <span></span><button type="button" id="void-submit" data-writes>冲销所选事件</button>
+                    </div>
+                </section>
+
+                <section class="fop-card" aria-labelledby="import-title">
+                    <h2 id="import-title">导入报表</h2>
+                    <p class="fop-state">按账本现有历史、已登记的报表期间和上方的账户时区预览；确认前不写入。</p>
+                    <div class="fop-form">
+                        <label for="import-file">报表 CSV</label>
+                        <input type="file" id="import-file" accept=".csv,text/csv">
+                        <label for="import-baseline">期初参考价</label>
+                        <textarea id="import-baseline" rows="2" placeholder="每行一个：合约=价格，如 CLZ6=70.5"></textarea>
+                        <label for="import-confirm-account">遮罩账户</label>
+                        <label class="fop-inline"><input type="checkbox" id="import-confirm-account">
+                            报表中的遮罩账户就是本账本的账户</label>
+                        <label for="import-claim">人工认领</label>
+                        <label class="fop-inline"><input type="checkbox" id="import-claim">
+                            我已逐行核对，将“仅合成样本”的行作为人工核实事件认领</label>
+                        <label for="import-attestation">核对说明</label>
+                        <input type="text" id="import-attestation" autocomplete="off"
+                            placeholder="例如：已与 2026 年 10 月对账单逐行核对">
+                        <span></span><button type="button" id="import-submit" data-writes>确认导入</button>
+                    </div>
+                    <p class="fop-state" id="import-status" role="status"></p>
+                    <div id="import-result" hidden>
+                        <dl class="fop-identity" id="import-summary"></dl>
+                        <h3>阻断问题</h3>
+                        <ul class="fop-issues" id="import-problems"></ul>
+                        <div id="import-duplicates-block" hidden>
+                            <h3>疑似重复：逐行核实</h3>
+                            <p class="fop-state">这些行与已记账的成交同合约、同方向、同一天，但没有证据证明是同一笔还是另一笔。逐行选择并写明核对依据，再重新预览；不处理就不能导入。</p>
+                            <div id="import-duplicates"></div>
+                            <button type="button" id="import-decide">按所选决定重新预览</button>
+                        </div>
+                        <h3>提示</h3>
+                        <ul class="fop-issues" id="import-warnings"></ul>
+                        <h3>事件</h3>
+                        <div class="fop-table-wrap" id="import-events"></div>
+                        <h3>数量证明</h3>
+                        <div class="fop-table-wrap" id="import-proof"></div>
+                        <h3>报表已实现盈亏对照（旁证，不改写账本）</h3>
+                        <p class="fop-state" id="import-realized-note"></p>
+                        <div class="fop-table-wrap" id="import-realized"></div>
+                        <h3>逐行识别</h3>
+                        <div class="fop-table-wrap" id="import-rows"></div>
+                    </div>
+                    <h3>疑似重复的人工核实记录</h3>
+                    <div class="fop-table-wrap" id="import-decision-log"></div>
+                </section>
+
+                <section class="fop-card" aria-labelledby="manual-title">
+                    <h2 id="manual-title">手工记账</h2>
+                    <p class="fop-state">例外处理：报表是主输入。手工录入的事件始终显示为人工核实。</p>
+                    <div class="fop-form" id="manual-form">
+                        <label for="manual-kind">种类</label>
+                        <select id="manual-kind">
+                            <option value="futures_trade">期货成交</option>
+                            <option value="option_trade">期权成交</option>
+                            <option value="assignment">期权被指派</option>
+                            <option value="exercise">期权行权</option>
+                            <option value="expiry">期权到期</option>
+                            <option value="fee">费用</option>
+                        </select>
+                        <label for="manual-contract" data-kinds="futures_trade option_trade assignment exercise expiry">合约</label>
+                        <select id="manual-contract" data-kinds="futures_trade option_trade assignment exercise expiry"></select>
+                        <label for="manual-month" data-kinds="futures_trade">新期货交割月</label>
+                        <input type="text" id="manual-month" data-kinds="futures_trade" placeholder="YYYYMM（不是最后交易日）">
+                        <label for="manual-symbol" data-kinds="futures_trade option_trade">新合约本地代码</label>
+                        <input type="text" id="manual-symbol" data-kinds="futures_trade option_trade" placeholder="如 CLZ6 或 LOZ6 C7500">
+                        <label for="manual-right" data-kinds="option_trade">新期权 C/P、行权价</label>
+                        <span class="fop-inline" data-kinds="option_trade">
+                            <select id="manual-right"><option value="C">Call</option><option value="P">Put</option></select>
+                            <input type="text" id="manual-strike" placeholder="行权价"></span>
+                        <label for="manual-expiry" data-kinds="option_trade">新期权到期日、交易类</label>
+                        <span class="fop-inline" data-kinds="option_trade">
+                            <input type="text" id="manual-expiry" placeholder="YYYY-MM-DD">
+                            <input type="text" id="manual-class" placeholder="如 LO"></span>
+                        <label for="manual-future" data-kinds="option_trade">新期权交割的期货</label>
+                        <select id="manual-future" data-kinds="option_trade"></select>
+                        <label for="manual-quantity" data-kinds="futures_trade option_trade assignment exercise expiry">张数</label>
+                        <input type="text" id="manual-quantity" data-kinds="futures_trade option_trade assignment exercise expiry"
+                            placeholder="买为正、卖为负；到期按平仓方向">
+                        <label for="manual-price" data-kinds="futures_trade option_trade">价格</label>
+                        <input type="text" id="manual-price" data-kinds="futures_trade option_trade"
+                            placeholder="期货可为零或负">
+                        <label for="manual-fees" data-kinds="futures_trade option_trade assignment exercise expiry">费用</label>
+                        <input type="text" id="manual-fees" data-kinds="futures_trade option_trade assignment exercise expiry"
+                            placeholder="0">
+                        <label for="manual-fee-category" data-kinds="fee">费用归属、金额</label>
+                        <span class="fop-inline" data-kinds="fee">
+                            <select id="manual-fee-category">
+                                <option value="futures">期货</option>
+                                <option value="short_option">卖方期权</option>
+                                <option value="long_option">买方期权</option>
+                                <option value="strategy">策略</option>
+                            </select>
+                            <input type="text" id="manual-fee-amount" placeholder="金额">
+                            <label class="fop-inline"><input type="checkbox" id="manual-fee-refund">返佣</label></span>
+                        <label for="manual-fee-source" data-kinds="fee">费用的源成交</label>
+                        <select id="manual-fee-source" data-kinds="fee"></select>
+                        <label for="manual-local">成交时刻（账户时区）</label>
+                        <input type="datetime-local" id="manual-local" step="1">
+                        <label for="manual-date">或只填日期</label>
+                        <input type="date" id="manual-date">
+                        <label for="manual-open-close" data-kinds="futures_trade option_trade">开平</label>
+                        <select id="manual-open-close" data-kinds="futures_trade option_trade">
+                            <option value="">未说明</option><option value="O">开仓</option>
+                            <option value="C">平仓</option><option value="CO">平后反向开仓</option>
+                        </select>
+                        <label for="manual-note">备注</label>
+                        <input type="text" id="manual-note" autocomplete="off">
+                        <span></span><button type="button" id="manual-preview">预览</button>
+                    </div>
+                    <p class="fop-state" id="manual-status" role="status"></p>
+                    <div id="manual-preview-result" hidden>
+                        <h3>将记入的内容（尚未写入）</h3>
+                        <div class="fop-table-wrap" id="manual-preview-events"></div>
+                        <div class="fop-table-wrap" id="manual-preview-positions"></div>
+                        <div class="fop-table-wrap" id="manual-preview-totals"></div>
+                        <div class="fop-actions">
+                            <button type="button" id="manual-submit" data-writes>确认记入</button>
+                            <button type="button" id="manual-cancel">取消</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="fop-card" aria-labelledby="delivery-title">
+                    <h2 id="delivery-title">交割预览</h2>
+                    <p class="fop-state">逐张期权选择被指派、行权或到期，逐个期货合约给出假设价格。只在内存中演算，不写入账本。</p>
+                    <div class="fop-table-wrap" id="delivery-choices"></div>
+                    <div class="fop-table-wrap" id="delivery-prices"></div>
+                    <div class="fop-form">
+                        <label for="delivery-at">假设交割时刻（账户时区）</label>
+                        <input type="datetime-local" id="delivery-at" step="1">
+                        <span></span>
+                        <span class="fop-inline"><button type="button" id="delivery-suggest">按假设价给出到期结果</button>
+                            <button type="button" id="delivery-run">演算</button></span>
+                    </div>
+                    <p class="fop-state" id="delivery-status" role="status"></p>
+                    <div class="fop-table-wrap" id="delivery-result"></div>
+                </section>
+
+                <section class="fop-card" aria-labelledby="backup-title">
+                    <h2 id="backup-title">备份、恢复与删除</h2>
+                    <div class="fop-form">
+                        <span>导出</span>
+                        <button type="button" id="backup-export">下载完整备份（JSON）</button>
+                        <label for="restore-file">从备份恢复</label>
+                        <input type="file" id="restore-file" accept=".json,application/json">
+                        <label for="restore-phrase">确认短语</label>
+                        <input type="text" id="restore-phrase" autocomplete="off">
+                        <span></span><button type="button" id="restore-submit" data-writes>恢复（先存档当前历史）</button>
+                        <label for="delete-phrase">删除账本</label>
+                        <input type="text" id="delete-phrase" autocomplete="off">
+                        <span></span><button type="button" id="delete-submit">永久删除账本</button>
+                    </div>
+                    <p class="fop-state" id="backup-status" role="status"></p>
+                </section>
+            </div>
+        </div>
 
         <section class="fop-card" id="list-view" hidden aria-labelledby="list-title">
             <h2 id="list-title">FOP / FUT 账本</h2>
             <ul class="fop-book-list" id="fop-book-list"></ul>
             <h3>股票 / ETF 账本</h3>
             <ul class="fop-book-list" id="equity-book-list"></ul>
+            <h3>新建 FOP 账本</h3>
+            <p class="fop-state">首版只支持 USD、NYMEX 标准 CL 期货及交割到一张 CL 期货的期权。建账后类型不可更改。</p>
+            <div class="fop-form">
+                <label for="create-account">账户</label>
+                <input type="text" id="create-account" autocomplete="off" spellcheck="false">
+                <label for="create-start">起算日</label>
+                <input type="date" id="create-start">
+                <label for="create-scope">账本范围</label>
+                <select id="create-scope">
+                    <option value="">请选择</option>
+                    <option value="full_history">完整历史</option>
+                    <option value="since_baseline">自基线起</option>
+                </select>
+                <label for="create-note">备注</label>
+                <input type="text" id="create-note" autocomplete="off">
+                <span></span><button type="button" id="create-submit" data-writes>新建 CL 账本</button>
+            </div>
+            <p class="fop-state" id="create-status" role="status"></p>
         </section>
 
         <section class="fop-card" id="preview-view" aria-labelledby="preview-title">
@@ -95,10 +393,15 @@
         <a href="cost_basis.html">股票 / ETF 成本账本</a>
     </footer>
 
-    <script src="js/cost_basis_common.js?v=ad7210faa465"></script>
+    <script src="js/cost_basis_common.js?v=b750cfdf979f"></script>
     <script src="js/cost_basis_import_common.js?v=68181c7c6bc1"></script>
-    <script src="js/cost_basis_fop_core.js?v=fe44fc4f6c5d"></script>
-    <script src="js/cost_basis_fop_import.js?v=1dcb5b528ab7"></script>
-    <script src="js/cost_basis_fop.js?v=b1306a4cebaa"></script>
+    <script src="js/cost_basis_fop_core.js?v=b31e61dbd423"></script>
+    <script src="js/cost_basis_fop_import.js?v=c7fc9e7a46c3"></script>
+    <script src="js/cost_basis_fop_quotes.js?v=4cc345ef481e"></script>
+    <script src="js/cost_basis_fop_messages.js?v=62f6734bfe3a"></script>
+    <script src="js/cost_basis_fop_view.js?v=bc561af9cbd9"></script>
+    <script src="js/cost_basis_fop_forms.js?v=969fd0fcddc6"></script>
+    <script src="js/cost_basis_fop_reconcile.js?v=87a6049b4b0f"></script>
+    <script src="js/cost_basis_fop.js?v=b34141300d16"></script>
 </body>
 </html>

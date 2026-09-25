@@ -112,7 +112,8 @@ function activity(options) {
         lines.push(csv(['Deposits & Withdrawals', 'Header', 'Currency', 'Settle Date', 'Description', 'Amount']));
         lines.push(csv(['Deposits & Withdrawals', 'Data', 'USD', '2026-10-02', 'Electronic Fund Transfer', '5000']));
     }
-    lines.push(csv([words.trades, 'Header', ...words.tradeHeader]));
+    // realizedColumn: a Realized P/L column, each fill's `realized` (blank when it has none).
+    lines.push(csv([words.trades, 'Header', ...words.tradeHeader].concat(options.realizedColumn ? ['Realized P/L'] : [])));
     const orders = options.orders || [];
     const inOrder = new Set(orders.flatMap((order) => order.fills));
     const printed = new Set();
@@ -127,15 +128,15 @@ function activity(options) {
                 ? Number((notional / quantity).toFixed(10)) : order.price,
             commission: order.commission === undefined ? Number(commission.toFixed(6)) : order.commission,
             proceeds: undefined });
-            lines.push(activityTradeRow(words, 'Order', aggregate));
+            lines.push(activityTradeRow(words, 'Order', aggregate, options.realizedColumn));
             for (const position of order.fills) {
-                lines.push(activityTradeRow(words, 'Trade', options.fills[position]));
+                lines.push(activityTradeRow(words, 'Trade', options.fills[position], options.realizedColumn));
                 printed.add(position);
             }
             return;
         }
         if (inOrder.has(index) || printed.has(index)) return;
-        lines.push(activityTradeRow(words, options.discriminator || 'Order', fill));
+        lines.push(activityTradeRow(words, options.discriminator || 'Order', fill, options.realizedColumn));
     });
     if (options.instruments !== false) {
         const symbols = [...new Set((options.fills || []).map((fill) => fill.symbol)
@@ -178,11 +179,12 @@ function activity(options) {
     return options.bom ? `﻿${text}` : text;
 }
 
-function activityTradeRow(words, discriminator, fill) {
+function activityTradeRow(words, discriminator, fill, realizedColumn) {
     const terms = termsOf(fill.symbol);
     return csv([words.trades, 'Data', discriminator, terms.asset === 'FUT' ? words.fut : words.fop,
         fill.currency || 'USD', fill.symbol, fill.dateOnly ? fill.local.slice(0, 10) : activityTime(fill.local),
-        fill.qty, fill.price, proceeds(fill), fill.commission || 0, fill.codes || '']);
+        fill.qty, fill.price, proceeds(fill), fill.commission || 0, fill.codes || '']
+        .concat(realizedColumn ? [fill.realized === undefined ? '' : fill.realized] : []));
 }
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',
@@ -203,7 +205,8 @@ const FLEX_HEADER = ['ClientAccountID', 'CurrencyPrimary', 'AssetClass', 'Symbol
  * executions name the same one.
  */
 function flex(options) {
-    const lines = [csv(FLEX_HEADER)];
+    // realizedColumn: IB's FifoPnlRealized column, each fill's `realized`.
+    const lines = [csv(FLEX_HEADER.concat(options.realizedColumn ? ['FifoPnlRealized'] : []))];
     for (const fill of options.fills || []) {
         const terms = termsOf(fill.symbol);
         const future = terms.asset === 'FUT';
@@ -215,7 +218,7 @@ function flex(options) {
             fill.tradeId || '', fill.execId || '', fill.orderId || '',
             fill.dateOnly ? '' : `${fill.local.slice(0, 10).replace(/-/g, '')};${fill.local.slice(11, 19).replace(/:/g, '')}`,
             date.replace(/-/g, ''), fill.qty, fill.price, proceeds(fill), fill.commission || 0, fill.codes || '',
-            'NYMEX']));
+            'NYMEX'].concat(options.realizedColumn ? [fill.realized === undefined ? '' : fill.realized] : [])));
     }
     return lines.join('\n') + '\n';
 }

@@ -24,6 +24,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import sqlite3
 import uuid
 
@@ -87,6 +88,10 @@ CREDENTIAL_TTL_SECONDS = 15 * 60
 # One import or rebuild package, as canonical JSON: below the shared WebSocket
 # message limit, so a large history is split into periods (plan §9.5 item 7).
 MAX_FOP_PACKAGE_BYTES = 6 * 1024 * 1024
+# A person's decision on a possible duplicate (plan §19 P5-C1): the trades it
+# may name, and how long the check it rests on may be.
+DECISION_TRADE_KINDS = frozenset({'futures_trade', 'option_trade'})
+MAX_ATTESTATION_CHARS = 500
 
 
 def delete_fop_graph(conn, book_id, *, keep_book_row=False):
@@ -384,6 +389,51 @@ class FopLedgerMixin:
                 f'binding {record["bindingId"]}: the credential is not valid: '
                 + '; '.join(problems) + '; resolve the contract again')
         return claims['evidence']
+
+    def issue_positions_credential(self, book_id, *, ledger_version, observed_at, account, positions,
+                                   ttl_seconds=CREDENTIAL_TTL_SECONDS):
+        """A bounded, expiring credential for positions this server read from TWS (plan §19 P5-C3).
+
+        It binds the positions to the ledger, its version when they were
+        read, the account and the time; a snapshot that claims them is held
+        to it, so the page cannot present other positions, or old ones, as
+        this version's evidence.
+        """
+        claims = {
+            'v': 1, 'kind': 'positions', 'bookId': book_id, 'ledgerDigest': ledger_version['digest'],
+            'observedAtUtc': observed_at, 'account': account,
+            'positions': hashlib.sha256(domain.canonical_json(positions).encode()).hexdigest(),
+            'exp': int(self.now_utc().timestamp()) + int(ttl_seconds),
+        }
+        body = _b64(domain.canonical_json(claims).encode())
+        signature = _b64(hmac.new(self._credential_key, body.encode(), hashlib.sha256).digest())
+        return f'{body}.{signature}'
+
+    def _verify_positions_credential(self, book_id, evidence):
+        """Refuse positions evidence this server did not read, for another ledger or version, or too old."""
+        base = _store_errors()
+        try:
+            body, signature = (evidence.get('evidenceCredential') or '').split('.', 1)
+            expected = _b64(hmac.new(self._credential_key, body.encode(), hashlib.sha256).digest())
+            if not hmac.compare_digest(signature, expected):
+                raise ValueError('signature')
+            claims = json.loads(_unb64(body))
+        except (ValueError, TypeError, json.JSONDecodeError):
+            raise base.InvalidRequestError('the positions were not read by this server; read them again') from None
+        problems = []
+        if claims.get('kind') != 'positions' or claims.get('bookId') != book_id:
+            problems.append('they were read for another ledger')
+        if claims.get('ledgerDigest') != evidence['ledgerVersion']['digest']:
+            problems.append('they were read against another ledger version')
+        if claims.get('observedAtUtc') != evidence['observedAtUtc'] or claims.get('account') != evidence['account'] \
+                or claims.get('positions') != hashlib.sha256(
+                    domain.canonical_json(evidence['positions']).encode()).hexdigest():
+            problems.append('they are not the positions that were read')
+        if int(claims.get('exp') or 0) < int(self.now_utc().timestamp()):
+            problems.append('they are too old')
+        if problems:
+            raise base.InvalidRequestError('the positions evidence is not valid: ' + '; '.join(problems)
+                                           + '; read them again')
 
     # ------------------------------------------------------------------
     # Books
@@ -925,7 +975,17 @@ class FopLedgerMixin:
                 'fop_reference_revision_conflict')
 
     def _op_adopt_binding(self, conn, book, operation):
+        """A new revision of a binding (plan §4.3), with the contracts its evidence brings (plan §19 P5-C2).
+
+        operation.contracts (optional, verified evidence only): the option's
+        or its future's next revision filling in terms the broker proved, or
+        the future itself when the ledger has none yet. They are checked as a
+        correct_contract or a new package contract is, and the binding's
+        credential must prove exactly the option and future they leave; so a
+        browser can add nothing the broker did not state.
+        """
         record = operation['binding']
+        contracts = operation.get('contracts') or []
         graph = _StoredGraph(conn, book['bookId'])
         current = conn.execute(
             'SELECT * FROM cost_basis_fop_bindings WHERE book_id = ? AND binding_id = ? '
@@ -939,6 +999,31 @@ class FopLedgerMixin:
                            f'{record["revision"]}', 'fop_reference_revision_conflict')
         if record['optionContractId'] != current['option_contract_id']:
             domain._refuse('a binding revision keeps its option contract', 'fop_identity_conflict')
+        changes = []
+        if contracts:
+            if record['status'] not in domain.VERIFIED_BINDING_STATUSES:
+                domain._refuse('contracts travel with a binding only on verified evidence',
+                               'fop_binding_evidence_invalid')
+            ids = [contract['contractId'] for contract in contracts]
+            if len(set(ids)) != len(ids):
+                domain._refuse('a binding adoption names a contract twice', 'fop_identity_conflict')
+            for contract in contracts:
+                if contract['contractId'] == record['optionContractId']:
+                    if contract['secType'] != 'FOP':
+                        domain._refuse(f'{contract["contractId"]} is the option of this binding',
+                                       'fop_identity_conflict')
+                    changes.extend(self._revise_contract(conn, book, graph, contract))
+                elif contract['contractId'] == record['futureContractId']:
+                    if contract['secType'] != 'FUT':
+                        domain._refuse(f'{contract["contractId"]} is the future of this binding',
+                                       'fop_identity_conflict')
+                    if graph.current_contract(contract['contractId']) is None:
+                        self._add_contract(conn, book, graph, contract)
+                    else:
+                        changes.extend(self._revise_contract(conn, book, graph, contract))
+                else:
+                    domain._refuse(f'{contract["contractId"]} is neither the option nor the future of '
+                                   f'binding {record["bindingId"]}', 'fop_identity_conflict')
         option_row = graph.current_contract(record['optionContractId'])
         future_row = (graph.current_contract(record['futureContractId'])
                       if record['futureContractId'] else None)
@@ -962,7 +1047,7 @@ class FopLedgerMixin:
         digest = None
         if record['status'] in domain.VERIFIED_BINDING_STATUSES:
             digest = self._verify_binding_credential(book['bookId'], record, option, future)
-        expected = [
+        expected = changes + [
             {'eventId': row['event_id'], 'reference': 'binding',
              'before': {'id': record['bindingId'], 'revision': int(current['revision'])},
              'after': {'id': record['bindingId'], 'revision': record['revision']}}
@@ -977,13 +1062,25 @@ class FopLedgerMixin:
         conn.execute(f'INSERT INTO cost_basis_fop_bindings ({", ".join(row)}) '
                      f'VALUES ({", ".join("?" for _ in row)})', tuple(row.values()))
         for change in expected:
-            conn.execute('UPDATE cost_basis_fop_event_details SET binding_revision = ? '
-                         'WHERE event_id = ?', (record['revision'], change['eventId']))
+            if change['reference'] == 'binding':
+                conn.execute('UPDATE cost_basis_fop_event_details SET binding_revision = ? '
+                             'WHERE event_id = ?', (record['revision'], change['eventId']))
         return expected
 
     def _op_correct_contract(self, conn, book, operation):
         record = operation['contract']
-        graph = _StoredGraph(conn, book['bookId'])
+        expected = self._revise_contract(conn, book, _StoredGraph(conn, book['bookId']), record,
+                                         affected=operation['affected'])
+        return expected
+
+    def _revise_contract(self, conn, book, graph, record, *, affected=None):
+        """Write a contract's next revision and move the live references to it.
+
+        It only fills in terms that were unknown (check_contract_revision) and
+        may not make two current records one real contract. affected, when
+        given, must list exactly the references it moves (a correct_contract
+        preview); an adoption checks its whole list at once. Returns them.
+        """
         current = graph.current_contract(record['contractId'])
         if current is None:
             domain._refuse(f'contract {record["contractId"]} does not exist',
@@ -1018,7 +1115,8 @@ class FopLedgerMixin:
              'after': {'id': record['contractId'], 'revision': record['revision']}}
             for row in affected_rows
         ]
-        self._require_affected(operation['affected'], expected, 'correct_contract')
+        if affected is not None:
+            self._require_affected(affected, expected, 'correct_contract')
         conn.execute('UPDATE cost_basis_fop_contracts SET superseded_by_revision = ? '
                      'WHERE contract_id = ? AND revision = ?',
                      (record['revision'], record['contractId'], revision))
@@ -1031,6 +1129,22 @@ class FopLedgerMixin:
             conn.execute(f'UPDATE cost_basis_fop_event_details SET {column} = ? WHERE event_id = ?',
                          (record['revision'], change['eventId']))
         return expected
+
+    def _add_contract(self, conn, book, graph, record):
+        """A contract the ledger does not hold yet, checked as a new package contract is."""
+        domain.check_contract_against_book(record, book=book,
+                                           product_rules=book['fop']['productRules'])
+        if graph.has_contract_id(record['contractId']):
+            domain._refuse(f'contract {record["contractId"]} already exists; a new revision is a '
+                           'correct_contract metadata commit', 'fop_reference_revision_conflict')
+        if record['revision'] != 1:
+            domain._refuse(f'a new contract starts at revision 1, not {record["revision"]}',
+                           'fop_reference_revision_conflict')
+        domain.check_current_contracts_distinct([record] + [
+            domain.contract_record_from_row(other) for other in graph.current_contracts()])
+        row = domain.contract_row(record, book_id=book['bookId'], created_at=self._utc_now_iso())
+        conn.execute(f'INSERT INTO cost_basis_fop_contracts ({", ".join(row)}) '
+                     f'VALUES ({", ".join("?" for _ in row)})', tuple(row.values()))
 
     def _current_boundary(self, conn, book_id, boundary_id):
         return conn.execute(
@@ -1195,7 +1309,7 @@ class FopLedgerMixin:
     def _export_fop_backup(self, conn, book):
         payload = self._fop_graph_payload(conn, book)
         return {'format': 'cost-basis-backup', 'version': 2, 'kind': 'fop',
-                'sha256': hashlib.sha256(domain.canonical_json(payload).encode()).hexdigest(),
+                'sha256': domain.backup_digest(payload),
                 'payload': payload}
 
     @staticmethod
@@ -1612,8 +1726,9 @@ class FopLedgerMixin:
                     'a version 1 backup holds no FOP graph; a FOP ledger restores version 2 '
                     'backups only') from exc
             raise_store_error(exc)
-        encoded = domain.canonical_json(backup['payload'])
-        if hashlib.sha256(encoded.encode()).hexdigest() != backup['sha256']:
+        # The digest reads whole numbers as integers, so a backup a browser
+        # downloaded (and so re-serialized) still proves itself.
+        if not domain.backup_digest_matches(backup['payload'], backup['sha256']):
             raise base.InvalidRequestError('backup checksum mismatch; nothing restored')
         return backup['payload']
 
@@ -1797,6 +1912,208 @@ class FopLedgerMixin:
             conn.close()
 
     # ------------------------------------------------------------------
+    # One-shot quotes (plan §10.2, §10.3, §13.3 P5)
+    # ------------------------------------------------------------------
+
+    def fop_quote_scope(self, book_id):
+        """The current contract records of a FOP ledger and its version, read together.
+
+        A quote batch is asked for these records only: the page names contract
+        ids, never terms, so a quote can never be for another ledger's
+        contract (plan §10.2). Nothing is written.
+        """
+        conn = self._connect()
+        try:
+            book = self._get_book(conn, book_id)
+            if self._fop_book_row(conn, book_id) is None:
+                raise _store_errors().InvalidRequestError('quotes are taken for FOP ledgers only')
+            contracts = [domain.contract_record_from_row(row) for row in conn.execute(
+                'SELECT * FROM cost_basis_fop_contracts WHERE book_id = ? '
+                'AND superseded_by_revision IS NULL ORDER BY contract_id', (book_id,))]
+            return {'book': book, 'contracts': contracts,
+                    'ledgerVersion': self._ledger_version(conn, book_id)}
+        except sqlite3.Error as exc:
+            raise self._map_sqlite_error(exc) from exc
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------
+    # Reconciliation snapshots (plan §10.3, §19 P5-C3)
+    # ------------------------------------------------------------------
+
+    def _fop_quantities(self, conn, book_id):
+        """{(secType, contract_id): quantity} of every live event of the ledger, as it stands."""
+        totals = {}
+        for row in conn.execute(f'{self._FOP_TIMELINE_SELECT} WHERE e.book_id = ? AND e.voided_at_utc IS NULL',
+                                (book_id,)):
+            for key, delta in domain.event_deltas(dict(row)):
+                totals[key] = totals.get(key, 0.0) + delta
+        return {key: value for key, value in totals.items() if abs(value) > 1e-9}
+
+    def _position_mismatches(self, conn, book_id, positions):
+        """How the ledger's own quantities differ from the positions a snapshot names (empty when equal).
+
+        A position is the ledger contract with its conId, else with its local
+        symbol; never by root or month alone, and a local symbol never
+        outweighs a conId: the contract of that symbol with another conId is
+        another contract (review P5-C3). One the ledger cannot place, or a
+        ledger contract with no position, is a difference.
+        """
+        def compact(symbol):
+            return re.sub(r'\s+', '', symbol or '').upper()
+
+        records = [domain.contract_record_from_row(row) for row in conn.execute(
+            'SELECT * FROM cost_basis_fop_contracts WHERE book_id = ? AND superseded_by_revision IS NULL',
+            (book_id,))]
+        by_con_id = {record['conId']: record for record in records if record.get('conId')}
+        by_symbol = {(record['secType'], compact(record.get('localSymbol'))): record
+                     for record in records if record.get('localSymbol')}
+        broker = {}
+        problems = []
+        for position in positions:
+            record = by_con_id.get(position['conId']) if position['conId'] else None
+            if record is None and position['localSymbol']:
+                record = by_symbol.get((position['secType'], compact(position['localSymbol'])))
+                if record is not None and record.get('conId') and position['conId']:
+                    problems.append(f'{position["localSymbol"]} is conId {position["conId"]} in TWS but conId '
+                                    f'{record["conId"]} in the ledger: another contract')
+                    continue
+            if record is None or record['secType'] != position['secType']:
+                problems.append(f'{position["localSymbol"] or position["conId"]} is not a contract of this ledger')
+                continue
+            key = (record['secType'], record['contractId'])
+            broker[key] = broker.get(key, 0.0) + float(position['position'])
+        ledger = self._fop_quantities(conn, book_id)
+        for key in sorted(set(ledger) | set(broker)):
+            if abs(ledger.get(key, 0.0) - broker.get(key, 0.0)) > 1e-9:
+                problems.append(f'{key[1]}: {ledger.get(key, 0.0):g} in the ledger, {broker.get(key, 0.0):g} in TWS')
+        return problems
+
+    @staticmethod
+    def _snapshot_status_problem(tws_snapshot):
+        """How a snapshot's summaries differ from what its own rows say ('' when they agree).
+
+        The same summaries as js/cost_basis_fop_reconcile.js: positions not
+        read compare nothing; read ones are a mismatch when any row is, else
+        unknown when any row is, else matched; AvgCost differs when any row
+        does, agrees only when every row does, is partial when some agree and
+        the rest are not comparable (review P5-C3).
+        """
+        rows = tws_snapshot['rows']
+        if not (tws_snapshot['accountConnected'] and tws_snapshot['positionsReady']):
+            if rows or (tws_snapshot['quantityStatus'], tws_snapshot['avgCostStatus']) != ('not_checked',
+                                                                                         'not_checked'):
+                return 'positions that were not read compare nothing'
+            return ''
+        quantities = {row['quantityStatus'] for row in rows}
+        averages = [row['avgCostStatus'] for row in rows]
+        agreeing = averages.count('matched')
+        expected = {
+            'quantityStatus': 'mismatch' if 'mismatch' in quantities
+            else ('unknown' if 'unknown' in quantities else 'matched'),
+            'avgCostStatus': 'differs' if 'differs' in averages
+            else ('matched' if agreeing and agreeing == len(averages)
+                  else ('partial' if agreeing else 'not_comparable')),
+        }
+        for name, status in expected.items():
+            if tws_snapshot[name] != status:
+                return f'twsSnapshot {name} is {tws_snapshot[name]}, but its rows make it {status}'
+        return ''
+
+    def save_fop_snapshot(self, book_id, *, expected_ledger_version, book_identity, as_of_date, summary,
+                          account_scope='', tws_snapshot=None, reconciled=False, note=''):
+        """Keep what the page showed for one ledger version (SnapshotRequest, plan §10.3).
+
+        A snapshot records the ledger version, the quote batch and its quotes,
+        the completeness states and, when positions were read, the positions
+        with every per-contract comparison. It changes no economic row and no
+        ledger version. The server holds it to what it can check:
+
+        - it describes the version it is saved against, and so do its positions,
+          which carry the credential of this server's own read (not too old);
+        - reconciled is only claimed with read positions of a connected
+          account that match the ledger's own quantities, contract by contract;
+        - its quantity and AvgCost summaries are what its own rows say;
+        - cash is never reconciled (the contract fixes it).
+
+        The same snapshot saved again (a repeated confirmation) is the first one.
+        """
+        base = _store_errors()
+        try:
+            domain.require_shape('FopSnapshotSummary', summary, 'summary')
+            if tws_snapshot is not None:
+                domain.require_shape('FopPositionsSnapshot', tws_snapshot, 'twsSnapshot')
+        except domain.FopDomainError as exc:
+            raise_store_error(exc)
+        as_of_date = base._require_trade_date(as_of_date, 'asOfDate')
+        note = base._optional_text(note, 'note', base.MAX_NOTE_CHARS)
+        account_scope = base._optional_text(account_scope, 'accountScope', base.MAX_NOTE_CHARS)
+        conn = self._connect()
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            try:
+                book = self._open_fop_write(conn, book_id, 'saving a reconciliation snapshot',
+                                            book_identity=book_identity,
+                                            engine_version=domain.FOP_ENGINE_VERSION)
+                self._require_ledger_version(conn, book_id, expected_ledger_version)
+                version = self._ledger_version(conn, book_id)
+                if summary['ledgerVersion']['digest'] != version['digest']:
+                    raise base.LedgerChangedError('the summary describes another ledger version; reload')
+                if tws_snapshot is not None:
+                    if tws_snapshot['account'] != book['account']:
+                        raise base.InvalidRequestError(f'the positions are of account {tws_snapshot["account"]}, '
+                                                       f'not {book["account"]}')
+                    if tws_snapshot['ledgerVersion']['digest'] != version['digest']:
+                        raise base.LedgerChangedError('the positions were compared with another ledger version; '
+                                                      'read them again')
+                    if tws_snapshot['positionsReady'] or tws_snapshot['positions']:
+                        self._verify_positions_credential(book_id, tws_snapshot)
+                    problem = self._snapshot_status_problem(tws_snapshot)
+                    if problem:
+                        raise base.InvalidRequestError(problem)
+                if reconciled:
+                    if tws_snapshot is None or not tws_snapshot['accountConnected'] \
+                            or not tws_snapshot['positionsReady'] or tws_snapshot['quantityStatus'] != 'matched' \
+                            or summary['completeness']['quantity'] != 'complete':
+                        raise base.InvalidRequestError('reconciled needs positions read from TWS for this account '
+                                                       'that match every quantity')
+                    problems = self._position_mismatches(conn, book_id, tws_snapshot['positions'])
+                    if problems:
+                        raise base.InvalidRequestError('the positions do not match the ledger: '
+                                                       + '; '.join(problems[:5]))
+                summary_json = base._json_for_storage(summary, 'summary')
+                tws_json = None if tws_snapshot is None else base._json_for_storage(tws_snapshot, 'twsSnapshot')
+                latest = conn.execute(
+                    'SELECT * FROM cost_basis_snapshots WHERE book_id = ? ORDER BY taken_at_utc DESC, rowid DESC '
+                    'LIMIT 1', (book_id,)).fetchone()
+                if latest is not None and (latest['events_sha256'], latest['as_of_date'], latest['account_scope'],
+                                           latest['summary_json'], latest['tws_snapshot_json'],
+                                           bool(latest['reconciled']), latest['note']) == (
+                        version['digest'], as_of_date, account_scope, summary_json, tws_json, bool(reconciled),
+                        note):
+                    conn.execute('ROLLBACK')
+                    return dict(base._snapshot_row_to_dict(latest), idempotentReplay=True)
+                snapshot_id = uuid.uuid4().hex
+                conn.execute(
+                    'INSERT INTO cost_basis_snapshots (snapshot_id, book_id, taken_at_utc, as_of_date, '
+                    'account_scope, through_seq, event_count, events_sha256, summary_json, '
+                    'tws_snapshot_json, reconciled, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    (snapshot_id, book_id, self._utc_now_iso(), as_of_date, account_scope, version['maxSeq'],
+                     version['liveEventCount'], version['digest'], summary_json, tws_json,
+                     1 if reconciled else 0, note))
+                row = conn.execute('SELECT * FROM cost_basis_snapshots WHERE snapshot_id = ?',
+                                   (snapshot_id,)).fetchone()
+                conn.execute('COMMIT')
+            except BaseException:
+                self._rollback_quietly(conn)
+                raise
+            return dict(base._snapshot_row_to_dict(row), idempotentReplay=False)
+        except sqlite3.Error as exc:
+            raise self._map_sqlite_error(exc) from exc
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------
     # Statement imports (plan §9, §13.3 P4)
     # ------------------------------------------------------------------
 
@@ -1819,7 +2136,7 @@ class FopLedgerMixin:
 
     def import_fop_events(self, book_id, package, *, statement, import_batch_id, client_token_prefix,
                           supersede_tws_event_ids=(), expected_ledger_version=None,
-                          book_identity=None):
+                          book_identity=None, duplicate_decisions=()):
         """Import one statement into a FOP ledger (ImportRequest), all or nothing.
 
         Inside the write lock: the gate, identity, the engine, the request log
@@ -1834,7 +2151,10 @@ class FopLedgerMixin:
         - each superseded TWS execution must be repeated by one event of the
           statement and is voided, so a fill never counts twice (plan §9.3);
         - the rows are written and the whole ledger is proven again;
-        - later coverage is invalidated and this statement's registered.
+        - later coverage is invalidated and this statement's registered;
+        - the decisions a person made on possible duplicates (plan §19 P5-C1)
+          are checked (_check_duplicate_decisions) and kept in the answer,
+          which the request log keeps.
 
         A statement that adds no event (a period without trades, or rows all
         stored under other references) comes without a package and only
@@ -1862,9 +2182,17 @@ class FopLedgerMixin:
             raise base.InvalidRequestError('supersedeTwsEventIds names an execution twice')
         if package is not None:
             self._check_package_size(package, 'an import')
-        digest = self._request_digest('import', book_id, {
-            'package': package, 'statement': statement, 'clientTokenPrefix': client_token_prefix,
-            'supersedeTwsEventIds': sorted(supersede)})
+        decisions = list(duplicate_decisions or ())
+        try:
+            for index, decision in enumerate(decisions):
+                domain.require_shape('DuplicateDecision', decision, f'duplicateDecisions[{index}]')
+        except domain.FopDomainError as exc:
+            raise_store_error(exc)
+        asked = {'package': package, 'statement': statement, 'clientTokenPrefix': client_token_prefix,
+                 'supersedeTwsEventIds': sorted(supersede)}
+        if decisions:
+            asked['duplicateDecisions'] = decisions
+        digest = self._request_digest('import', book_id, asked)
         conn = self._connect()
         try:
             conn.execute('BEGIN IMMEDIATE')
@@ -1884,6 +2212,8 @@ class FopLedgerMixin:
                     kept, duplicates, superseded = {'events': []}, [], []
                     if package is not None:
                         domain.check_source_records(package, book=book, kind='import', statement=statement)
+                    recorded = self._check_duplicate_decisions(conn, book, package, decisions)
+                    if package is not None:
                         kept, duplicates = self._without_repeats(conn, book, package)
                         superseded = self._supersede_tws_events(conn, book, kept, supersede,
                                                                 import_batch_id)
@@ -1916,6 +2246,8 @@ class FopLedgerMixin:
                           'duplicates': duplicates, 'superseded': superseded,
                           'ledgerVersion': self._ledger_version(conn, book_id),
                           'idempotentReplay': False}
+                if recorded:
+                    result['duplicateDecisions'] = recorded
                 self._record_request(conn, book_id, 'import', import_batch_id, digest, result)
                 self._fault('fop_before_commit')
                 conn.execute('COMMIT')
@@ -1929,6 +2261,140 @@ class FopLedgerMixin:
             raise self._map_sqlite_error(exc) from exc
         finally:
             conn.close()
+
+    def _check_duplicate_decisions(self, conn, book, package, decisions):
+        """The possible-duplicate decisions of an import, held to what the server can check (plan §19 P5-C1).
+
+        A person decided that a statement row is (part of) a stored fill, or
+        another fill than the stored ones near it, and stated the check. The
+        server does not take either on trust:
+
+        - every fill a decision names is a live trade of this ledger;
+        - a same-fill row travels in the decision, not the package: it is not
+          stored already, it reads (from its own raw fields) as a trade row of
+          a row type this release accepts, of the same contract, direction
+          and day as the fill, and the rows named the same as one fill add up
+          to its quantity. Nothing is written for it;
+        - a distinct-fill row is one this import writes.
+
+        A decision never lifts another check: the package still meets its row
+        types, account, contracts, bindings and openings. The checked
+        decisions are returned for the answer, which the request log keeps.
+        """
+        if not decisions:
+            return []
+        book_id = book['bookId']
+        capabilities = self._fop_capability_list()
+        mapping = capabilities.mapping
+        in_package = {(record['namespace'], record['sourceRef'])
+                      for record in (package or {}).get('sourceRecords', [])}
+        seen = set()
+        totals = {}
+        recorded = []
+        for decision in decisions:
+            reference = f'{decision["namespace"]}:{decision["sourceRef"]}'
+            attestation = decision['attestation'].strip()
+            if not attestation or len(attestation) > MAX_ATTESTATION_CHARS:
+                domain._refuse(f'the decision on {reference} states its check in 1 to '
+                               f'{MAX_ATTESTATION_CHARS} characters')
+            key = (decision['namespace'], decision['sourceRef'])
+            if key in seen:
+                domain._refuse(f'{reference} is decided twice in one import')
+            seen.add(key)
+            ids = decision['eventIds']
+            if len(set(ids)) != len(ids):
+                domain._refuse(f'the decision on {reference} names a fill twice')
+            marks = ', '.join('?' for _ in ids)
+            fills = {row['event_id']: row for row in conn.execute(
+                'SELECT e.event_id, e.kind, e.contracts, e.future_contracts, e.voided_at_utc, e.price, e.fees, '
+                'e.cash_amount, d.contract_id, d.contract_revision, d.open_close, d.exchange_trade_date, '
+                'd.executed_at_utc, d.time_range_start_utc, d.time_range_end_utc '
+                'FROM cost_basis_events e JOIN cost_basis_fop_event_details d '
+                f'ON d.event_id = e.event_id WHERE e.book_id = ? AND e.event_id IN ({marks})',
+                (book_id, *ids))}
+            for event_id in ids:
+                row = fills.get(event_id)
+                if row is None or row['voided_at_utc'] is not None \
+                        or row['kind'] not in DECISION_TRADE_KINDS:
+                    domain._refuse(f'the decision on {reference} names {event_id}, which is not a live '
+                                   'trade of this ledger; preview the statement again')
+            if decision['decision'] == 'distinct_fill':
+                if key not in in_package:
+                    domain._refuse(f'{reference} is decided to be another fill, but this import does '
+                                   'not write it')
+                recorded.append({field: decision[field] for field in
+                                 ('decision', 'namespace', 'sourceRef', 'eventIds', 'attestation')}
+                                | {'source': None})
+                continue
+            if len(ids) != 1:
+                domain._refuse(f'{reference} is named the same fill as {len(ids)} fills; name one')
+            source = decision['source']
+            if (source['namespace'], source['sourceRef']) != key:
+                domain._refuse(f'the decision on {reference} carries the row {source["namespace"]}:'
+                               f'{source["sourceRef"]}')
+            if source['account'] != book['account']:
+                domain._refuse(f'{reference} belongs to account {source["account"]}, not '
+                               f'{book["account"]}')
+            if key in in_package:
+                domain._refuse(f'{reference} is both written by this import and named a stored fill')
+            if conn.execute('SELECT 1 FROM cost_basis_fop_sources WHERE book_id = ? AND account = ? '
+                            'AND namespace = ? AND source_ref = ?',
+                            (book_id, source['account'], *key)).fetchone():
+                domain._refuse(f'{reference} is stored already: a repeat, not a possible duplicate')
+            row_type = source['capabilityKey']
+            status = capabilities.status_of(row_type) if row_type else None
+            derived = statement_rows.row_key(source, mapping)
+            if status == 'unsupported' or capabilities.status_of(derived) == 'unsupported':
+                domain._refuse(f'{reference} is {derived or row_type}, which the first release does not '
+                               'support; a decision does not dispose of it (plan §1.2, §9.7)',
+                               'fop_unsupported_row')
+            if status not in ('real_verified', 'synthetic_only') or derived != row_type:
+                domain._refuse(f'{reference} is sent as {row_type}, but its own fields read as '
+                               f'{derived or "no Trades row of this ledger"} (plan §9.7)')
+            fill = fills[ids[0]]
+            contract = domain.contract_record_from_row(conn.execute(
+                'SELECT * FROM cost_basis_fop_contracts WHERE contract_id = ? AND revision = ?',
+                (fill['contract_id'], fill['contract_revision'])).fetchone())
+            quantity = fill['future_contracts'] if fill['kind'] == 'futures_trade' else fill['contracts']
+            days = {text[:10] for text in (fill['executed_at_utc'], fill['time_range_start_utc'],
+                                           fill['time_range_end_utc']) if text}
+            problems = statement_rows.same_fill_mismatches(
+                source, {'kind': fill['kind'], 'quantity': float(quantity), 'days': days}, contract, mapping,
+                self._bound_future(conn, book_id, contract))
+            if problems:
+                domain._refuse(f'{reference} is named the same fill as {ids[0]}, but they differ in '
+                               + ', '.join(problems))
+            stored = {'quantity': float(quantity), 'price': fill['price'], 'fees': fill['fees'],
+                      'cash': fill['cash_amount'], 'openClose': fill['open_close'],
+                      'exchangeTradeDate': fill['exchange_trade_date']}
+            totals.setdefault(ids[0], (stored, []))[1].append(
+                statement_rows.same_fill_worth(source, fill['kind'], contract, mapping))
+            recorded.append({field: decision[field] for field in
+                             ('decision', 'namespace', 'sourceRef', 'eventIds', 'attestation', 'source')})
+        for event_id, (stored, rows) in sorted(totals.items()):
+            named = sum(abs(row['quantity']) for row in rows)
+            if abs(abs(stored['quantity']) - named) > 1e-9:
+                domain._refuse(f'the rows named the same fill as {event_id} add up to {named:g} contracts; '
+                               f'it is {abs(stored["quantity"]):g}')
+            # Their worth added up: the server's own check of what the page compared (review P5-C1).
+            problems = statement_rows.same_fill_total_mismatches(stored, rows)
+            if problems:
+                domain._refuse(f'the rows named the same fill as {event_id} differ in ' + ', '.join(problems))
+        return recorded
+
+    @staticmethod
+    def _bound_future(conn, book_id, contract):
+        """The future the ledger binds an option to now (its current record), else None."""
+        if contract.get('secType') != 'FOP':
+            return None
+        binding = conn.execute(
+            'SELECT future_contract_id FROM cost_basis_fop_bindings WHERE book_id = ? AND option_contract_id = ? '
+            'AND superseded_by_revision IS NULL', (book_id, contract['contractId'])).fetchone()
+        if binding is None or binding['future_contract_id'] is None:
+            return None
+        row = conn.execute('SELECT * FROM cost_basis_fop_contracts WHERE book_id = ? AND contract_id = ? '
+                           'AND superseded_by_revision IS NULL', (book_id, binding['future_contract_id'])).fetchone()
+        return domain.contract_record_from_row(row) if row is not None else None
 
     def _without_repeats(self, conn, book, package):
         """(the package without repeated sources, their references), plan §9.1.

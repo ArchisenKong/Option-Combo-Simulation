@@ -55,6 +55,8 @@ function summarize(plan) {
             future: item.future, evidence: item.evidence })),
         quantityProof: plan.quantityProof, timeZone: plan.timeZone, period: plan.period,
         eventTimes: plan.events.map((event) => event.time), coverage: plan.coverage, checks: plan.checks,
+        duplicateReviews: plan.duplicateReviews, decisions: plan.decisions,
+        notes: plan.events.map((event) => event.note),
     });
 }
 

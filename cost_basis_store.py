@@ -5189,9 +5189,10 @@ class CostBasisStore(FopLedgerMixin):
         conn = self._connect()
         try:
             self._get_book(conn, book_id)
+            # Newest first; two snapshots of one second in the order they were saved.
             rows = conn.execute(
                 'SELECT * FROM cost_basis_snapshots WHERE book_id = ? '
-                'ORDER BY taken_at_utc DESC LIMIT ?',
+                'ORDER BY taken_at_utc DESC, rowid DESC LIMIT ?',
                 (book_id, limit),
             ).fetchall()
             return [_snapshot_row_to_dict(row) for row in rows]

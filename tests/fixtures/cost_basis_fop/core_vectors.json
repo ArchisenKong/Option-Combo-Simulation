@@ -433,6 +433,13 @@
      "Js": 0,
      "breakEven": 70.6,
      "breakEvenIfOpenShortsExpire": 70.6
+    },
+    "buyerOptions": {
+     "Rb": 0,
+     "Eb": 0,
+     "openPremium": 0,
+     "openValue": 0,
+     "result": 0
     }
    }
   },
@@ -773,6 +780,13 @@
       "contracts": 1,
       "remainingNetPremium": -500
      }
+    },
+    "buyerOptions": {
+     "Rb": 0,
+     "Eb": 0,
+     "openPremium": -500,
+     "openValue": 800,
+     "result": 300
     }
    }
   },
@@ -839,6 +853,13 @@
       "contracts": 1,
       "remainingNetPremium": -500
      }
+    },
+    "buyerOptions": {
+     "Rb": -500,
+     "Eb": 0,
+     "openPremium": -500,
+     "openValue": 5000,
+     "result": 4000
     }
    }
   },
@@ -903,6 +924,13 @@
      "breakEven": 80,
      "breakEvenIfOpenShortsExpire": 80,
      "longExerciseAffectsBreakEven": false
+    },
+    "buyerOptions": {
+     "Rb": 4500,
+     "Eb": 0,
+     "openPremium": -500,
+     "openValue": 5000,
+     "result": 9000
     }
    }
   },
@@ -1197,7 +1225,14 @@
       ]
      }
     ],
-    "coreOutputExample": "plan §9.6 after three rolls, D at 71.8"
+    "coreOutputExample": "plan §9.6 after three rolls, D at 71.8",
+    "buyerOptions": {
+     "Rb": 0,
+     "Eb": 0,
+     "openPremium": 0,
+     "openValue": 0,
+     "result": 0
+    }
    }
   },
   {
@@ -1674,6 +1709,13 @@
      "Js": 20,
      "breakEven": 69.9845,
      "breakEvenIfOpenShortsExpire": 69.9845
+    },
+    "buyerOptions": {
+     "Rb": 0,
+     "Eb": 4,
+     "openPremium": -502,
+     "openValue": 500,
+     "result": -6
     }
    }
   },
@@ -1835,6 +1877,13 @@
       "contracts": 1,
       "averagePrice": 75
      }
+    },
+    "buyerOptions": {
+     "Rb": -1000,
+     "Eb": 1.5,
+     "openPremium": 0,
+     "openValue": 0,
+     "result": -1001.5
     }
    }
   },
@@ -1885,6 +1934,13 @@
       "contracts": -1,
       "averagePrice": 65
      }
+    },
+    "buyerOptions": {
+     "Rb": -800,
+     "Eb": 1.5,
+     "openPremium": 0,
+     "openValue": 0,
+     "result": -801.5
     }
    }
   },
@@ -2891,6 +2947,13 @@
     "openingValue": null,
     "reasons": {
      "totals.economicPnl": "unknown_opening_cost:fop-loz6-p65-01"
+    },
+    "buyerOptions": {
+     "Rb": 0,
+     "Eb": 0,
+     "openPremium": null,
+     "openValue": 800,
+     "result": null
     }
    }
   },
