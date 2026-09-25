@@ -1469,114 +1469,7 @@ module.exports = {
             },
         },
         {
-            name: 'a proven FUT close and open pair becomes one roll event',
-            run() {
-                const parser = loadImport();
-                const result = parser.parse(flex(
-                    'U1,ES,ESU6,FUT,"2026-08-24, 10:00:00",-1,5100,0,-2,,,202609,50,old-fill,C',
-                    'U1,ES,ESZ6,FUT,"2026-08-24, 10:00:00",1,5120,0,-2,,,202612,50,new-fill,O',
-                ), { symbol: 'ES', secType: 'FUT', defaultSharesPerContract: 50 });
-                assert.equal(result.problems.length, 0);
-                assert.equal(result.events.length, 1);
-                const roll = result.events[0];
-                assert.equal(roll.kind, 'futures_roll');
-                assert.equal(roll.futureExpiry, '202609');
-                assert.equal(roll.rollToExpiry, '202612');
-                assert.equal(roll.futureContracts, 1);
-                assert.equal(roll.rollToPrice - roll.price, 20);
-                assert.equal(roll.cashAmount, -4);
-                assert.match(roll.rollGroup, /^roll-/);
-            },
-        },
-        {
-            name: 'a negative FUT trade price keeps its statement sign',
-            run() {
-                const parser = loadImport();
-                const result = parser.parse(flex(
-                    'U1,CL,CLK20,FUT,"2020-04-20, 14:00:00",1,-37.63,0,-2,,,'
-                        + '202005,1000,negative-fill,O',
-                ), { symbol: 'CL', secType: 'FUT', defaultSharesPerContract: 1000 });
-                assert.equal(result.problems.length, 0);
-                assert.equal(result.events[0].kind, 'futures_trade');
-                assert.equal(result.events[0].price, -37.63);
-            },
-        },
-        {
-            name: 'a partial FUT roll preserves the unmatched outright quantity',
-            run() {
-                const parser = loadImport();
-                const result = parser.parse(flex(
-                    'U1,ES,ESU6,FUT,"2026-08-24, 10:00:00",-2,5100,0,-4,,,202609,50,old-partial,C',
-                    'U1,ES,ESZ6,FUT,"2026-08-24, 10:00:00",1,5120,0,-2,,,202612,50,new-partial,O',
-                ), { symbol: 'ES', secType: 'FUT', defaultSharesPerContract: 50 });
-                assert.equal(result.problems.length, 0);
-                assert.equal(result.events.length, 2);
-                const roll = result.events.find((event) => event.kind === 'futures_roll');
-                const residual = result.events.find(
-                    (event) => event.kind === 'futures_trade');
-                assert.equal(roll.futureContracts, 1);
-                assert.equal(roll.fees, 4);
-                assert.equal(residual.futureExpiry, '202609');
-                assert.equal(residual.futureContracts, -1);
-                assert.equal(residual.fees, 2);
-                assert.match(residual.externalRef, /^fut-residual-/);
-            },
-        },
-        {
-            name: 'an FOP assignment consumes its actual FUT delivery leg',
-            run() {
-                const parser = loadImport();
-                const result = parser.parse(flex(
-                    'U1,ES,"ES 21AUG26 5000 P",FOP,"2026-08-21, 16:00:00",1,0,0,-1,P,5000,20260821,50,fop-a,A;C',
-                    'U1,ES,ESU6,FUT,"2026-08-21, 16:00:00",1,5000,0,-2,,,202609,50,fut-a,A;O',
-                ), { symbol: 'ES', secType: 'FUT', defaultSharesPerContract: 50 });
-                assert.equal(result.problems.length, 0);
-                assert.equal(result.events.length, 1);
-                const delivery = result.events[0];
-                assert.equal(delivery.kind, 'option_assignment');
-                assert.equal(delivery.optionSecType, 'FOP');
-                assert.equal(delivery.futureExpiry, '202609');
-                assert.equal(delivery.futureContracts, 1);
-                assert.equal(delivery.shares, undefined);
-                // Only the two commissions move cash; FUT notional does not.
-                assert.equal(delivery.fees, 3);
-                assert.equal(delivery.cashAmount, -3);
-            },
-        },
-        {
-            name: 'a Chinese Activity Statement resolves FOP and FUT identities',
-            run() {
-                const parser = loadImport();
-                const text = chinese({
-                    trades: [
-                        cnTrade('期货期权', 'ES 21AUG26 5000 P',
-                            '2026-08-21, 16:00:00', 1, 0, 0, -1, 'A;C'),
-                        cnTrade('期货', 'ESU6', '2026-08-21, 16:00:00',
-                            1, 5000, 0, -2, 'A;O'),
-                    ],
-                    extra: [
-                        '金融产品信息,Header,资产分类,代码,描述,合约编号,底层,上市交易所,乘数,到期,'
-                            + '发送月份,类型,执行,代码',
-                        '金融产品信息,Data,期货期权,ES 21AUG26 5000 P,'
-                            + 'ES 21AUG26 5000 P,2001,ES,CME,50,2026-08-21,'
-                            + '2026-08,P,5000,',
-                        '金融产品信息,Data,期货,ESU6,ES Sep26,1001,ES,CME,'
-                            + '50,2026-09-18,2026-09,,,,',
-                    ],
-                });
-                const result = parser.parse(text, {
-                    symbol: 'ES', secType: 'FUT', defaultSharesPerContract: 50,
-                });
-                assert.equal(result.problems.length, 0);
-                assert.equal(result.events.length, 1);
-                assert.equal(result.events[0].futureExpiry, '20260918');
-                assert.equal(result.events[0].futureConId, 1001);
-                assert.equal(result.events[0].conId, 2001);
-                assert.equal(result.events[0].cashAmount, -3);
-            },
-        },
-        {
-            name: 'FUT rows never leak into an STK ledger or vice versa',
+            name: 'FUT rows never leak into an STK ledger, and a FUT ledger imports on the FOP page (P6)',
             run() {
                 const parser = loadImport();
                 const future = flex(
@@ -1584,75 +1477,15 @@ module.exports = {
                 const stock = flex(
                     'U1,ES,ES,STK,"2026-08-20, 10:00:00",100,50,-5000,-1,,,,1,stk-1,O');
                 const wrongStock = parser.parse(future, { symbol: 'ES', secType: 'STK' });
-                const wrongFuture = parser.parse(stock, { symbol: 'ES', secType: 'FUT' });
                 assert.equal(wrongStock.events.length, 0);
-                assert.equal(wrongFuture.events.length, 0);
                 assert.match(wrongStock.problems[0].reason, /unrecognized asset class/);
-                assert.match(wrongFuture.problems[0].reason, /unrecognized asset class/);
-            },
-        },
-        {
-            name: 'an unexplained opening FUT blocks a partial-period Activity import',
-            run() {
-                const parser = loadImport();
-                const text = [
-                    'Statement,Header,Field Name,Field Value',
-                    'Statement,Data,Period,"August 20, 2026 - August 24, 2026"',
-                    'Account Information,Header,Field Name,Field Value',
-                    'Account Information,Data,Account,U1',
-                    'Financial Instrument Information,Header,Asset Category,Symbol,'
-                        + 'Description,Conid,Underlying Symbol,Multiplier,Expiry',
-                    'Financial Instrument Information,Data,Futures,ESU6,ES Sep26,'
-                        + '1001,ES,50,2026-09-18',
-                    ACTIVITY_HEADER,
-                    'Open Positions,Header,DataDiscriminator,Asset Category,Currency,'
-                        + 'Symbol,Quantity,Multiplier',
-                    'Open Positions,Data,Summary,Futures,USD,ESU6,1,50',
-                ].join('\n');
-                const options = {
-                    symbol: 'ES', secType: 'FUT', defaultSharesPerContract: 50,
-                };
-                const missing = parser.parse(text, options);
-                assert.equal(missing.events.length, 0);
-                assert.equal(missing.openings.openingFutures.length, 1);
-                assert.match(missing.problems[0].reason, /existing FUT position/);
-
-                const covered = parser.parse(text, Object.assign({}, options, {
-                    existingOpenFutures: [{
-                        account: 'U1', expiry: '20260918', contracts: 1,
-                        multiplier: 50, conId: 1001, localSymbol: 'ESU6',
-                    }],
-                }));
-                assert.equal(covered.openings.openingFutures.length, 0);
-                assert.equal(covered.problems.length, 0);
-            },
-        },
-        {
-            name: 'a pre-period FOP position is retained as an explicit unknown-premium stub',
-            run() {
-                const parser = loadImport();
-                const text = [
-                    'Statement,Header,Field Name,Field Value',
-                    'Statement,Data,Period,"August 20, 2026 - August 24, 2026"',
-                    'Account Information,Header,Field Name,Field Value',
-                    'Account Information,Data,Account,U1',
-                    ACTIVITY_HEADER,
-                    'Open Positions,Header,DataDiscriminator,Asset Category,Currency,'
-                        + 'Symbol,Quantity,Multiplier',
-                    'Open Positions,Data,Summary,Futures Options,USD,'
-                        + 'ES 18SEP26 4900 P,-1,50',
-                ].join('\n');
-                const result = parser.parse(text, {
-                    symbol: 'ES', secType: 'FUT', defaultSharesPerContract: 50,
-                    openingDate: '2026-08-19',
-                });
-                assert.equal(result.problems.length, 0);
-                assert.equal(result.openings.drafts.length, 1);
-                const opening = result.openings.drafts[0];
-                assert.equal(opening.optionSecType, 'FOP');
-                assert.equal(opening.contracts, -1);
-                assert.equal(opening.price, 0);
-                assert.equal(opening.tag, 'prior_open');
+                // The stock importer reads no FUT ledger at all: not even its stock rows.
+                const futuresBook = parser.parse(stock, { symbol: 'ES', secType: 'FUT' });
+                assert.equal(futuresBook.events.length, 0);
+                assert.equal(futuresBook.problems.length, 1);
+                assert.match(futuresBook.problems[0].reason, /FOP ledger page \(cost_basis_fop\.html\)/);
+                assert.equal(typeof parser.deriveFuturesBookOpenings, 'undefined');
+                assert.equal(typeof parser.deriveOpeningFutures, 'undefined');
             },
         },
         {
@@ -1836,33 +1669,6 @@ module.exports = {
                 assert.deepEqual(
                     Array.from(aliased.confirmedDuplicates.map((item) => item.externalRef)).sort(),
                     ['ibkr-exec-fill1', 'ibkr-exec-fill2']);
-            },
-        },
-        {
-            name: 'a FUT roll whose legs TWS already delivered is a duplicate; half a roll blocks',
-            run() {
-                const parser = loadImport();
-                const text = flex(
-                    'U1,ES,ESU6,FUT,"2026-08-24, 10:00:00",-1,5100,0,-2,,,202609,50,old-fill,C',
-                    'U1,ES,ESZ6,FUT,"2026-08-24, 10:00:00",1,5120,0,-2,,,202612,50,new-fill,O',
-                );
-                const options = { symbol: 'ES', secType: 'FUT', defaultSharesPerContract: 50 };
-                const plain = parser.parse(text, options);
-                assert.equal(plain.events[0].sourceLegs.length, 2);
-                assert.equal(plain.events[0].sourceLegs[0].sourceRef, 'old-fill');
-                const both = parser.parse(text, Object.assign({}, options, {
-                    externalRefAliases: {
-                        'U1\u0000old-fill': 'ibkr-exec-A', 'U1\u0000new-fill': 'ibkr-exec-B',
-                    },
-                }));
-                assert.equal(both.events.length, 0);
-                assert.equal(both.confirmedDuplicates.length, 2);
-                const half = parser.parse(text, Object.assign({}, options, {
-                    externalRefAliases: { 'U1\u0000old-fill': 'ibkr-exec-A' },
-                }));
-                assert.equal(half.events.length, 0);
-                assert.ok(half.problems.length >= 1);
-                assert.match(half.problems[0].reason, /one leg of this FUT roll/);
             },
         },
         {

@@ -485,7 +485,7 @@ module.exports = {
                 const writes = closed.socket.sent.filter((message) => pure.OptionComboCostBasisCommon
                     .isWriteAction(message.action));
                 assert.deepEqual(writes, []);
-                assert.match(closed.node('manual-status').textContent, /FOP 写入尚未发布/);
+                assert.match(closed.node('manual-status').textContent, /本后端已关闭 FOP 写入/);
             },
         },
         {
@@ -843,6 +843,155 @@ module.exports = {
                 page.node('binding-adopt').fire('click');
                 await page.settle();
                 assert.equal(page.pending('commit_cost_basis_fop_metadata').length, 0);
+            },
+        },
+        {
+            name: 'a statement that proves a stored unresolved binding offers its adoption, then previews again (P6)',
+            async run() {
+                // LOF7 sold earlier without its future: its binding is stored unresolved. A Flex
+                // file assigns it and names its underlying (conId 556) with CLF7's own row.
+                const period = { from: '2026-11-01', through: '2026-11-30' };
+                const graph = graphOf(statements.activity({ period, fills: [
+                    fill('CLZ6', '2026-11-02T10:00:00', 1, 70), fill('LOF7 C8000', '2026-11-03T10:00:00', -1, 1.5)] }));
+                assert.equal(graph.bindings[0].status, 'unresolved');
+                const text = statements.flex({ fills: [
+                    { symbol: 'LOF7 C8000', local: '2026-11-20T16:30:00', qty: 1, price: 0, codes: 'A', tradeId: '31' },
+                    { symbol: 'CLF7', local: '2026-11-20T16:30:00', qty: -1, price: 80, codes: 'A', tradeId: '32' }] });
+                const page = loadLedgerPage({ writesReleased: true, version: V1, graph,
+                    digest: async () => new Uint8Array(32).buffer });
+                await page.open();
+                await page.drain();
+                page.node('import-file').files = [{ name: 'flex-assignment.csv', text: async () => text }];
+                page.node('import-file').fire('change');
+                await page.settle();
+                assert.equal(page.page().inspect().importPlan.blocking, true);
+                assert.equal(page.node('import-upgrades-block').hidden, false);
+                const rows = findNode(page.node('import-upgrades'), (node) => node.tag === 'table').children
+                    .map((row) => row.children.map((cell) => cell.textContent));
+                assert.deepEqual(rows.slice(1).map((row) => row.slice(0, 3)), [['LOF7 C8000', 'CLF7（交割月 202701）', '待补全']]);
+                page.node('import-submit').fire('click');
+                await page.settle();
+                assert.equal(page.pending('import_cost_basis_events').length, 0, 'the blocked file sends nothing');
+                // Adopt: the server signs the pair from the rows, one metadata commit adopts it.
+                page.node('import-adopt-upgrades').fire('click');
+                page.node('import-adopt-upgrades').fire('click');
+                await page.settle();
+                const asked = page.pending('request_cost_basis_fop_statement_bindings');
+                assert.equal(asked.length, 1, 'a repeated click asks once');
+                const [candidate] = asked[0].bindings;
+                assert.deepEqual([candidate.option.localSymbol, candidate.future.localSymbol], ['LOF7 C8000', 'CLF7']);
+                assert.ok(candidate.evidence.rows.some((row) => row.role === 'future'), 'CLF7\'s own row is the evidence');
+                await page.answer('request_cost_basis_fop_statement_bindings', { bookId: BOOK.bookId, results: [{
+                    bindingId: candidate.bindingId, status: 'verified_statement',
+                    evidenceCredential: 'eyJ2IjoxfQ.c2lnbmF0dXJl', problems: [] }] });
+                const [commit] = page.pending('commit_cost_basis_fop_metadata');
+                assert.ok(commit, page.node('import-status').textContent);
+                assert.deepEqual(createChecker(PROTOCOL.types).check('MetadataCommitRequest', plain(commit)), []);
+                assert.deepEqual([commit.operation.kind, commit.operation.binding.revision, commit.operation.binding.status,
+                    plain(commit.operation.affected)], ['adopt_binding', 2, 'verified_statement', []]);
+                assert.deepEqual(plain(commit.operation.contracts).map((record) => record.localSymbol), ['CLF7']);
+                assert.deepEqual(commit.expectedLedgerVersion, V1);
+                // The ledger the server now holds; the page reloads it and previews the same file again.
+                const adopted = plain(graph);
+                adopted.contracts.push({ record: plain(commit.operation.contracts[0]), supersededByRevision: null });
+                adopted.bindings[0].supersededByRevision = 2;
+                adopted.bindings.push(Object.assign(plain(commit.operation.binding), { evidenceCredential: null,
+                    supersededByRevision: null }));
+                page.server.graph = adopted;
+                page.server.version = V2;
+                await page.answer('commit_cost_basis_fop_metadata', { bookId: BOOK.bookId, idempotentReplay: false,
+                    operation: { operationId: 'op-0002', kind: 'adopt_binding' }, ledgerVersion: V2 });
+                await page.drain();
+                await page.settle();
+                assert.equal(page.page().inspect().version.digest, V2.digest);
+                assert.equal(page.page().inspect().importPlan.blocking, false, page.node('import-status').textContent);
+                assert.equal(page.node('import-upgrades-block').hidden, true);
+                assert.match(page.node('import-status').textContent, /没有阻断问题/);
+                // A refused pair adopts nothing and says why.
+                const again = loadLedgerPage({ writesReleased: true, version: V1, graph });
+                await again.open();
+                await again.drain();
+                again.node('import-file').files = [{ name: 'flex-assignment.csv', text: async () => text }];
+                again.node('import-file').fire('change');
+                await again.settle();
+                again.node('import-adopt-upgrades').fire('click');
+                await again.settle();
+                await again.answer('request_cost_basis_fop_statement_bindings', { bookId: BOOK.bookId, results: [{
+                    bindingId: candidate.bindingId, status: 'unresolved', evidenceCredential: null,
+                    problems: ['no row shows the delivery month 202701 of CLF7'] }] });
+                assert.equal(again.pending('commit_cost_basis_fop_metadata').length, 0);
+                assert.match(again.node('import-status').textContent, /未采纳.*202701/);
+                // Writes closed: the adoption sends nothing.
+                const closed = loadLedgerPage({ writesReleased: false, version: V1, graph });
+                await closed.open();
+                await closed.drain();
+                closed.node('import-file').files = [{ name: 'flex-assignment.csv', text: async () => text }];
+                closed.node('import-file').fire('change');
+                await closed.settle();
+                closed.node('import-adopt-upgrades').fire('click');
+                await closed.settle();
+                assert.equal(closed.pending('request_cost_basis_fop_statement_bindings').length, 0);
+            },
+        },
+        {
+            name: 'two adoptions that share a new future bring it once, and a refusal part way says what was kept (P6 review)',
+            async run() {
+                // C75 and P65 sold without their future; a Flex file assigns both with CLZ6's legs.
+                const period = { from: '2026-10-01', through: '2026-10-31' };
+                const graph = graphOf(statements.activity({ period, fills: [
+                    fill('LOZ6 C7500', '2026-10-05T11:00:00', -1, 1.2), fill('LOZ6 P6500', '2026-10-05T11:30:00', -1, 0.8)] }));
+                assert.deepEqual(plain(graph.bindings.map((binding) => binding.status)), ['unresolved', 'unresolved']);
+                const text = statements.flex({ fills: [
+                    { symbol: 'LOZ6 C7500', local: '2026-11-09T16:20:00', qty: 1, price: 0, codes: 'A', tradeId: '41' },
+                    { symbol: 'CLZ6', local: '2026-11-09T16:20:00', qty: -1, price: 75, codes: 'A', tradeId: '42' },
+                    { symbol: 'LOZ6 P6500', local: '2026-11-09T16:30:00', qty: 1, price: 0, codes: 'A', tradeId: '43' },
+                    { symbol: 'CLZ6', local: '2026-11-09T16:30:00', qty: 1, price: 65, codes: 'A', tradeId: '44' }] });
+                const page = loadLedgerPage({ writesReleased: true, version: V1, graph,
+                    digest: async () => new Uint8Array(32).buffer });
+                await page.open();
+                await page.drain();
+                page.node('import-file').files = [{ name: 'flex-assignments.csv', text: async () => text }];
+                page.node('import-file').fire('change');
+                await page.settle();
+                const upgradeRows = () => findNode(page.node('import-upgrades'), (node) => node.tag === 'table').children
+                    .slice(1).map((row) => row.children.slice(0, 3).map((cell) => cell.textContent));
+                assert.deepEqual(upgradeRows(), [['LOZ6 C7500', 'CLZ6（交割月 202612）', '待补全'],
+                    ['LOZ6 P6500', 'CLZ6（交割月 202612）', '待补全']]);
+                page.node('import-adopt-upgrades').fire('click');
+                await page.settle();
+                const [asked] = page.pending('request_cost_basis_fop_statement_bindings');
+                await page.answer('request_cost_basis_fop_statement_bindings', { bookId: BOOK.bookId,
+                    results: asked.bindings.map((item) => ({ bindingId: item.bindingId, status: 'verified_statement',
+                        evidenceCredential: 'eyJ2IjoxfQ.c2lnbmF0dXJl', problems: [] })) });
+                // The first adoption brings CLZ6.
+                const [first] = page.pending('commit_cost_basis_fop_metadata');
+                assert.deepEqual(plain(first.operation.contracts).map((record) => record.localSymbol), ['CLZ6']);
+                assert.deepEqual(first.expectedLedgerVersion, V1);
+                const kept = plain(graph);
+                kept.contracts.push({ record: plain(first.operation.contracts[0]), supersededByRevision: null });
+                kept.bindings.find((binding) => binding.bindingId === first.operation.binding.bindingId)
+                    .supersededByRevision = 2;
+                kept.bindings.push(Object.assign(plain(first.operation.binding), { evidenceCredential: null,
+                    supersededByRevision: null }));
+                page.server.graph = kept;
+                page.server.version = V2;
+                await page.answer('commit_cost_basis_fop_metadata', { bookId: BOOK.bookId, idempotentReplay: false,
+                    operation: { operationId: 'op-0001', kind: 'adopt_binding' }, ledgerVersion: V2 });
+                // The second refers to it on the version the first left, and brings nothing again.
+                const [second] = page.pending('commit_cost_basis_fop_metadata');
+                assert.ok(second, page.node('import-status').textContent);
+                assert.equal(second.operation.binding.optionContractId, idOf(graph, 'LOZ6 P6500'));
+                assert.equal(second.operation.contracts, undefined);
+                assert.deepEqual(second.expectedLedgerVersion, V2);
+                // Refused part way: the page reads the ledger the server holds and previews the file again.
+                await page.answer('commit_cost_basis_fop_metadata', { success: false, code: 'ledger_changed',
+                    message: 'the ledger changed since it was reviewed' });
+                await page.drain();
+                await page.settle();
+                assert.equal(page.page().inspect().version.digest, V2.digest);
+                assert.deepEqual(upgradeRows(), [['LOZ6 P6500', 'CLZ6（交割月 202612）', '待补全']]);
+                assert.match(page.node('import-status').textContent,
+                    /^已采纳 1 个报表证明的绑定（共 2 个）；LOZ6 P6500 未采纳：版本冲突：.*\[ledger_changed\].*已按账本的当前版本重新预览。/);
             },
         },
         {

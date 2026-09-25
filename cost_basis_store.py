@@ -166,14 +166,13 @@ _CONTRACT_MONTH_RE = re.compile(r'^\d{6}(?:\d{2})?$')
 # mean what they think it means.
 DELIVERABLE_SEC_TYPES = ('STK', 'FUT')
 
-# FUT/FOP ledgers are frozen until the standalone FOP ledger ships
-# (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §2 and §13 P0). The shared
-# engine keys a futures position by the first six digits of its date, so a CL
-# last-trade date and another contract's delivery month collide and a calendar
-# spread silently books as a close. No FUT ledger exists on the user's
-# machines, so creation and every write are refused rather than patched.
-# Reading, export and whole-book deletion stay open, so a ledger arriving from
-# another database can still be taken out.
+# The stock path never creates or writes a FUT ledger (CODE PLAN/
+# COST_BASIS_FOP_STANDALONE_PLAN.md §8.2 item 3, §13 P0 and P6). The retired
+# shared engine keyed a futures position by the first six digits of its date,
+# so a CL last-trade date and another contract's delivery month collided; a
+# legacy FUT ledger from it (none exists on the user's machines) keeps only
+# reading, export and whole-book deletion. A FOP ledger is written only through
+# cost_basis_fop_store (its own engine, metadata and write gate).
 FROZEN_BOOK_SEC_TYPES = frozenset({'FUT'})
 
 
@@ -302,10 +301,10 @@ class FopUnsupportedRowError(CostBasisStoreError):
 def _reject_frozen_sec_type(sec_type, action):
     if str(sec_type or 'STK').strip().upper() in FROZEN_BOOK_SEC_TYPES:
         raise FuturesBookFrozenError(
-            f'{action} is disabled for FUT/FOP ledgers: the current engine can '
-            'merge different futures months, so these ledgers are read-only until '
-            'the standalone FOP ledger replaces it. Export or delete the ledger '
-            'instead.'
+            f'{action} is not available for a FUT ledger here: a legacy FUT ledger '
+            'from the retired engine (which could merge different futures months) '
+            'can only be exported or deleted, and a FOP ledger is written through '
+            'the FOP ledger page (cost_basis_fop.html).'
         )
 
 
@@ -1039,29 +1038,6 @@ def contract_key(event):
     ))
 
 
-def future_key(event, *, roll_target=False):
-    """Structural identity of one FUT month inside an account."""
-    def pick(*names):
-        for name in names:
-            try:
-                value = event[name]
-            except (KeyError, IndexError, TypeError):
-                value = event.get(name) if hasattr(event, 'get') else None
-            if value not in (None, ''):
-                return value
-        return None
-
-    expiry = pick(
-        'rollToExpiry' if roll_target else 'futureExpiry',
-        'roll_to_expiry' if roll_target else 'future_expiry')
-    multiplier = pick('sharesPerContract', 'shares_per_contract')
-    return '|'.join((
-        str(pick('account') or ''),
-        str(expiry or '').replace('-', '')[:6],
-        '' if multiplier in (None, '') else str(abs(int(multiplier))),
-    ))
-
-
 def _normalized_local_symbol(value):
     """Ignore presentation-only whitespace when comparing broker identities."""
     return ' '.join(str(value or '').split()).upper()
@@ -1356,34 +1332,6 @@ def _single_execution_reconstructs_option_baseline(baseline, matching,
     return False
 
 
-def _future_deltas(event):
-    """All signed FUT position movements carried by one normalized event."""
-    kind = event.get('kind') if hasattr(event, 'get') else event['kind']
-    if hasattr(event, 'get'):
-        contracts = event.get('future_contracts')
-        if contracts is None:
-            contracts = event.get('futureContracts')
-    else:
-        contracts = event['future_contracts']
-    if contracts in (None, 0):
-        return []
-    contracts = float(contracts)
-    if kind == 'futures_roll':
-        return [
-            (future_key(event), -contracts),
-            (future_key(event, roll_target=True), contracts),
-        ]
-    return [(future_key(event), contracts)]
-
-
-def _future_con_id_for_key(event, key):
-    """Broker identity carried by the side of an event matching ``key``."""
-    if event['kind'] == 'futures_roll' and future_key(
-            event, roll_target=True) == key:
-        return event['roll_to_con_id']
-    return event['future_con_id']
-
-
 def derive_cash_amount(event):
     """The cash a row implies, or None when the kind has no derivation.
 
@@ -1405,16 +1353,7 @@ def derive_cash_amount(event):
         if contracts is None or price is None or not spc:
             return None
         return round(-(float(contracts) * float(spc) * float(price)) - fees, 6)
-    if kind in ('futures_trade', 'futures_roll'):
-        # A futures fill has no notional cash purchase. Daily variation margin
-        # is deliberately outside this ledger; price differences are carried
-        # by the futures cost engine and only the explicit fee is cash here.
-        return round(-fees, 6)
     if kind in ('option_assignment', 'option_exercise'):
-        if str(event.get('optionSecType') or '').upper() == 'FOP':
-            # An FOP delivery opens a FUT at the strike; no shares or notional
-            # cash move on this row. The premium is already on its trade rows.
-            return round(-fees, 6)
         # The premium was banked when the contract was opened; an
         # assignment row is purely the share delivery at the strike.
         shares = event.get('shares')
@@ -1527,7 +1466,7 @@ def _validate_event_shape(payload, book):
     book_sec_type = str(book.get('secType') or 'STK').upper()
     option_sec_type = str(payload.get('optionSecType') or '').strip().upper()
     if kind in OPTION_KINDS and not option_sec_type:
-        option_sec_type = 'FOP' if book_sec_type == 'FUT' else 'OPT'
+        option_sec_type = 'OPT'
     if option_sec_type and option_sec_type not in ('OPT', 'FOP'):
         raise InvalidRequestError('optionSecType must be OPT or FOP')
 
@@ -1613,12 +1552,6 @@ def _validate_event_shape(payload, book):
                     'future_contracts', 'roll_to_expiry', 'roll_to_con_id',
                     'roll_to_local_symbol', 'roll_to_price', 'roll_group')):
             raise InvalidRequestError('STK ledgers cannot contain FOP/FUT events')
-    elif book_sec_type == 'FUT':
-        if kind in ('opening_balance', 'share_trade', 'dividend', 'split'):
-            raise InvalidRequestError(
-                f'FUT ledgers cannot contain {kind}; use futures/FOP events')
-        if kind in OPTION_KINDS and option_sec_type != 'FOP':
-            raise InvalidRequestError('FUT ledgers accept FOP option events only')
 
     if kind in OPTION_KINDS:
         if event['right'] is None:
@@ -1640,56 +1573,16 @@ def _validate_event_shape(payload, book):
             raise InvalidRequestError(f'{kind} requires price')
 
     if kind in ('option_assignment', 'option_exercise'):
-        # The strike is the delivered underlying's entry price. For OPT this
-        # is a share delivery; for FOP it is a futures entry with no notional
-        # cash movement.
+        # The strike is the delivered shares' entry price.
         event['price'] = event['strike']
-        if option_sec_type == 'FOP':
-            if event['shares'] not in (None, 0):
-                raise InvalidRequestError('FOP delivery must not move shares')
-            event['shares'] = None
-            _require_nonzero(event['future_contracts'], 'futureContracts')
-            if not event['future_expiry']:
-                raise InvalidRequestError('FOP delivery requires futureExpiry')
-            _validate_fop_delivery_direction(kind, event)
-        else:
-            _require_nonzero(event['shares'], 'shares')
-            _validate_delivery_direction(kind, event)
+        _require_nonzero(event['shares'], 'shares')
+        _validate_delivery_direction(kind, event)
 
     if kind == 'option_expiry':
         if event['shares'] not in (None, 0):
             raise InvalidRequestError(
                 'option_expiry must not move shares; record an assignment instead')
         event['shares'] = None
-        if event['future_contracts'] not in (None, 0):
-            raise InvalidRequestError('option_expiry must not move futures')
-        event['future_contracts'] = None
-
-    if kind == 'futures_trade':
-        _require_nonzero(event['future_contracts'], 'futureContracts')
-        if event['price'] is None:
-            raise InvalidRequestError('futures_trade requires price')
-        if not event['future_expiry']:
-            raise InvalidRequestError('futures_trade requires futureExpiry')
-        if event['shares_per_contract'] is None:
-            event['shares_per_contract'] = book['defaultSharesPerContract']
-
-    if kind == 'futures_roll':
-        _require_nonzero(event['future_contracts'], 'futureContracts')
-        if event['price'] is None or event['roll_to_price'] is None:
-            raise InvalidRequestError(
-                'futures_roll requires old close price and rollToPrice')
-        if not event['future_expiry'] or not event['roll_to_expiry']:
-            raise InvalidRequestError(
-                'futures_roll requires futureExpiry and rollToExpiry')
-        if event['future_expiry'] == event['roll_to_expiry'] \
-                and event['future_con_id'] == event['roll_to_con_id'] \
-                and event['future_local_symbol'] == event['roll_to_local_symbol']:
-            raise InvalidRequestError('futures_roll must move to a different contract')
-        if not event['roll_group']:
-            raise InvalidRequestError('futures_roll requires rollGroup')
-        if event['shares_per_contract'] is None:
-            event['shares_per_contract'] = book['defaultSharesPerContract']
 
     if kind == 'split':
         ratio = event['split_ratio']
@@ -1735,7 +1628,7 @@ def _validate_event_shape(payload, book):
         derived is not None
         and abs(derived - event['cash_amount']) > CASH_DERIVATION_TOLERANCE
     )
-    if mismatch and (kind in DELIVERY_KINDS or kind in FUTURE_KINDS):
+    if mismatch and kind in DELIVERY_KINDS:
         # A trade's settlement can legitimately sit a cent or two away from
         # the theoretical figure, so those rows are only flagged. A delivery
         # cannot: its cash is exactly the shares at the strike, plus fees
@@ -1744,24 +1637,12 @@ def _validate_event_shape(payload, book):
         # the one invariant this ledger exists to protect - so it is refused.
         tolerance = max(DELIVERY_CASH_TOLERANCE, abs(derived) * 1e-6)
         if abs(derived - event['cash_amount']) > tolerance:
-            if kind in FUTURE_KINDS:
-                raise InvalidRequestError(
-                    f'{kind} cash {event["cash_amount"]:.2f} must be '
-                    f'{derived:.2f} (fees only); futures notional and variation '
-                    f'margin are not cash purchases in this ledger'
-                )
             if kind == 'option_expiry':
                 raise InvalidRequestError(
                     f'option_expiry cash {event["cash_amount"]:.2f} must be '
                     f'{derived:.2f} (fees only); an expiring contract settles '
                     f'no cash, and the premium is already recorded on the '
                     f'opening event'
-                )
-            if option_sec_type == 'FOP':
-                raise InvalidRequestError(
-                    f'{kind} cash {event["cash_amount"]:.2f} must be '
-                    f'{derived:.2f} (fees only); an FOP delivery opens a FUT '
-                    f'at the strike and does not pay its notional value'
                 )
             raise InvalidRequestError(
                 f'{kind} cash {event["cash_amount"]:.2f} does not match the '
@@ -1793,32 +1674,6 @@ def _bind_event_to_book_account(payload, book):
             f'event account {event_account} does not match ledger account '
             f'{book_account}')
     return {**payload, 'account': book_account}
-
-
-def _validate_fop_delivery_direction(kind, event):
-    """Validate the FUT created by an FOP assignment/exercise.
-
-    IBKR-listed FOPs normally deliver one FUT per option. The actual CSV/TWS
-    quantity is nevertheless stored explicitly and checked rather than
-    inferred from the point-value multiplier.
-    """
-    contracts = event['contracts']
-    future_contracts = event['future_contracts']
-    right = event['right']
-    if kind == 'option_assignment' and contracts <= 0:
-        raise InvalidRequestError(
-            'FOP option_assignment must close a short, so contracts must be positive')
-    if kind == 'option_exercise' and contracts >= 0:
-        raise InvalidRequestError(
-            'FOP option_exercise must close a long, so contracts must be negative')
-    expect_positive = right == ('P' if kind == 'option_assignment' else 'C')
-    if expect_positive != (future_contracts > 0):
-        raise InvalidRequestError(
-            f'{kind} on FOP {right} has the wrong delivered FUT direction')
-    if abs(abs(future_contracts) - abs(contracts)) > 1e-6:
-        raise InvalidRequestError(
-            f'{kind} delivers {abs(future_contracts):g} FUT contracts but closes '
-            f'{abs(contracts):g} FOP contracts; expected one FUT per FOP')
 
 
 def _validate_delivery_direction(kind, event):
@@ -3268,59 +3123,6 @@ class CostBasisStore(FopLedgerMixin):
                 conn, book_id, account, *key, voiding=voiding))
         return warnings
 
-    def _validate_futures_timeline(self, conn, book_id, account):
-        """Replay every FUT movement for one account and prove each roll.
-
-        Ordinary futures trades may legitimately cross through zero, but a
-        row explicitly labelled as a roll promises that it transfers an
-        already-held signed quantity from one month to another. That promise
-        is enforced for back-dated inserts and voids as well as tail writes.
-        """
-        rows = conn.execute(
-            'SELECT * FROM cost_basis_events WHERE book_id = ? AND account = ? '
-            'AND voided_at_utc IS NULL AND include_in_cost = 1 AND ('
-            'kind IN (\'futures_trade\', \'futures_roll\') OR '
-            '(kind IN (\'option_assignment\', \'option_exercise\') '
-            'AND option_sec_type = \'FOP\')) '
-            f'ORDER BY {_EVENT_ORDER_SQL}',
-            (book_id, account),
-        ).fetchall()
-        positions = {}
-        identities = {}
-
-        def apply_identity(item, target=False):
-            key = future_key(item, roll_target=target)
-            con_column = 'roll_to_con_id' if target else 'future_con_id'
-            local_column = 'roll_to_local_symbol' if target else 'future_local_symbol'
-            marker = identities.setdefault(key, {'con_ids': set(), 'locals': set()})
-            if item[con_column] not in (None, ''):
-                marker['con_ids'].add(str(item[con_column]))
-            if item[local_column]:
-                marker['locals'].add(_normalized_local_symbol(item[local_column]))
-            if len(marker['con_ids']) > 1 or (
-                    not marker['con_ids'] and len(marker['locals']) > 1):
-                raise InvalidRequestError(
-                    'multiple real FUT contracts share one account/month/multiplier; '
-                    'provide an unambiguous conId/localSymbol history')
-            return key
-
-        for row in rows:
-            old_key = apply_identity(row, False)
-            if row['kind'] == 'futures_roll':
-                moved = float(row['future_contracts'] or 0)
-                current = positions.get(old_key, 0.0)
-                if (not moved or not current or current * moved <= 0
-                        or abs(current) + 1e-9 < abs(moved)):
-                    raise PositionOverdrawError(
-                        f"futures_roll on {row['trade_date']} transfers {moved:g} "
-                        f"contracts but the old FUT month holds {current:g}")
-                positions[old_key] = current - moved
-                new_key = apply_identity(row, True)
-                positions[new_key] = positions.get(new_key, 0.0) + moved
-            else:
-                positions[old_key] = positions.get(old_key, 0.0) \
-                    + float(row['future_contracts'] or 0)
-
     def _net_short_share_warnings(self, conn, book_id):
         """Report only the final replayed share direction.
 
@@ -3376,9 +3178,6 @@ class CostBasisStore(FopLedgerMixin):
                 and (normalized['shares'] is not None
                      or normalized['kind'] == 'split'):
             warnings.extend(self._net_short_share_warnings(conn, book_id))
-        if normalized['kind'] in FUTURE_KINDS \
-                or normalized['future_contracts'] is not None:
-            self._validate_futures_timeline(conn, book_id, normalized['account'])
         if check_split_groups:
             self._validate_split_groups(conn, book_id, normalized['account'])
         return warnings
@@ -3393,7 +3192,6 @@ class CostBasisStore(FopLedgerMixin):
         """
         warnings = []
         options = set()
-        futures_accounts = set()
         accounts = set()
         for row in rows:
             accounts.add(row['account'])
@@ -3404,10 +3202,6 @@ class CostBasisStore(FopLedgerMixin):
                     if key not in options:
                         options.add(key)
                         warnings.extend(self._replay_contract_key(conn, book_id, *key))
-            if row['kind'] in FUTURE_KINDS or row['future_contracts'] is not None:
-                futures_accounts.add(row['account'])
-        for account in futures_accounts:
-            self._validate_futures_timeline(conn, book_id, account)
         for account in accounts:
             self._validate_split_groups(conn, book_id, account)
         return warnings
@@ -3849,8 +3643,7 @@ class CostBasisStore(FopLedgerMixin):
             baseline = _event_row_to_dict(row)
             if (row['voided_at_utc'] or not row['include_in_cost']
                     or row['source'] != 'reconcile' or row['tag'] != 'tws_snapshot'
-                    or row['kind'] not in (
-                        'option_trade', 'opening_balance', 'futures_trade')):
+                    or row['kind'] not in ('option_trade', 'opening_balance')):
                 raise InvalidRequestError(
                     'only an active adopted TWS baseline may be superseded')
 
@@ -3899,45 +3692,6 @@ class CostBasisStore(FopLedgerMixin):
                         and not exact_api_execution):
                     raise InvalidRequestError(
                         'broker history does not reconstruct the adopted TWS option quantity')
-            elif row['kind'] == 'futures_trade':
-                baseline_key = future_key(baseline)
-                siblings = conn.execute(
-                    'SELECT * FROM cost_basis_events WHERE book_id = ? AND account = ? '
-                    'AND kind = ? '
-                    "AND substr(replace(future_expiry, '-', ''), 1, 6) = ? "
-                    'AND shares_per_contract IS ? '
-                    'AND source = ? AND tag = ? AND voided_at_utc IS NULL',
-                    (book_id, row['account'], 'futures_trade',
-                     str(row['future_expiry'] or '').replace('-', '')[:6],
-                     row['shares_per_contract'], 'reconcile', 'tws_snapshot'),
-                ).fetchall()
-                if len(siblings) != 1:
-                    raise InvalidRequestError(
-                        'ambiguous adopted TWS FUT baselines require manual review')
-                matching = []
-                con_ids = set()
-                for item in incoming_rows:
-                    if (item['source'] not in ('csv_import', 'execution_report')
-                            or item['tag'] == 'prior_open'
-                            or not _event_precedes_tws_snapshot(item, baseline)):
-                        continue
-                    for key, delta in _future_deltas(item):
-                        if key != baseline_key:
-                            continue
-                        matching.append(delta)
-                        matching_con_id = _future_con_id_for_key(item, key)
-                        if matching_con_id not in (None, ''):
-                            con_ids.add(str(matching_con_id))
-                baseline_con_id = '' if row['future_con_id'] in (None, '') \
-                    else str(row['future_con_id'])
-                if (not matching or len(con_ids) > 1
-                        or (baseline_con_id and con_ids
-                            and baseline_con_id not in con_ids)):
-                    raise InvalidRequestError(
-                        'broker history FUT identity does not prove this TWS baseline')
-                if abs(sum(matching) - float(row['future_contracts'] or 0)) >= 1e-6:
-                    raise InvalidRequestError(
-                        'broker history does not reconstruct the adopted TWS FUT quantity')
             else:
                 siblings = conn.execute(
                     'SELECT * FROM cost_basis_events WHERE book_id = ? AND account = ? '
@@ -4100,16 +3854,6 @@ class CostBasisStore(FopLedgerMixin):
                             and item['account'] == row['account']
                             and item['shares'] is not None
                             and _event_may_overlap_tws_snapshot(item, baseline)]
-            elif row['kind'] == 'futures_trade':
-                baseline_key = future_key(baseline)
-                overlaps = []
-                for item in incoming_rows:
-                    if (item['source'] not in ('csv_import', 'execution_report')
-                            or item['tag'] == 'prior_open'
-                            or not _event_may_overlap_tws_snapshot(item, baseline)):
-                        continue
-                    if any(key == baseline_key for key, _delta in _future_deltas(item)):
-                        overlaps.append(item)
             else:
                 overlaps = []
             if overlaps:
@@ -4252,8 +3996,6 @@ class CostBasisStore(FopLedgerMixin):
                 # also covers a future batch shape with all rows de-duplicated.
                 for row in superseded_rows:
                     self._validate_contract_timeline(conn, book_id, row)
-                    if row['kind'] == 'futures_trade':
-                        self._validate_futures_timeline(conn, book_id, row['account'])
                 for row in superseded_stubs:
                     if row['kind'] == 'option_trade':
                         self._validate_contract_timeline(conn, book_id, row)
@@ -4584,8 +4326,6 @@ class CostBasisStore(FopLedgerMixin):
                 # nothing behind it - exactly the state append_event refuses
                 # to create in the first place.
                 self._validate_contract_timeline(conn, book_id, row)
-                if row['kind'] in FUTURE_KINDS or row['future_contracts'] is not None:
-                    self._validate_futures_timeline(conn, book_id, row['account'])
                 self._validate_split_groups(conn, book_id, row['account'])
                 self._invalidate_coverage(conn, book_id, row['trade_date'])
                 voided = conn.execute(

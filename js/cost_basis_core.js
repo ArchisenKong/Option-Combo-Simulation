@@ -52,13 +52,14 @@
         'restore_cost_basis_backup',
     ]);
 
-    const FUTURES_FROZEN_MESSAGE = 'FUT/FOP 账本已停用：现有引擎可能把不同期货月份'
-        + '合并计算，在独立 FOP 账本上线前只能查看、导出或删除。';
+    const FUTURES_FROZEN_MESSAGE = '旧格式 FUT/FOP 账本：旧引擎可能把不同期货月份合并计算，'
+        + '已经退役；本页只显示它的身份，只能导出原始记录或整本删除。'
+        + '期货与期货期权请在 FOP 账本页面（cost_basis_fop.html）建账。';
 
     const EVENT_KINDS = Object.freeze([
         'opening_balance', 'share_trade', 'option_trade', 'option_assignment',
         'option_exercise', 'option_expiry', 'dividend', 'fee', 'split',
-        'manual_adjust', 'futures_trade', 'futures_roll', 'option_split',
+        'manual_adjust', 'option_split',
     ]);
 
     // Kinds that exist only inside a split group. They are written and voided
@@ -106,8 +107,6 @@
         return !_ibkrOpenOpposes(position, contracts)
             || Math.abs(_number(contracts)) <= Math.abs(_number(position)) + SHARE_EPSILON;
     }
-
-    const FUTURE_KINDS = Object.freeze(['futures_trade', 'futures_roll']);
 
     const BASIS_MODES = Object.freeze(['net_cash', 'stock_only', 'tax_adjusted']);
 
@@ -179,24 +178,6 @@
             strike === null ? '' : strike.toFixed(4),
             _dateDigits(item.expiry || item.expDate).slice(0, 8),
             perContract === null ? '' : String(Math.abs(perContract)),
-        ].join('|');
-    }
-
-    /** Structural identity of one FUT month inside one account. */
-    function futureKey(descriptor, useRollTarget) {
-        const item = descriptor || {};
-        const target = useRollTarget === true;
-        const expiry = target ? item.rollToExpiry : (item.futureExpiry || item.expDate);
-        const multiplier = _finiteOrNull(
-            item.sharesPerContract === undefined || item.sharesPerContract === null
-                ? item.multiplier : item.sharesPerContract);
-        return [
-            String(item.account || ''),
-            // IB/TWS may spell the same delivery month as YYYYMM or as the
-            // contract's last-trade YYYYMMDD. Month is the structural key;
-            // conId/localSymbol retain the exact broker identity.
-            _dateDigits(expiry).slice(0, 6),
-            multiplier === null ? '' : String(Math.abs(multiplier)),
         ].join('|');
     }
 
@@ -522,9 +503,6 @@
                 return _round(-(contracts * perContract * price) - fees, 6);
             case 'option_assignment':
             case 'option_exercise':
-                if (_upper(item.optionSecType) === 'FOP') {
-                    return _round(-fees, 6);
-                }
                 if (shares === null || strike === null) return null;
                 return _round(-(shares * strike) - fees, 6);
             case 'option_expiry':
@@ -532,9 +510,6 @@
             case 'split':
             case 'option_split':
                 return 0;
-            case 'futures_trade':
-            case 'futures_roll':
-                return _round(-fees, 6);
             default:
                 return null;
         }
@@ -571,10 +546,6 @@
             taxRealized: 0,
             taxRealizedPremium: 0,
             contracts: new Map(),
-            futures: new Map(),
-            futuresRealizedPnl: 0,
-            futuresFees: 0,
-            futuresSettlementCash: 0,
             identityWarnings: new Set(),
             warnings: [],
         };
@@ -751,6 +722,18 @@
     }
 
     /**
+     * FUT ledgers are computed only by the standalone FOP ledger
+     * (js/cost_basis_fop_core.js, plan §13.3 P6): this engine never replays
+     * one, so a legacy FUT ledger shows its raw rows and nothing computed.
+     */
+    function _refuseFutures(secType) {
+        if (_upper(secType) === 'FUT') {
+            throw new Error('FUT ledgers are computed by the standalone FOP ledger (cost_basis_fop.html), '
+                + 'not by the stock engine');
+        }
+    }
+
+    /**
      * Fold the event stream into per-account and combined state.
      *
      * options: { accounts, startDate, endDate, includeExcluded, referencePrice }
@@ -758,9 +741,7 @@
      */
     function computeLedger(events, options) {
         const opts = options || {};
-        if (_upper(opts.secType) === 'FUT') {
-            return _computeFuturesLedger(events, opts);
-        }
+        _refuseFutures(opts.secType);
         const accountFilter = Array.isArray(opts.accounts) && opts.accounts.length
             ? new Set(opts.accounts.map((item) => String(item)))
             : null;
@@ -911,450 +892,6 @@
             warnings: warnings.concat(
                 Array.from(accounts.values()).reduce(
                     (all, state) => all.concat(state.warnings), [])),
-        };
-    }
-
-    function _futurePositionState(event, target) {
-        const isTarget = target === true;
-        const conId = isTarget ? event.rollToConId : event.futureConId;
-        const localSymbol = _upper(
-            isTarget ? event.rollToLocalSymbol : event.futureLocalSymbol);
-        return {
-            key: futureKey(event, isTarget),
-            expiry: _dateDigits(
-                isTarget ? event.rollToExpiry : event.futureExpiry).slice(0, 8),
-            multiplier: Math.abs(_number(event.sharesPerContract)),
-            contracts: 0,
-            basisValue: 0,
-            conIds: new Set(conId === null || conId === undefined || conId === ''
-                ? [] : [String(conId)]),
-            localSymbols: new Set(localSymbol ? [localSymbol] : []),
-            identityConflict: false,
-        };
-    }
-
-    function _trackFutureIdentity(position, event, target) {
-        const isTarget = target === true;
-        const rawConId = isTarget ? event.rollToConId : event.futureConId;
-        const conId = rawConId === null || rawConId === undefined || rawConId === ''
-            ? '' : String(rawConId);
-        const localSymbol = _upper(
-            isTarget ? event.rollToLocalSymbol : event.futureLocalSymbol);
-        if (conId) position.conIds.add(conId);
-        if (localSymbol) position.localSymbols.add(localSymbol);
-        position.identityConflict = position.identityConflict
-            || position.conIds.size > 1
-            || (position.conIds.size === 0 && position.localSymbols.size > 1);
-    }
-
-    /** Apply one signed FUT fill and bank its gross realized price P&L. */
-    function _applyFutureFill(account, event, delta, price, target) {
-        const key = futureKey(event, target === true);
-        const multiplier = Math.abs(_number(event.sharesPerContract));
-        if (!key || !multiplier || !Number.isFinite(price)) {
-            account.warnings.push(`future_identity_or_multiplier_missing:${key}`);
-            return;
-        }
-        const position = account.futures.get(key)
-            || _futurePositionState(event, target === true);
-        account.futures.set(key, position);
-        _trackFutureIdentity(position, event, target === true);
-        if (position.identityConflict) {
-            account.warnings.push(`future_identity_conflict:${key}`);
-        }
-
-        const prior = position.contracts;
-        let remaining = _number(delta);
-        if (Math.abs(prior) > EPSILON && Math.sign(remaining) === -Math.sign(prior)) {
-            const closing = Math.min(Math.abs(prior), Math.abs(remaining));
-            const average = position.basisValue / (prior * multiplier);
-            const direction = Math.sign(prior);
-            account.futuresRealizedPnl = _round(
-                account.futuresRealizedPnl
-                + direction * closing * multiplier * (price - average), 6);
-            position.basisValue = _round(
-                position.basisValue - direction * closing * multiplier * average, 6);
-            position.contracts = _round(prior - direction * closing, 6);
-            remaining = _round(remaining + direction * closing, 6);
-            if (Math.abs(position.contracts) <= EPSILON) {
-                position.contracts = 0;
-                position.basisValue = 0;
-            }
-        }
-        if (Math.abs(remaining) > EPSILON) {
-            position.contracts = _round(position.contracts + remaining, 6);
-            position.basisValue = _round(
-                position.basisValue + remaining * multiplier * price, 6);
-        }
-    }
-
-    function _applyFuturesEvent(account, event, realizations, identityResolution) {
-        const kind = event.kind;
-        const cash = _number(event.cashAmount);
-        const fees = _number(event.fees);
-        const creditCash = () => {
-            account.netCash = _round(account.netCash + cash, 6);
-            account.fees = _round(account.fees + fees, 6);
-        };
-
-        if (kind === 'fee' || kind === 'manual_adjust') {
-            creditCash();
-            account.futuresSettlementCash = _round(
-                account.futuresSettlementCash + cash, 6);
-            return true;
-        }
-        if (kind === 'futures_trade') {
-            creditCash();
-            account.futuresFees = _round(account.futuresFees + fees, 6);
-            _applyFutureFill(
-                account, event, _number(event.futureContracts),
-                _number(event.price), false);
-            return true;
-        }
-        if (kind === 'futures_roll') {
-            const retained = _number(event.futureContracts);
-            const old = account.futures.get(futureKey(event, false));
-            if (!old || Math.sign(old.contracts) !== Math.sign(retained)
-                || Math.abs(old.contracts) + EPSILON < Math.abs(retained)) {
-                account.warnings.push(`roll_closes_more_than_open:${futureKey(event, false)}`);
-                return false;
-            }
-            creditCash();
-            account.futuresFees = _round(account.futuresFees + fees, 6);
-            _applyFutureFill(account, event, -retained, _number(event.price), false);
-            _applyFutureFill(
-                account, event, retained, _number(event.rollToPrice), true);
-            return true;
-        }
-        if (OPTION_KINDS.indexOf(kind) < 0) return false;
-
-        const resolved = identityResolution.get(event) || {
-            structuralKey: contractKey(event),
-            identity: '',
-            key: contractKey(event),
-            ambiguous: false,
-            groupConflict: false,
-        };
-        const key = resolved.key;
-        const contractState = account.contracts.get(key)
-            || _contractState(event, resolved);
-        account.contracts.set(key, contractState);
-        _trackIdentity(contractState, event);
-        if (resolved.groupConflict || contractState.identityConflict) {
-            account.warnings.push(`contract_identity_conflict:${resolved.structuralKey}`);
-        }
-        if (event.tag === 'prior_open') {
-            const warning = `unknown_prior_open:${key}`;
-            if (account.warnings.indexOf(warning) < 0) account.warnings.push(warning);
-            // The headline must carry this, not just the warning list below
-            // it: a bare number at the top of the page reads as a finished
-            // answer, and a premium-less stub means it is not one.
-            account.costIncomplete = true;
-        }
-        if (event.kind === 'option_trade' && event.tag === 'ibkr_open'
-            && _ibkrOpenOpposes(contractState.contracts, event.contracts)) {
-            account.warnings.push(`ibkr_open_opposes_existing:${key}`);
-            return false;
-        }
-        if (event.kind === 'option_trade' && event.tag === 'ibkr_close_open'
-            && _ibkrCloseOpenInvalid(contractState.contracts, event.contracts)) {
-            account.warnings.push(`ibkr_close_open_invalid:${key}`);
-            return false;
-        }
-        const mandatoryClose = _isClosingOptionEvent(event);
-        if (mandatoryClose && _closeOverdraws(
-            contractState.contracts, _number(event.contracts))) {
-            account.warnings.push(`closes_more_than_open:${key}`);
-            // A broker C row is evidence of a close, never permission to
-            // create the opposite position.  The database rejects it; the
-            // pure preview also fails closed instead of displaying a phantom
-            // inverse position while the missing opening is being resolved.
-            return false;
-        }
-        creditCash();
-        const premiumCash = kind === 'option_trade' ? cash : 0;
-        if (kind === 'option_trade') {
-            account.optionPremiumNet = _round(account.optionPremiumNet + cash, 6);
-        }
-        const premiumResult = _applyContractRow(
-            contractState, _number(event.contracts), premiumCash);
-        const realized = premiumResult.realized;
-        if (Math.abs(realized) > EPSILON) {
-            realizations.push({
-                tradeDate: String(event.tradeDate || ''),
-                account: String(event.account || ''),
-                key,
-                amount: _round(realized, 6),
-                shortAmount: _round(premiumResult.shortRealized, 6),
-            });
-        }
-        if (kind !== 'option_trade') {
-            account.futuresSettlementCash = _round(
-                account.futuresSettlementCash + cash, 6);
-        }
-        if (kind === 'option_assignment' || kind === 'option_exercise') {
-            _applyFutureFill(
-                account, event, _number(event.futureContracts),
-                _number(event.strike), false);
-        }
-        return true;
-    }
-
-    function _futureTotals(account) {
-        let contracts = 0;
-        let exposure = 0;
-        let basisValue = 0;
-        const directions = new Set();
-        account.futures.forEach((position) => {
-            if (Math.abs(position.contracts) <= EPSILON) return;
-            contracts += position.contracts;
-            exposure += position.contracts * position.multiplier;
-            basisValue += position.basisValue;
-            directions.add(Math.sign(position.contracts));
-        });
-        return {
-            contracts: _round(contracts, 6),
-            exposure: _round(exposure, 6),
-            basisValue: _round(basisValue, 6),
-            mixedDirections: directions.size > 1,
-        };
-    }
-
-    function _finalizeFuturesAccount(account, opts) {
-        let realizedPremium = 0;
-        let openPremium = 0;
-        let realizedShortPremium = 0;
-        let openShortPremium = 0;
-        account.contracts.forEach((contractState) => {
-            realizedPremium += contractState.realizedPremium;
-            openPremium += contractState.openPremium;
-            realizedShortPremium += contractState.realizedShortPremium;
-            openShortPremium += contractState.openShortPremium;
-        });
-        const totals = _futureTotals(account);
-        // Long FOP protection/convexity is a separate strategy asset. Keep
-        // its cash in the audit ledger, but never blend it into the FUT cost
-        // curve; only Short FOP net premium can lower or raise that curve.
-        const economicNumerator = _round(
-            totals.basisValue - account.futuresRealizedPnl + account.futuresFees
-            - realizedShortPremium - account.futuresSettlementCash, 6);
-        const available = !totals.mixedDirections
-            && Math.abs(totals.exposure) > SHARE_EPSILON;
-        const summary = {
-            account: account.account,
-            secType: 'FUT',
-            shares: 0,
-            futuresContracts: totals.contracts,
-            futureExposure: totals.exposure,
-            netCash: _round(account.netCash, 6),
-            netCashOut: _round(-account.netCash, 6),
-            optionPremiumNet: _round(account.optionPremiumNet, 6),
-            realizedPremium: _round(realizedPremium, 6),
-            openPremium: _round(openPremium, 6),
-            realizedShortPremium: _round(realizedShortPremium, 6),
-            openShortPremium: _round(openShortPremium, 6),
-            shortOptionPremiumNet: _round(
-                realizedShortPremium + openShortPremium, 6),
-            fees: _round(account.fees, 6),
-            futuresFees: _round(account.futuresFees, 6),
-            futuresRealizedPnl: _round(account.futuresRealizedPnl, 6),
-            futuresAvgCost: available
-                ? _round(totals.basisValue / totals.exposure, 6) : null,
-            blendedCost: available
-                ? _round(economicNumerator / totals.exposure, 6) : null,
-            blendedCostIfExpired: available
-                ? _round((economicNumerator - openShortPremium) / totals.exposure, 6) : null,
-            stockAvgCost: null,
-            taxAvgCost: null,
-            stockRealizedPnl: 0,
-            taxRealizedPnl: 0,
-            taxRealizedPremium: _round(realizedPremium, 6),
-            dividends: 0,
-            dividendWithholding: 0,
-            netDividends: 0,
-            withholdingFees: 0,
-            shareAcquisitionCost: 0,
-            shareDisposalProceeds: 0,
-            hasShares: false,
-            hasFutures: available,
-            isShort: totals.exposure < -SHARE_EPSILON,
-            warnings: account.warnings.slice(),
-            costIncomplete: account.costIncomplete === true,
-            _futureBasisValue: totals.basisValue,
-            _futureEconomicNumerator: economicNumerator,
-            _mixedFutureDirections: totals.mixedDirections,
-        };
-        if (totals.mixedDirections) summary.warnings.push('mixed_future_directions');
-        summary.breakEvenPrice = summary.blendedCost;
-        summary.lifetimeNetCash = _round(
-            account.futuresRealizedPnl - account.futuresFees
-            + realizedPremium + account.futuresSettlementCash, 6);
-        const reference = _finiteOrNull((opts || {}).referencePrice);
-        summary.referencePrice = reference;
-        summary.liquidationValue = null;
-        summary.unrealizedStockPnl = null;
-        summary.lifetimeNetIfLiquidated = reference !== null && available
-            ? _round((reference - summary.blendedCost) * totals.exposure, 6) : null;
-        return summary;
-    }
-
-    function _combineFuturesAccounts(summaries, opts) {
-        const combined = {
-            account: '', secType: 'FUT', shares: 0, futuresContracts: 0,
-            futureExposure: 0, netCash: 0, netCashOut: 0, optionPremiumNet: 0,
-            realizedPremium: 0, openPremium: 0, fees: 0, futuresFees: 0,
-            realizedShortPremium: 0, openShortPremium: 0,
-            shortOptionPremiumNet: 0,
-            futuresRealizedPnl: 0, futuresAvgCost: null, blendedCost: null,
-            blendedCostIfExpired: null, stockAvgCost: null, taxAvgCost: null,
-            stockRealizedPnl: 0, taxRealizedPnl: 0, taxRealizedPremium: 0,
-            dividends: 0, dividendWithholding: 0, netDividends: 0, withholdingFees: 0,
-            shareAcquisitionCost: 0, shareDisposalProceeds: 0,
-            hasShares: false, hasFutures: false, isShort: false, warnings: [],
-            costIncomplete: false,
-        };
-        let basisValue = 0;
-        let economicNumerator = 0;
-        const directions = new Set();
-        summaries.forEach((summary) => {
-            combined.futuresContracts += summary.futuresContracts;
-            combined.futureExposure += summary.futureExposure;
-            combined.netCash += summary.netCash;
-            combined.optionPremiumNet += summary.optionPremiumNet;
-            combined.realizedPremium += summary.realizedPremium;
-            combined.openPremium += summary.openPremium;
-            combined.realizedShortPremium += summary.realizedShortPremium;
-            combined.openShortPremium += summary.openShortPremium;
-            combined.shortOptionPremiumNet += summary.shortOptionPremiumNet;
-            combined.fees += summary.fees;
-            combined.futuresFees += summary.futuresFees;
-            combined.futuresRealizedPnl += summary.futuresRealizedPnl;
-            combined.lifetimeNetCash = _number(combined.lifetimeNetCash)
-                + _number(summary.lifetimeNetCash);
-            combined.taxRealizedPremium += summary.taxRealizedPremium;
-            basisValue += summary._futureBasisValue;
-            economicNumerator += summary._futureEconomicNumerator;
-            combined.warnings = combined.warnings.concat(summary.warnings);
-            if (summary.costIncomplete) combined.costIncomplete = true;
-            if (Math.abs(summary.futureExposure) > SHARE_EPSILON) {
-                directions.add(Math.sign(summary.futureExposure));
-            }
-            if (summary._mixedFutureDirections) directions.add(2);
-        });
-        Object.keys(combined).forEach((key) => {
-            if (typeof combined[key] === 'number') combined[key] = _round(combined[key], 6);
-        });
-        combined.netCashOut = _round(-combined.netCash, 6);
-        const available = directions.size <= 1
-            && Math.abs(combined.futureExposure) > SHARE_EPSILON;
-        if (available) {
-            combined.futuresAvgCost = _round(basisValue / combined.futureExposure, 6);
-            combined.blendedCost = _round(economicNumerator / combined.futureExposure, 6);
-            combined.blendedCostIfExpired = _round(
-                (economicNumerator - combined.openShortPremium)
-                / combined.futureExposure, 6);
-        } else if (directions.size > 1) {
-            combined.warnings.push('mixed_future_directions');
-        }
-        combined.hasFutures = available;
-        combined.isShort = combined.futureExposure < -SHARE_EPSILON;
-        combined.breakEvenPrice = combined.blendedCost;
-        combined.lifetimeNetCash = _round(combined.lifetimeNetCash, 6);
-        const reference = _finiteOrNull((opts || {}).referencePrice);
-        combined.referencePrice = reference;
-        combined.liquidationValue = null;
-        combined.unrealizedStockPnl = null;
-        combined.lifetimeNetIfLiquidated = reference !== null && available
-            ? _round((reference - combined.blendedCost) * combined.futureExposure, 6)
-            : null;
-        return combined;
-    }
-
-    function _collectOpenFutures(accounts) {
-        const rows = [];
-        accounts.forEach((account, accountName) => {
-            account.futures.forEach((position, key) => {
-                if (Math.abs(position.contracts) <= EPSILON) return;
-                rows.push({
-                    key,
-                    account: accountName,
-                    expiry: position.expiry,
-                    multiplier: position.multiplier,
-                    sharesPerContract: position.multiplier,
-                    contracts: _round(position.contracts, 6),
-                    avgCost: _round(
-                        position.basisValue
-                        / (position.contracts * position.multiplier), 6),
-                    conId: position.conIds.size === 1
-                        ? Array.from(position.conIds)[0] : null,
-                    localSymbol: position.localSymbols.size === 1
-                        ? Array.from(position.localSymbols)[0] : '',
-                    identityConflict: position.identityConflict,
-                });
-            });
-        });
-        return rows.sort((left, right) => (left.key < right.key ? -1 : 1));
-    }
-
-    function _computeFuturesLedger(events, opts) {
-        const accountFilter = Array.isArray(opts.accounts) && opts.accounts.length
-            ? new Set(opts.accounts.map((item) => String(item))) : null;
-        const startDate = String(opts.startDate || '');
-        const endDate = String(opts.endDate || '');
-        const includeExcluded = opts.includeExcluded === true;
-        const ordered = _sortEvents(Array.isArray(events) ? events : []);
-        const optionEvents = ordered.filter((event) => event && !event.voidedAtUtc
-            && OPTION_KINDS.indexOf(event.kind) >= 0);
-        const identityResolution = _buildIdentityResolution(optionEvents).byItem;
-        const accounts = new Map();
-        const rows = [];
-        const realizations = [];
-
-        ordered.forEach((event) => {
-            if (!event || typeof event !== 'object') return;
-            const accountName = String(event.account || '');
-            if (accountFilter && !accountFilter.has(accountName)) return;
-            if (!_inWindow(event, startDate, endDate)) return;
-            const excluded = event.includeInCost === false && !includeExcluded;
-            let account = accounts.get(accountName);
-            if (!account) {
-                account = _emptyAccountState(accountName);
-                accounts.set(accountName, account);
-            }
-            if (!event.voidedAtUtc && !excluded) {
-                _applyFuturesEvent(account, event, realizations, identityResolution);
-            }
-            const summaries = Array.from(accounts.values()).map(
-                (state) => _finalizeFuturesAccount(state, opts));
-            const running = _combineFuturesAccounts(summaries, opts);
-            rows.push({
-                event,
-                voided: Boolean(event.voidedAtUtc),
-                excluded,
-                runningShares: 0,
-                runningFuturesContracts: running.futuresContracts,
-                runningNetCash: running.netCash,
-                // Match the STK flow column: it includes premium already
-                // received on still-open options, i.e. the all-expire-zero lens.
-                runningCostPerShare: running.blendedCostIfExpired,
-                runningFuturesCost: running.blendedCostIfExpired,
-            });
-        });
-
-        const perAccount = {};
-        accounts.forEach((account, accountName) => {
-            perAccount[accountName] = _finalizeFuturesAccount(account, opts);
-        });
-        const combined = _combineFuturesAccounts(Object.values(perAccount), opts);
-        return {
-            accounts: Array.from(accounts.keys()).sort(),
-            perAccount,
-            combined,
-            rows,
-            openOptions: _collectOpenOptions(accounts),
-            openFutures: _collectOpenFutures(accounts),
-            realizations,
-            warnings: combined.warnings.slice(),
         };
     }
 
@@ -2060,34 +1597,6 @@
                 mode: basisMode, costIncomplete: false,
             };
         }
-        if (summary.secType === 'FUT') {
-            if (!summary.hasFutures) {
-                return {
-                    available: false,
-                    state: 'no_futures',
-                    value: null,
-                    mode: basisMode,
-                    lifetimeNetCash: summary.lifetimeNetCash,
-                    costIncomplete: incomplete,
-                };
-            }
-            const futureValue = basisMode === 'stock_only'
-                ? summary.futuresAvgCost : summary.blendedCost;
-            if (futureValue === null || futureValue === undefined) {
-                return {
-                    available: false, state: 'no_data', value: null,
-                    mode: basisMode, costIncomplete: incomplete,
-                };
-            }
-            return {
-                available: true,
-                state: summary.isShort ? 'short'
-                    : (futureValue < 0 ? 'recovered' : 'normal'),
-                value: futureValue,
-                mode: basisMode,
-                costIncomplete: incomplete,
-            };
-        }
         if (!summary.hasShares) {
             return {
                 available: false,
@@ -2142,10 +1651,10 @@
         const opts = Object.assign({}, options || {}, { referencePrice: price });
         const throughExpiry = _dateDigits(opts.throughExpiry).slice(0, 8);
         const baseLedger = computeLedger(events, opts);
-        if (price === null || price < 0 || _upper(opts.secType) === 'FUT') {
+        if (price === null || price < 0) {
             return {
                 available: false,
-                reason: price === null || price < 0 ? 'invalid_price' : 'futures_book',
+                reason: 'invalid_price',
                 price,
                 baseLedger,
                 ledger: null,
@@ -2297,10 +1806,9 @@
         });
     }
 
-    function _filterPositions(positions, symbol, bookSecType) {
+    function _filterPositions(positions, symbol) {
         const wanted = _upper(symbol);
-        const allowed = _upper(bookSecType) === 'FUT'
-            ? new Set(['FOP', 'FUT']) : new Set(['STK', 'OPT']);
+        const allowed = new Set(['STK', 'OPT']);
         return (Array.isArray(positions) ? positions : []).filter((item) => (
             item && _upper(item.symbol) === wanted
             && allowed.has(_upper(item.secType))
@@ -2322,8 +1830,7 @@
         }
         function fields(row) {
             const fallback = labelParts(row);
-            const expiry = _dateDigits(
-                (row || {}).expiry || (row || {}).futureExpiry).slice(0, 8)
+            const expiry = _dateDigits((row || {}).expiry).slice(0, 8)
                 || fallback.expiry || '99999999';
             const right = _upper((row || {}).right).slice(0, 1) || fallback.right;
             const strike = _finiteOrNull((row || {}).strike);
@@ -2333,7 +1840,7 @@
                 strike: strike === null ? fallback.strike : strike,
             };
         }
-        const kindRank = { shares: 1, future: 2, option: 3 };
+        const kindRank = { shares: 1, option: 3 };
         return (Array.isArray(items) ? items : []).slice().sort((left, right) => {
             const accountOrder = String((left || {}).account || '').localeCompare(
                 String((right || {}).account || ''));
@@ -2358,211 +1865,14 @@
         });
     }
 
-    function _buildFuturesReconciliation(args) {
-        const ledger = args.ledger || { perAccount: {}, openOptions: [], openFutures: [] };
-        const symbol = _upper(args.symbol);
-        const multiplier = _number(args.defaultSharesPerContract) || 1;
-        const positions = _filterPositions(args.positions, symbol, 'FUT');
-        const rows = [];
-
-        function aggregateFutures(items, fromTws) {
-            const result = new Map();
-            (items || []).forEach((raw) => {
-                const item = fromTws ? {
-                    account: String(raw.account || ''),
-                    futureExpiry: _dateDigits(raw.expDate || raw.expiry).slice(0, 8),
-                    futureContracts: _number(raw.position),
-                    sharesPerContract: Math.abs(_number(raw.multiplier)) || multiplier,
-                    futureConId: raw.conId,
-                    futureLocalSymbol: raw.localSymbol || '',
-                    twsAvgCost: _finiteOrNull(raw.avgCostPerUnit),
-                } : {
-                    account: raw.account,
-                    futureExpiry: raw.expiry,
-                    futureContracts: raw.contracts,
-                    sharesPerContract: raw.multiplier || raw.sharesPerContract,
-                    futureConId: raw.conId,
-                    futureLocalSymbol: raw.localSymbol,
-                    identityConflict: raw.identityConflict,
-                };
-                const key = futureKey(item);
-                const previous = result.get(key);
-                const conIds = new Set(previous ? previous.conIds : []);
-                if (item.futureConId !== null && item.futureConId !== undefined
-                    && item.futureConId !== '') conIds.add(String(item.futureConId));
-                result.set(key, Object.assign({}, previous || item, {
-                    key,
-                    futureContracts: _round(
-                        _number(previous && previous.futureContracts)
-                        + _number(item.futureContracts), 6),
-                    conIds: Array.from(conIds),
-                    identityConflict: Boolean(item.identityConflict || conIds.size > 1),
-                    twsAvgCost: item.twsAvgCost || (previous && previous.twsAvgCost) || null,
-                }));
-            });
-            return result;
-        }
-
-        const twsFutureItems = positions.filter((item) => _upper(item.secType) === 'FUT');
-        const ledgerFutures = aggregateFutures(ledger.openFutures || [], false);
-        const twsFutures = aggregateFutures(twsFutureItems, true);
-        const futureKeys = new Set([...ledgerFutures.keys(), ...twsFutures.keys()]);
-        Array.from(futureKeys).sort().forEach((key) => {
-            const ours = ledgerFutures.get(key);
-            const actual = twsFutures.get(key);
-            const ledgerContracts = _number(ours && ours.futureContracts);
-            const twsContracts = _number(actual && actual.futureContracts);
-            const difference = _round(twsContracts - ledgerContracts, 6);
-            const descriptor = actual || ours;
-            let status = Math.abs(difference) <= SHARE_EPSILON ? 'match'
-                : (ledgerContracts === 0 ? 'tws_only'
-                    : (twsContracts === 0 ? 'ledger_only' : 'quantity_mismatch'));
-            const identityConflict = Boolean(
-                (ours && ours.identityConflict) || (actual && actual.identityConflict)
-                || (ours && actual && ours.conIds.length && actual.conIds.length
-                    && ours.conIds[0] !== actual.conIds[0]));
-            if (identityConflict) status = 'identity_conflict';
-            rows.push({
-                kind: 'future', key, account: descriptor.account,
-                label: `${symbol} ${descriptor.futureExpiry || ''} FUT`,
-                futureExpiry: descriptor.futureExpiry,
-                sharesPerContract: descriptor.sharesPerContract,
-                futureConId: (actual && actual.futureConId)
-                    || (ours && ours.futureConId) || null,
-                futureLocalSymbol: (actual && actual.futureLocalSymbol)
-                    || (ours && ours.futureLocalSymbol) || '',
-                ledger: ledgerContracts, tws: twsContracts, difference, status,
-                identityConflict, suggestion: null, confidence: null,
-                twsAvgCost: (actual && actual.twsAvgCost) || null,
-            });
-        });
-
-        const twsOptionItems = positions.filter((item) => _upper(item.secType) === 'FOP')
-            .map((item) => ({
-                account: String(item.account || ''), right: _upper(item.right).slice(0, 1),
-                strike: _finiteOrNull(item.strike),
-                expiry: _dateDigits(item.expDate || item.expiry).slice(0, 8),
-                contracts: _number(item.position),
-                sharesPerContract: Math.abs(_number(item.multiplier)) || multiplier,
-                conId: item.conId, localSymbol: item.localSymbol || '',
-                twsAvgCost: _finiteOrNull(item.avgCostPerUnit),
-            }));
-        function aggregateOptions(items) {
-            const result = new Map();
-            (items || []).forEach((item) => {
-                const key = contractKey(item);
-                const previous = result.get(key);
-                const conIds = new Set(previous ? previous.conIds : []);
-                if (item.conId !== null && item.conId !== undefined && item.conId !== '') {
-                    conIds.add(String(item.conId));
-                }
-                result.set(key, Object.assign({}, previous || item, {
-                    key,
-                    contracts: _round(_number(previous && previous.contracts)
-                        + _number(item.contracts), 6),
-                    conIds: Array.from(conIds),
-                    identityConflict: Boolean(item.identityConflict || conIds.size > 1),
-                    twsAvgCost: item.twsAvgCost || (previous && previous.twsAvgCost) || null,
-                }));
-            });
-            return result;
-        }
-        const ledgerOptions = aggregateOptions(ledger.openOptions || []);
-        const twsOptions = aggregateOptions(twsOptionItems);
-        const optionKeys = new Set([...ledgerOptions.keys(), ...twsOptions.keys()]);
-        Array.from(optionKeys).sort().forEach((key) => {
-            const ours = ledgerOptions.get(key);
-            const actual = twsOptions.get(key);
-            const ledgerContracts = _number(ours && ours.contracts);
-            const twsContracts = _number(actual && actual.contracts);
-            const difference = _round(twsContracts - ledgerContracts, 6);
-            const descriptor = actual || ours;
-            let status = Math.abs(difference) <= SHARE_EPSILON ? 'match'
-                : (ledgerContracts === 0 ? 'tws_only'
-                    : (twsContracts === 0 ? 'ledger_only' : 'quantity_mismatch'));
-            const identityConflict = Boolean(
-                (ours && ours.identityConflict) || (actual && actual.identityConflict)
-                || (ours && actual && ours.conIds.length && actual.conIds.length
-                    && ours.conIds[0] !== actual.conIds[0]));
-            if (identityConflict) status = 'identity_conflict';
-            rows.push({
-                kind: 'option', optionSecType: 'FOP', key,
-                account: descriptor.account, label: _describeOption(symbol, descriptor),
-                right: descriptor.right, strike: descriptor.strike,
-                expiry: descriptor.expiry,
-                sharesPerContract: descriptor.sharesPerContract,
-                conId: (actual && actual.conId) || (ours && ours.conId) || null,
-                localSymbol: (actual && actual.localSymbol)
-                    || (ours && ours.localSymbol) || '',
-                ledger: ledgerContracts, tws: twsContracts, difference, status,
-                identityConflict, suggestion: null, confidence: null,
-                twsAvgCost: (actual && actual.twsAvgCost) || null,
-            });
-        });
-
-        // A vanished FOP and a newly visible FUT can be the two sides of one
-        // exercise/assignment.  A position snapshot proves only the current
-        // quantities, not the historical event or its time, so never write a
-        // delivery from this coincidence.  It is nevertheless enough to
-        // block adopting the FUT as an independent baseline: doing only that
-        // would leave the FOP permanently open in the ledger.
-        const optionGaps = rows.filter((row) => row.kind === 'option'
-            && row.status !== 'match' && row.status !== 'identity_conflict'
-            && Math.abs(row.ledger) > SHARE_EPSILON);
-        const futureGaps = rows.filter((row) => row.kind === 'future'
-            && row.status !== 'match' && row.status !== 'identity_conflict');
-        optionGaps.forEach((optionRow) => {
-            const ledgerContracts = _number(optionRow.ledger);
-            const twsContracts = _number(optionRow.tws);
-            const isReduction = Math.abs(twsContracts) < Math.abs(ledgerContracts)
-                && (Math.abs(twsContracts) <= SHARE_EPSILON
-                    || Math.sign(twsContracts) === Math.sign(ledgerContracts));
-            if (!isReduction) return;
-            const reduced = _round(ledgerContracts - twsContracts, 6);
-            const deliveryKind = ledgerContracts < 0
-                ? 'option_assignment' : 'option_exercise';
-            const expectedFuture = deliveredShares(
-                deliveryKind, optionRow.right, reduced, 1);
-            const candidates = futureGaps.filter((futureRow) => (
-                futureRow.account === optionRow.account
-                && Math.abs(_number(futureRow.difference) - expectedFuture)
-                    <= SHARE_EPSILON
-                && Math.abs(_number(futureRow.sharesPerContract)
-                    - _number(optionRow.sharesPerContract)) <= SHARE_EPSILON));
-            if (!candidates.length) return;
-            optionRow.possibleDelivery = true;
-            optionRow.advice = candidates.length === 1
-                ? 'FOP 减少与 FUT 增加可能是同一次交割；导入 CSV '
-                    + '或手工核实完整交割，不能只采信 FUT。'
-                : '多个 FUT 差额都可能来自这个 FOP 交割，需用 CSV '
-                    + '或手工记录确定唯一合约。';
-            candidates.forEach((futureRow) => {
-                futureRow.adoptionBlocked = true;
-                futureRow.possibleDelivery = true;
-                futureRow.advice = '该 FUT 差额可能由 FOP 交割产生；不能单独'
-                    + '采信为开仓基线，请导入 CSV 或完整补录交割。';
-            });
-        });
-
-        const orderedRows = sortPositionRows(rows);
-        const accounts = Array.from(new Set(orderedRows.map((row) => row.account))).sort();
-        return {
-            symbol, accounts, rows: orderedRows,
-            mismatches: orderedRows.filter((row) => row.status !== 'match'),
-            balanced: orderedRows.every((row) => row.status === 'match'),
-            identityConflicts: orderedRows.filter(
-                (row) => row.status === 'identity_conflict'),
-        };
-    }
-
     /** Compare current quantities only; a TWS snapshot is not trade history. */
     function buildReconciliation(input) {
         const args = input || {};
-        if (_upper(args.secType) === 'FUT') return _buildFuturesReconciliation(args);
+        _refuseFutures(args.secType);
         const ledger = args.ledger || { perAccount: {}, openOptions: [] };
         const symbol = _upper(args.symbol);
         const today = String(args.today || '');
-        const positions = _filterPositions(args.positions, symbol, 'STK');
+        const positions = _filterPositions(args.positions, symbol);
         const defaultSharesPerContract = _number(args.defaultSharesPerContract) || 100;
 
         const twsShares = new Map();
@@ -2831,32 +2141,12 @@
                 sharesPerContract: item.sharesPerContract,
                 conId: item.conId,
                 localSymbol: item.localSymbol,
-                optionSecType: item.optionSecType || (_upper(opts.secType) === 'FUT'
-                    ? 'FOP' : 'OPT'),
+                optionSecType: item.optionSecType || 'OPT',
                 price: avgCost,
                 fees: 0,
                 source: 'reconcile',
                 tag: 'tws_snapshot',
                 note: 'Adopted from an authoritative TWS position snapshot at '
-                    + 'TWS average cost. TWS supplies no original trade date, so '
-                    + 'this is a current-date opening baseline.',
-            };
-        } else if (item.kind === 'future' && item.status === 'tws_only'
-            && !item.identityConflict) {
-            event = {
-                kind: 'futures_trade',
-                tradeDate,
-                account: String(item.account || ''),
-                futureExpiry: item.futureExpiry,
-                futureContracts: _number(item.tws),
-                sharesPerContract: item.sharesPerContract,
-                futureConId: item.futureConId,
-                futureLocalSymbol: item.futureLocalSymbol,
-                price: avgCost,
-                fees: 0,
-                source: 'reconcile',
-                tag: 'tws_snapshot',
-                note: 'Adopted from an authoritative TWS FUT position snapshot at '
                     + 'TWS average cost. TWS supplies no original trade date, so '
                     + 'this is a current-date opening baseline.',
             };
@@ -2897,7 +2187,7 @@
         const opts = options || {};
         const wantedAccount = _upper(opts.account);
         const wantedSymbol = _upper(opts.symbol);
-        const bookSecType = _upper(opts.secType) === 'FUT' ? 'FUT' : 'STK';
+        _refuseFutures(opts.secType);
         const defaultMultiplier = Math.abs(_number(opts.defaultSharesPerContract)) || 100;
         const knownRefs = new Set((opts.existingExternalRefs || []).map((item) => {
             if (typeof item === 'string') return `${wantedAccount}\u0000${item}`;
@@ -2960,10 +2250,8 @@
                 result.summary.skipped += 1;
                 return;
             }
-            const secTypeAllowed = bookSecType === 'FUT'
-                ? (secType === 'FUT' || secType === 'FOP')
-                : (secType === 'STK' || secType === 'OPT');
-            if (!secTypeAllowed) {
+            // FUT and FOP fills belong to the standalone FOP ledger.
+            if (secType !== 'STK' && secType !== 'OPT') {
                 result.summary.skipped += 1;
                 return;
             }
@@ -3034,7 +2322,7 @@
                     kind: 'share_trade',
                     shares: signedQuantity,
                 });
-            } else if (secType === 'OPT' || secType === 'FOP') {
+            } else {
                 const expiry = _dateDigits(row.expiry).slice(0, 8);
                 const right = _upper(row.right).slice(0, 1);
                 const strike = _finiteOrNull(row.strike);
@@ -3061,20 +2349,6 @@
                     && Math.abs(signedQuantity) <= Math.abs(before) + EPSILON;
                 if (closesWithoutCrossing) event.tag = 'ibkr_close';
                 optionPositions.set(key, _round(before + signedQuantity, 6));
-            } else {
-                const futureExpiry = _dateDigits(row.expiry).slice(0, 8);
-                if (!futureExpiry || !multiplier) {
-                    problem(`成交 ${execId} 缺少期货合约月或乘数`);
-                    return;
-                }
-                event = Object.assign(base, {
-                    kind: 'futures_trade',
-                    futureExpiry,
-                    futureContracts: signedQuantity,
-                    sharesPerContract: multiplier,
-                    futureConId: row.conId === undefined ? null : row.conId,
-                    futureLocalSymbol: row.localSymbol || '',
-                });
             }
             event.cashAmount = deriveCashAmount(event);
             result.events.push(event);
@@ -3235,17 +2509,7 @@
                 sharesPerContract: item.sharesPerContract,
                 conId: item.conId,
                 localSymbol: item.localSymbol,
-                optionSecType: item.optionSecType || (_upper(opts.secType) === 'FUT'
-                    ? 'FOP' : 'OPT'),
-            });
-        } else if (item.kind === 'future') {
-            event = Object.assign(base, {
-                kind: 'futures_trade',
-                futureExpiry: item.futureExpiry,
-                futureContracts: difference,
-                sharesPerContract: item.sharesPerContract,
-                futureConId: item.futureConId,
-                futureLocalSymbol: item.futureLocalSymbol,
+                optionSecType: item.optionSecType || 'OPT',
             });
         }
         if (!event) return null;
@@ -3437,10 +2701,8 @@
         GROUP_ONLY_EVENT_KINDS,
         OPTION_KINDS,
         CLOSING_KINDS,
-        FUTURE_KINDS,
         BASIS_MODES,
         contractKey,
-        futureKey,
         compareEventOrder,
         splitPhase,
         splitEpochs,

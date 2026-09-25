@@ -20,10 +20,11 @@
         { "name": "the core names a reason for every FUT write and none for reads, export or deletion", "requirements": ["F35 (entry)", "F38 (P0 part)", "F11 (reads, export, deletion stay open)"] },
         { "name": "the page stops frozen FUT writes before they reach the socket", "requirements": ["F35 (entry)", "F38 (P0 part)"] },
         { "name": "a FUT ledger explains that it is read-only and a stock ledger does not", "requirements": ["F38 (P0 part)"] },
-        { "name": "the create form keeps FOP / FUT visible but disabled", "requirements": ["F35 (entry)"] },
+        { "name": "the create form keeps FOP / FUT visible but disabled, pointing to the FOP page", "requirements": ["F35 (entry)", "P6 step 1 (the stock page points to the FOP page)"] },
         { "name": "the capability draft is well formed and marks no row type real_verified", "requirements": ["P0 gate: capability draft"] },
         { "name": "the month collision gold standard is internally consistent", "requirements": ["F03 (vector)", "F35 (vector)"] },
-        { "name": "the legacy FUT migration list keeps every converted test", "requirements": ["P0 step 4"] }
+        { "name": "the legacy FUT migration list keeps every converted test", "requirements": ["P0 step 4"] },
+        { "name": "every legacy FUT example names the new-engine tests that cover it, and they exist (P6)", "requirements": ["P6 step 1 (migration list re-asserted before the old branches go)", "F28", "F35"] }
       ]
     },
     {
@@ -51,7 +52,7 @@
         { "name": "a stage with no registered case fails, and so does every later stage", "requirements": ["§14.4 (stage runner)"] },
         { "name": "a gap before the target stage fails even when the target has cases", "requirements": ["§14.4 (stage runner)"] },
         { "name": "an unknown stage is a usage error", "requirements": ["§14.4 (stage runner)"] },
-        { "name": "the real runner refuses a stage beyond the implemented ones", "requirements": ["§14.4 (stage runner)"] }
+        { "name": "every stage through P6 is registered, and the real runner refuses P7, which has no command", "requirements": ["§14.4 (stage runner)"] }
       ]
     },
     {
@@ -76,7 +77,8 @@
         { "name": "a stock-page link to a missing ledger opens nothing and says so", "requirements": ["F01 (stale bookmark on the stock page)"] },
         { "name": "a stock-page link survives a list without its ledger and opens it once listed", "requirements": ["F01 (bookmark while the list is empty or incomplete)"] },
         { "name": "the create form has no default type and creates nothing without one", "requirements": ["F01 (type not chosen)", "F35 (entry)"] },
-        { "name": "the contract examples pass and fail as stated in the JS reader", "requirements": ["F37 (contract)", "F46 (contract)", "P1 step 2", "F42 (P1 part: an unknown is null with its reason)"] }
+        { "name": "the contract examples pass and fail as stated in the JS reader", "requirements": ["F37 (contract)", "F46 (contract)", "P1 step 2", "F42 (P1 part: an unknown is null with its reason)"] },
+        { "name": "the stock page sends a FOP ledger to its own page and never computes a legacy FUT ledger (P6)", "requirements": ["P6 step 1 (legacy FUT export/delete only; plan §8.2 item 3)", "F01", "F11"] }
       ]
     },
     {
@@ -163,7 +165,8 @@
         { "name": "MigrationTests.test_a_failed_v12_step_leaves_the_v11_file", "requirements": ["P4: schema v12", "F45 (P4 part)"] },
         { "name": "GraphTests.test_a_backup_a_browser_parsed_and_wrote_again_still_restores", "requirements": ["F25 (P5 part: a downloaded backup restores)", "P5 step 4 (backup and restore)"] },
         { "name": "MetadataTests.test_an_adoption_brings_the_future_the_broker_proved", "requirements": ["P5-C2 (adoption adds the proved future; refusals write nothing; retry idempotent)"] },
-        { "name": "MetadataTests.test_an_adoption_fills_in_the_option_terms_the_broker_proved", "requirements": ["P5-C2 (supplement proved terms; affected references exact)"] }
+        { "name": "MetadataTests.test_an_adoption_fills_in_the_option_terms_the_broker_proved", "requirements": ["P5-C2 (supplement proved terms; affected references exact)"] },
+        { "name": "FopWriteTests.test_a_stock_and_a_fop_ledger_of_one_root_stay_apart", "requirements": ["F02", "P6 step 1 (migration list entry)"] }
       ]
     },
     {
@@ -191,7 +194,7 @@
         { "name": "FopProtocolTests.test_status_reports_the_fop_engine_and_release_state", "requirements": ["F38 (P2 part)", "A8"] },
         { "name": "FopProtocolTests.test_a_fop_ledger_round_trips_through_the_protocol", "requirements": ["F26 (P2 part)", "F25 (P2 part)"] },
         { "name": "FopProtocolTests.test_messages_the_contract_refuses_never_reach_the_store", "requirements": ["F34", "F46", "F26 (P2 part)"] },
-        { "name": "FopProtocolTests.test_the_default_backend_keeps_fop_writes_closed", "requirements": ["F38 (P2 part)"] },
+        { "name": "FopProtocolTests.test_the_release_backend_writes_new_fop_ledgers_and_nothing_older", "requirements": ["F38 (P6: new FOP writable, old FUT format refused, synthetic_only rows refused; the switch closes writes)", "P6 step 6"] },
         { "name": "FopProtocolTests.test_contract_details_are_served_only_where_a_resolver_exists", "requirements": ["F26 (P2 part: historical backend)", "F05 (P2 part)"] },
         { "name": "FopProtocolTests.test_one_failing_request_answers_its_own_request_id", "requirements": ["F26 (P2 part)"] },
         { "name": "FopProtocolTests.test_every_fop_write_names_the_engine_it_was_prepared_for", "requirements": ["F38 (P2 part: every write names its engine)", "F26 (P2 part)"] },
@@ -343,7 +346,9 @@
         { "name": "a manual entry is previewed in memory, and only the previewed request is confirmed (P5-C5)", "requirements": ["P5-C5 (preview/cancel write nothing; confirm sends the previewed request once; inputs, zone, version and reconnection retire it)", "F15 (P5 part: negative FUT price previewed)"] },
         { "name": "positions are read, reconciled and kept in a snapshot of their version (P5-C3)", "requirements": ["P5-C3 (page: read, compare, save once, list, view; stale and offline evidence; unavailable backend)"] },
         { "name": "the buyer's options stand apart, and a statement's realized P&L is compared, never written (P5-C4)", "requirements": ["P5-C4 (page: buyer rows; realized comparison in the import preview)"] },
-        { "name": "a blocked import says why and what to do in Chinese, and following it clears the block (P5-C6)", "requirements": ["P5-C6 (page: blocked, follow the next step, preview again; server refusal in words)"] }
+        { "name": "a blocked import says why and what to do in Chinese, and following it clears the block (P5-C6)", "requirements": ["P5-C6 (page: blocked, follow the next step, preview again; server refusal in words)"] },
+        { "name": "a statement that proves a stored unresolved binding offers its adoption, then previews again (P6)", "requirements": ["P6 campaign finding (statement-proven binding adopted explicitly on the page)", "plan §4.3", "F40"] },
+        { "name": "two adoptions that share a new future bring it once, and a refusal part way says what was kept (P6 review)", "requirements": ["P6 review (adoption batch: one new future, refusal part way re-reads the ledger and counts what was kept)", "plan §4.3", "F40"] }
       ]
     },
     {
@@ -410,7 +415,11 @@
         { "name": "SharedDatabaseTests.test_two_accounts_import_the_same_contracts_into_one_database", "requirements": ["plan §4.2 (record ids scoped to their ledger; found in the P5 closeout)"] },
         { "name": "DuplicateDecisionTests.test_the_server_checks_what_a_same_fill_row_is_worth", "requirements": ["P5-C1 (review: the server adds up price, fees and intent; refused requests write nothing)"] },
         { "name": "DuplicateDecisionTests.test_the_preview_adds_up_intents_and_dates_as_the_server_does", "requirements": ["P5-C1 (review: the preview holds mixed intents and dates as the server does)"] },
-        { "name": "DuplicateDecisionTests.test_the_server_checks_a_same_fill_option_row_for_cash_date_and_future", "requirements": ["P5-C1 (review: option cash, exchange trade date and the bound future; refused requests write nothing)"] }
+        { "name": "DuplicateDecisionTests.test_the_server_checks_a_same_fill_option_row_for_cash_date_and_future", "requirements": ["P5-C1 (review: option cash, exchange trade date and the bound future; refused requests write nothing)"] },
+        { "name": "DeliveryTests.test_a_later_file_binds_an_option_to_the_stored_future_its_rows_name", "requirements": ["P6 campaign finding (a later Flex file names the stored future by conId)", "plan §4.3"] },
+        { "name": "DeliveryTests.test_a_later_file_that_proves_a_stored_unresolved_binding_offers_its_adoption", "requirements": ["P6 campaign finding (a stored unresolved binding the statement proves is adopted explicitly)", "plan §4.3", "F40"] },
+        { "name": "DeliveryTests.test_two_options_that_prove_one_new_future_adopt_it_once", "requirements": ["P6 review (adoptions sharing a new future bring it once)", "plan §4.3", "F40"] },
+        { "name": "DeliveryTests.test_a_repeated_fill_in_a_cumulative_file_still_proves_its_binding", "requirements": ["P6 review (a repeated fill still proves its binding; nothing economic is written twice)", "plan §4.3", "F21", "F40"] }
       ]
     },
     {
@@ -457,6 +466,16 @@
       "cases": [
         { "name": "every code the importer or the store reports has a Chinese reason and a next step (P5-C6)", "requirements": ["P5-C6 (every stable code, from the source)"] },
         { "name": "a problem names its row, contract, next step and code, and keeps the original (P5-C6)", "requirements": ["P5-C6 (row, contract, next step, code, original; unknown code fallback)"] }
+      ]
+    },
+    {
+      "stage": "P6",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_randomized_test.py",
+      "cases": [
+        { "name": "CampaignTests.test_fixed_seeds_agree_with_the_model_through_every_stage", "requirements": ["P6 step 2 (fixed slice of the seeded campaign)", "F09", "F15", "F22", "F29", "F31", "F39"] },
+        { "name": "CampaignTests.test_generated_histories_are_valid_and_keep_their_instants_apart", "requirements": ["P6 step 2 (generator validity)"] },
+        { "name": "CampaignTests.test_a_wrong_figure_is_caught_and_reduced_to_the_same_stage", "requirements": ["P6 step 2 (a failure is caught and reduced to a replayable case)"] }
       ]
     }
   ],

@@ -297,25 +297,23 @@
         return record;
     }
 
-    function _classifyTrade(record, options) {
+    function _classifyTrade(record) {
         const codes = _codes(record.codes);
         const assetKind = _assetKind(record.assetClass);
-        const futuresBook = _upper((options || {}).secType) === 'FUT';
-        if (assetKind === 'fop' || assetKind === 'option') {
-            if ((assetKind === 'fop') !== futuresBook) return '';
+        // FUT and FOP rows belong to the standalone FOP ledger
+        // (js/cost_basis_fop_import.js): never a row of a stock ledger.
+        if (assetKind === 'option') {
             if (codes.indexOf('A') >= 0) return 'assignment_option_leg';
             if (codes.indexOf('EX') >= 0) return 'exercise_option_leg';
             if (codes.indexOf('EP') >= 0) return 'option_expiry';
             return 'option_trade';
         }
         if (assetKind === 'stock') {
-            if (futuresBook) return '';
             if (codes.indexOf('A') >= 0 || codes.indexOf('EX') >= 0) {
                 return 'delivery_share_leg';
             }
             return 'share_trade';
         }
-        if (assetKind === 'future' && futuresBook) return 'future_leg';
         return '';
     }
 
@@ -484,27 +482,6 @@
         };
     }
 
-    function _futureIdentity(record, options) {
-        const localSymbol = _upper(record.symbol);
-        const detail = options.instruments
-            ? options.instruments.get(`SYM|${localSymbol}`) : null;
-        const unambiguous = detail && !detail.ambiguous ? detail : null;
-        const expiry = _contractDigits(record.expiry)
-            || (unambiguous ? _contractDigits(unambiguous.expiry) : '');
-        const multiplier = Math.abs(_number(record.multiplier) || 0)
-            || (unambiguous ? Math.abs(_number(unambiguous.multiplier) || 0) : 0)
-            || options.defaultSharesPerContract;
-        const conId = _number(record.conId) === null
-            ? (unambiguous ? unambiguous.conId : null) : _number(record.conId);
-        return {
-            expiry,
-            conId,
-            localSymbol: localSymbol || null,
-            sharesPerContract: multiplier,
-            underlying: resolveUnderlying(record, options),
-        };
-    }
-
     /**
      * Turn one statement row into a draft, or into a problem describing why
      * it could not become one.
@@ -554,7 +531,7 @@
                 + 'added to this book' };
         }
         const isTradeRow = classification === 'share_trade'
-            || classification === 'option_trade' || classification === 'future_leg';
+            || classification === 'option_trade';
         // A blank fee cell on a real trade is a missing figure, not a zero:
         // IBKR prints 0 when nothing was charged. Booking it as free would
         // understate the cost forever, and TWS imports already refuse to.
@@ -629,38 +606,8 @@
             };
         }
 
-        if (classification === 'future_leg') {
-            const future = _futureIdentity(record, options);
-            if (!future.expiry) return { problem: 'FUT contract month could not be read' };
-            if (price === null) return { problem: 'FUT trade price is missing' };
-            return {
-                pending: {
-                    classification,
-                    account,
-                    tradeDate,
-                    brokerTimestamp,
-                    rawTradeDate: String(record.tradeDate || ''),
-                    quantity,
-                    identity: future,
-                    // Futures can trade below zero (CL did in 2020).  The
-                    // signed statement price is economically meaningful.
-                    price,
-                    fees,
-                    cash,
-                    codes: _codes(record.codes),
-                    externalRef,
-                    sourceRef: externalRef,
-                    currency: currency || null,
-                    priceText,
-                    contentKey: _contentKey(record),
-                    lineNumber,
-                    symbol: resolveUnderlying(record, options),
-                },
-            };
-        }
-
         const identity = _optionIdentity(record, options);
-        const optionSecType = _assetKind(record.assetClass) === 'fop' ? 'FOP' : 'OPT';
+        const optionSecType = 'OPT';
         if (!identity.right || identity.strike === null || !identity.expiry) {
             return { problem: 'option right, strike, or expiry could not be read' };
         }
@@ -785,11 +732,8 @@
         const problems = [];
         const shareLegs = pendings.filter(
             (item) => item.classification === 'delivery_share_leg');
-        const futureLegs = pendings.filter(
-            (item) => item.classification === 'future_leg');
         const optionLegs = pendings.filter(
-            (item) => item.classification !== 'delivery_share_leg'
-                && item.classification !== 'future_leg');
+            (item) => item.classification !== 'delivery_share_leg');
         const consumed = new Set();
 
         optionLegs.forEach((leg) => {
@@ -801,70 +745,6 @@
                 ? leg.identity.right === 'P'
                 : leg.identity.right === 'C';
             const shares = acquires ? expectedShares : -expectedShares;
-
-            if (leg.optionSecType === 'FOP') {
-                const expectedFutures = acquires
-                    ? Math.abs(leg.quantity) : -Math.abs(leg.quantity);
-                const candidates = futureLegs.filter((candidate) => (
-                    !consumed.has(candidate)
-                    && candidate.account === leg.account
-                    && candidate.tradeDate === leg.tradeDate
-                    && candidate.symbol === leg.symbol
-                    && Math.abs(candidate.quantity - expectedFutures) < SHARE_EPSILON
-                    && (!leg.brokerTimestamp || !candidate.brokerTimestamp
-                        || candidate.brokerTimestamp === leg.brokerTimestamp)
-                ));
-                const strikeMatches = candidates.filter((candidate) => (
-                    candidate.price !== null && leg.identity.strike !== null
-                    && Math.abs(candidate.price - leg.identity.strike) < 1e-6));
-                const matches = strikeMatches.length ? strikeMatches : candidates;
-                if (matches.length !== 1) {
-                    problems.push({
-                        lineNumber: leg.lineNumber,
-                        reason: matches.length
-                            ? `${kind} has multiple matching FUT delivery legs`
-                            : `${kind} has no matching FUT delivery leg; the delivered `
-                                + 'contract month and direction would be a guess',
-                        raw: `${leg.account} ${leg.tradeDate} ${leg.quantity} FOP `
-                            + `${leg.identity.right}${leg.identity.strike}`,
-                    });
-                    return;
-                }
-                const match = matches[0];
-                consumed.add(match);
-                const fees = _round(leg.fees + match.fees, 6);
-                events.push({
-                    kind,
-                    tradeDate: leg.tradeDate,
-                    brokerTimestamp: leg.brokerTimestamp || match.brokerTimestamp,
-                    account: leg.account,
-                    right: leg.identity.right,
-                    strike: leg.identity.strike,
-                    expiry: leg.identity.expiry,
-                    contracts: leg.quantity,
-                    sharesPerContract: leg.identity.sharesPerContract,
-                    conId: leg.identity.conId,
-                    localSymbol: leg.identity.localSymbol,
-                    optionSecType: 'FOP',
-                    futureExpiry: match.identity.expiry,
-                    futureConId: match.identity.conId,
-                    futureLocalSymbol: match.identity.localSymbol,
-                    futureContracts: match.quantity,
-                    price: leg.identity.strike,
-                    fees,
-                    cashAmount: _round(-fees, 6),
-                    source: 'csv_import',
-                    tag: 'ibkr_close',
-                    brokerBasis: leg.brokerBasis,
-                    brokerRealizedPnl: leg.brokerRealizedPnl,
-                    brokerCodes: leg.brokerCodes,
-                    brokerCloseCash: leg.brokerCloseCash,
-                    externalRef: leg.externalRef || leg.contentKey,
-                    note: `IBKR FOP ${kind} ${leg.rawTradeDate || leg.tradeDate}`,
-                    lineNumber: leg.lineNumber,
-                });
-                return;
-            }
 
             // Two assignments can settle on the same date for the same share
             // count and differ only in strike - a wheel that had several
@@ -941,199 +821,7 @@
             });
         });
 
-        const remainingFutures = futureLegs.filter((leg) => !consumed.has(leg));
-        const duplicates = [];
-        const groups = new Map();
-        remainingFutures.forEach((leg) => {
-            const key = [leg.account, leg.brokerTimestamp || leg.tradeDate, leg.symbol].join('|');
-            const group = groups.get(key) || [];
-            group.push(leg);
-            groups.set(key, group);
-        });
-        groups.forEach((legs) => {
-            const closes = legs.filter((leg) => leg.codes.indexOf('C') >= 0);
-            const opens = legs.filter((leg) => leg.codes.indexOf('O') >= 0);
-            const rollCandidate = legs.length === 2 && closes.length === 1 && opens.length === 1;
-            if (rollCandidate) {
-                const oldLeg = closes[0];
-                const newLeg = opens[0];
-                // The roll is derived from two broker legs. When TWS already
-                // delivered both legs as real fills, the whole roll is a
-                // duplicate; when it delivered only one, importing the roll
-                // would book the other leg twice and the batch must stop.
-                const aliasedLegs = legs.filter((leg) => leg.aliased);
-                if (aliasedLegs.length === legs.length) {
-                    legs.forEach((leg) => duplicates.push({
-                        sourceRef: leg.sourceRef || leg.externalRef,
-                        externalRef: leg.aliased,
-                        account: leg.account,
-                        kind: 'futures_trade',
-                        lineNumber: leg.lineNumber,
-                    }));
-                    return;
-                }
-                if (aliasedLegs.length) {
-                    legs.forEach((leg) => problems.push({
-                        lineNumber: leg.lineNumber,
-                        reason: 'one leg of this FUT roll is already stored as a TWS '
-                            + 'fill and the other is not; import is blocked so the '
-                            + 'roll is not booked on top of a real leg',
-                        raw: `${leg.account} ${leg.rawTradeDate} ${leg.identity.localSymbol}`,
-                    }));
-                    return;
-                }
-                const provesRoll = oldLeg !== newLeg
-                    && oldLeg.quantity * newLeg.quantity < 0
-                    && Math.abs(oldLeg.identity.sharesPerContract
-                        - newLeg.identity.sharesPerContract) < SHARE_EPSILON
-                    && oldLeg.identity.expiry !== newLeg.identity.expiry;
-                if (!provesRoll) {
-                    legs.forEach((leg) => problems.push({
-                        lineNumber: leg.lineNumber,
-                        reason: 'FUT rows look like a roll but quantity, multiplier, or '
-                            + 'contract month does not prove a unique transfer',
-                        raw: `${leg.account} ${leg.rawTradeDate} ${leg.identity.localSymbol}`,
-                    }));
-                    return;
-                }
-                const movedSize = Math.min(
-                    Math.abs(oldLeg.quantity), Math.abs(newLeg.quantity));
-                const retained = Math.sign(newLeg.quantity) * movedSize;
-                const oldFeeUsed = oldLeg.fees * movedSize / Math.abs(oldLeg.quantity);
-                const newFeeUsed = newLeg.fees * movedSize / Math.abs(newLeg.quantity);
-                const fees = _round(oldFeeUsed + newFeeUsed, 6);
-                const rollGroup = `roll-${_hash16([
-                    oldLeg.externalRef, newLeg.externalRef,
-                ].sort().join('|'))}`;
-                events.push({
-                    kind: 'futures_roll',
-                    tradeDate: oldLeg.tradeDate,
-                    brokerTimestamp: oldLeg.brokerTimestamp || newLeg.brokerTimestamp,
-                    account: oldLeg.account,
-                    futureExpiry: oldLeg.identity.expiry,
-                    futureConId: oldLeg.identity.conId,
-                    futureLocalSymbol: oldLeg.identity.localSymbol,
-                    // The opening leg's sign is the retained position direction.
-                    futureContracts: retained,
-                    sharesPerContract: oldLeg.identity.sharesPerContract,
-                    price: oldLeg.price,
-                    rollToExpiry: newLeg.identity.expiry,
-                    rollToConId: newLeg.identity.conId,
-                    rollToLocalSymbol: newLeg.identity.localSymbol,
-                    rollToPrice: newLeg.price,
-                    rollGroup,
-                    fees,
-                    cashAmount: _round(-fees, 6),
-                    source: 'csv_import',
-                    externalRef: rollGroup,
-                    sourceRef: rollGroup,
-                    // The broker legs behind the derived event, so a later
-                    // TWS fill can be reconciled against each leg.
-                    sourceLegs: [oldLeg, newLeg].map((leg) => ({
-                        sourceRef: leg.sourceRef || leg.externalRef,
-                        account: leg.account,
-                        tradeDate: leg.tradeDate,
-                        brokerTimestamp: leg.brokerTimestamp,
-                        futureExpiry: leg.identity.expiry,
-                        futureConId: leg.identity.conId,
-                        futureLocalSymbol: leg.identity.localSymbol,
-                        sharesPerContract: leg.identity.sharesPerContract,
-                        futureContracts: leg.quantity,
-                        price: leg.price,
-                        fees: leg.fees,
-                        cashAmount: _round(-leg.fees, 6),
-                    })),
-                    currency: oldLeg.currency || newLeg.currency || null,
-                    note: `IBKR FUT roll ${oldLeg.rawTradeDate || oldLeg.tradeDate}; `
-                        + `spread ${_round(newLeg.price - oldLeg.price, 6)}`,
-                    lineNumber: Math.min(oldLeg.lineNumber, newLeg.lineNumber),
-                });
-                // A broker may close two old contracts while opening only one
-                // new one (or open an extra new contract) in the same timestamped
-                // pair. The common quantity is the roll; the excess is a real
-                // outright FUT fill and must not disappear into the spread.
-                [
-                    {
-                        leg: oldLeg,
-                        quantity: _round(oldLeg.quantity + retained, 6),
-                        fees: _round(oldLeg.fees - oldFeeUsed, 6),
-                    },
-                    {
-                        leg: newLeg,
-                        quantity: _round(newLeg.quantity - retained, 6),
-                        fees: _round(newLeg.fees - newFeeUsed, 6),
-                    },
-                ].forEach((remainder) => {
-                    if (Math.abs(remainder.quantity) < SHARE_EPSILON) return;
-                    const leg = remainder.leg;
-                    events.push({
-                        kind: 'futures_trade',
-                        tradeDate: leg.tradeDate,
-                        brokerTimestamp: leg.brokerTimestamp,
-                        account: leg.account,
-                        futureExpiry: leg.identity.expiry,
-                        futureConId: leg.identity.conId,
-                        futureLocalSymbol: leg.identity.localSymbol,
-                        futureContracts: remainder.quantity,
-                        sharesPerContract: leg.identity.sharesPerContract,
-                        price: leg.price,
-                        fees: remainder.fees,
-                        cashAmount: _round(-remainder.fees, 6),
-                        source: 'csv_import',
-                        externalRef: `fut-residual-${_hash16([
-                            leg.externalRef, rollGroup, remainder.quantity,
-                        ].join('|'))}`,
-                        note: `IBKR FUT residual ${leg.rawTradeDate || leg.tradeDate} `
-                            + `beside ${rollGroup}`,
-                        lineNumber: leg.lineNumber,
-                    });
-                });
-                return;
-            }
-            if (legs.length > 1 && closes.length && opens.length) {
-                legs.forEach((leg) => problems.push({
-                    lineNumber: leg.lineNumber,
-                    reason: 'ambiguous FUT roll group; old and new legs are not unique',
-                    raw: `${leg.account} ${leg.rawTradeDate} ${leg.identity.localSymbol}`,
-                }));
-                return;
-            }
-            legs.forEach((leg) => {
-                if (leg.aliased) {
-                    duplicates.push({
-                        sourceRef: leg.sourceRef || leg.externalRef,
-                        externalRef: leg.aliased,
-                        account: leg.account,
-                        kind: 'futures_trade',
-                        lineNumber: leg.lineNumber,
-                    });
-                    return;
-                }
-                events.push({
-                    kind: 'futures_trade',
-                    tradeDate: leg.tradeDate,
-                    brokerTimestamp: leg.brokerTimestamp,
-                    account: leg.account,
-                    futureExpiry: leg.identity.expiry,
-                    futureConId: leg.identity.conId,
-                    futureLocalSymbol: leg.identity.localSymbol,
-                    futureContracts: leg.quantity,
-                    sharesPerContract: leg.identity.sharesPerContract,
-                    price: leg.price,
-                    fees: leg.fees,
-                    cashAmount: _round(-leg.fees, 6),
-                    source: 'csv_import',
-                    externalRef: leg.externalRef,
-                    sourceRef: leg.sourceRef || leg.externalRef,
-                    currency: leg.currency || null,
-                    priceText: leg.priceText || '',
-                    note: `IBKR FUT ${leg.rawTradeDate || leg.tradeDate}`,
-                    lineNumber: leg.lineNumber,
-                });
-            });
-        });
-
-        return { events, problems, duplicates };
+        return { events, problems };
     }
 
     /**
@@ -1534,7 +1222,7 @@
             // inventory.  Its lack of rows for the selected symbol is proof
             // of a zero balance, not proof that the section had no data.
             hasData: true, shares: 0, shareCostBasis: null,
-            options: new Map(), futures: new Map(),
+            options: new Map(),
             problems: [],
         };
         section.groups.forEach((group) => {
@@ -1585,32 +1273,8 @@
                     return;
                 }
                 const assetKind = _assetKind(values.assetClass);
-                if (assetKind === 'future') {
-                    const identity = _futureIdentity(values, options);
-                    if (!identity.expiry && (!wanted || rowUnderlying === wanted || _upper(values.symbol).startsWith(wanted))) {
-                        result.problems.push({ lineNumber: record.lineNumber, reason: 'Open Positions FUT contract for this underlying could not be parsed', raw: record.values.join(',') });
-                        result.hasData = false;
-                        return;
-                    }
-                    if (wanted && identity.underlying !== wanted) return;
-                    const brokerIdentity = identity.conId !== null
-                        && identity.conId !== undefined
-                        ? `con:${identity.conId}`
-                        : (identity.localSymbol
-                            ? `local:${identity.localSymbol}` : '');
-                    const structural = [
-                        identity.expiry, identity.sharesPerContract,
-                    ].join('|');
-                    const key = brokerIdentity
-                        ? `${structural}|#${brokerIdentity}` : structural;
-                    const previous = result.futures.get(key);
-                    result.futures.set(key, Object.assign({}, previous || identity, {
-                        key,
-                        quantity: _round(
-                            (previous ? previous.quantity : 0) + quantity, 6),
-                    }));
-                    return;
-                }
+                // A FUT row is the FOP ledger's; it never counts as shares here.
+                if (assetKind === 'future') return;
                 const parsed = parseOptionSymbol(values.symbol);
                 const underlying = parsed ? parsed.underlying : _upper(values.symbol);
                 if (!parsed && (assetKind === 'option' || assetKind === 'fop')
@@ -1961,7 +1625,7 @@
             }
             drafts.push({
                 kind: 'option_trade',
-                optionSecType: _upper(opts.secType) === 'FUT' ? 'FOP' : 'OPT',
+                optionSecType: 'OPT',
                 tradeDate: opts.openingDate || '',
                 account: opts.accountFallback || '',
                 right: descriptor.right,
@@ -2084,180 +1748,6 @@
                 localSymbol: item.localSymbol, quantity: item.quantity,
                 account: opts.accountFallback || '',
             })),
-        };
-    }
-
-    function _futureMovement(event, target, quantity) {
-        const isTarget = target === true;
-        return {
-            event,
-            account: String(event.account || ''),
-            expiry: _contractDigits(isTarget
-                ? event.rollToExpiry : (event.futureExpiry || event.expiry)),
-            sharesPerContract: Math.abs(_number(event.sharesPerContract) || 0),
-            conId: isTarget ? event.rollToConId : event.futureConId,
-            localSymbol: _upper(isTarget
-                ? event.rollToLocalSymbol : event.futureLocalSymbol),
-            quantity: _round(quantity, 6),
-        };
-    }
-
-    function _resolveFuturePositionIdentities(items) {
-        const groups = new Map();
-        function structural(item) {
-            return [_contractDigits(item.expiry).slice(0, 6),
-                item.sharesPerContract || ''].join('|');
-        }
-        (items || []).forEach((item) => {
-            const key = structural(item);
-            const group = groups.get(key) || {
-                conIds: new Set(), localSymbols: new Set(), localToConIds: new Map(),
-            };
-            const conId = item.conId === null || item.conId === undefined
-                || item.conId === '' ? '' : String(item.conId);
-            const localSymbol = _upper(item.localSymbol);
-            if (conId) group.conIds.add(conId);
-            if (localSymbol) group.localSymbols.add(localSymbol);
-            if (conId && localSymbol) {
-                const mapped = group.localToConIds.get(localSymbol) || new Set();
-                mapped.add(conId);
-                group.localToConIds.set(localSymbol, mapped);
-            }
-            groups.set(key, group);
-        });
-        const resolved = new Map();
-        (items || []).forEach((item) => {
-            const key = structural(item);
-            const group = groups.get(key);
-            const conId = item.conId === null || item.conId === undefined
-                || item.conId === '' ? '' : String(item.conId);
-            const localSymbol = _upper(item.localSymbol);
-            let identity = '';
-            if (conId) {
-                identity = `con:${conId}`;
-            } else if (group.conIds.size) {
-                const mapped = localSymbol && group.localToConIds.get(localSymbol);
-                if (mapped && mapped.size === 1) identity = `con:${Array.from(mapped)[0]}`;
-                else if (!localSymbol && group.conIds.size === 1) {
-                    identity = `con:${Array.from(group.conIds)[0]}`;
-                } else identity = 'ambiguous';
-            } else if (localSymbol) {
-                identity = `local:${localSymbol}`;
-            } else if (group.localSymbols.size === 1) {
-                identity = `local:${Array.from(group.localSymbols)[0]}`;
-            } else if (group.localSymbols.size > 1) {
-                identity = 'ambiguous';
-            }
-            resolved.set(item, identity ? `${key}|#${identity}` : key);
-        });
-        return resolved;
-    }
-
-    /**
-     * Prove whether an Activity Statement contains the whole FUT opening.
-     * A missing earlier FUT can never be drafted at price zero: unlike an
-     * option premium stub, that would make the headline cost itself false.
-     */
-    function deriveOpeningFutures(rows, events, options) {
-        const opts = options || {};
-        const end = extractEndPositions(rows, opts);
-        if (!end || !end.hasData) return null;
-        const account = String(opts.accountFallback || '');
-        const existing = (opts.existingOpenFutures || [])
-            .filter((item) => String(item.account || '') === account)
-            .map((item) => ({
-                account,
-                expiry: _contractDigits(item.expiry || item.futureExpiry),
-                sharesPerContract: Math.abs(_number(
-                    item.sharesPerContract || item.multiplier) || 0),
-                conId: item.conId === undefined ? item.futureConId : item.conId,
-                localSymbol: item.localSymbol || item.futureLocalSymbol || '',
-                quantity: _number(item.contracts === undefined
-                    ? item.futureContracts : item.contracts) || 0,
-            }));
-        const knownRefs = _existingExternalRefStates(opts.existingExternalRefs);
-        const effective = (events || []).filter((event) => {
-            if (!event.externalRef) return true;
-            return !knownRefs.has(`${String(event.account || '')}\u0000${event.externalRef}`);
-        });
-        const movements = [];
-        effective.forEach((event) => {
-            if (event.kind === 'futures_roll') {
-                const retained = _number(event.futureContracts) || 0;
-                movements.push(_futureMovement(event, false, -retained));
-                movements.push(_futureMovement(event, true, retained));
-                return;
-            }
-            if (event.kind === 'futures_trade'
-                || ((event.kind === 'option_assignment'
-                    || event.kind === 'option_exercise')
-                    && _upper(event.optionSecType) === 'FOP')) {
-                movements.push(_futureMovement(
-                    event, false, _number(event.futureContracts) || 0));
-            }
-        });
-        const ending = Array.from(end.futures.values()).map((item) => ({
-            account,
-            expiry: item.expiry,
-            sharesPerContract: item.sharesPerContract,
-            conId: item.conId,
-            localSymbol: item.localSymbol,
-            quantity: item.quantity,
-        }));
-        const identities = _resolveFuturePositionIdentities(
-            existing.concat(movements, ending));
-        function totals(items) {
-            const result = new Map();
-            items.forEach((item) => {
-                const key = identities.get(item);
-                result.set(key, _round((result.get(key) || 0) + item.quantity, 6));
-            });
-            return result;
-        }
-        const already = totals(existing);
-        const delta = totals(movements);
-        const closing = totals(ending);
-        const keys = new Set([...already.keys(), ...delta.keys(), ...closing.keys()]);
-        const openingFutures = [];
-        const problems = [];
-        keys.forEach((key) => {
-            const opening = _round(
-                (closing.get(key) || 0) - (delta.get(key) || 0)
-                - (already.get(key) || 0), 6);
-            if (Math.abs(opening) < SHARE_EPSILON) return;
-            const sample = ending.find((item) => identities.get(item) === key)
-                || movements.find((item) => identities.get(item) === key)
-                || existing.find((item) => identities.get(item) === key) || {};
-            openingFutures.push(Object.assign({}, sample, { quantity: opening }));
-            problems.push({
-                lineNumber: 0,
-                reason: 'statement begins with an existing FUT position whose entry '
-                    + 'price is not in this file; import an earlier covering statement '
-                    + 'or record/adopt a reviewed FUT baseline before appending',
-                raw: `${opts.symbol || ''} ${sample.expiry || ''} FUT ${opening}`,
-            });
-        });
-        return {
-            drafts: [], problems, openingShares: 0, closingShares: 0,
-            openingFutures,
-            closingFutures: ending.map((item) => Object.assign({}, item, { futureExpiry: item.expiry, futureConId: item.conId, futureLocalSymbol: item.localSymbol })),
-        };
-    }
-
-    function deriveFuturesBookOpenings(rows, events, options) {
-        const optionOpenings = deriveOpeningPositions(rows, events, options);
-        const futureOpenings = deriveOpeningFutures(rows, events, options);
-        if (!optionOpenings && !futureOpenings) return null;
-        return {
-            drafts: optionOpenings ? optionOpenings.drafts : [],
-            problems: (optionOpenings ? optionOpenings.problems : []).concat(
-                futureOpenings ? futureOpenings.problems : []),
-            openingShares: 0,
-            closingShares: 0,
-            openingFutures: futureOpenings ? futureOpenings.openingFutures : [],
-            closingFutures: futureOpenings ? futureOpenings.closingFutures : null,
-            closingOptions: optionOpenings ? optionOpenings.closingOptions : null,
-            unreadable: Boolean(optionOpenings?.unreadable || futureOpenings?.unreadable),
         };
     }
 
@@ -2454,6 +1944,11 @@
         opts.symbol = _upper(opts.symbol);
         opts.targetAccount = String(opts.targetAccount || '').trim();
         opts.currency = _upper(opts.currency);
+        if (_upper(opts.secType) === 'FUT') {
+            // FUT ledgers import on the standalone FOP ledger page (plan §13.3 P6).
+            return _emptyResult('unknown', [{ lineNumber: 0, raw: '',
+                reason: 'FUT ledgers import statements on the FOP ledger page (cost_basis_fop.html), not here' }]);
+        }
         const aliases = opts.externalRefAliases || {};
         const fillSplits = opts.fillSplits || {};
         const splitReversals = [];
@@ -2723,12 +2218,9 @@
         });
 
         const paired = _pairDeliveries(pendings, opts);
-        confirmedDuplicates.push(...(paired.duplicates || []));
         const allEvents = events.concat(paired.events);
         const openings = format === 'activity'
-            ? (_upper(opts.secType) === 'FUT'
-                ? deriveFuturesBookOpenings(rows, allEvents, opts)
-                : deriveOpeningPositions(rows, allEvents, opts))
+            ? deriveOpeningPositions(rows, allEvents, opts)
             : null;
         checks.openPositions = Boolean(openings && !openings.unreadable);
         if (openings && openings.problems && openings.problems.length) {
@@ -2737,7 +2229,7 @@
             // importer must not make silently.
             problems.push(...openings.problems);
         }
-        if (format === 'activity' && _upper(opts.secType) !== 'FUT') {
+        if (format === 'activity') {
             const dividends = _buildDividends(rows, opts);
             const taxes = _buildWithholdingTaxes(rows, opts);
             checks.dividends = dividends.present;
@@ -2810,8 +2302,6 @@
         extractInstruments,
         extractEndPositions,
         deriveOpeningPositions,
-        deriveOpeningFutures,
-        deriveFuturesBookOpenings,
         parseOptionSymbol,
         resolveUnderlying,
         parse,

@@ -19,8 +19,7 @@ const computeLedger = core.computeLedger;
 let capturedPreview;
 core.computeLedger = (...args) => { capturedPreview = computeLedger(...args); return capturedPreview; };
 function snapshot(ledger) {
-    return { combined: ledger.combined, options: ledger.openOptions,
-        futures: ledger.openFutures || [], warnings: ledger.warnings,
+    return { combined: ledger.combined, options: ledger.openOptions, warnings: ledger.warnings,
         running: ledger.rows.map(r => ({cash: r.runningNetCash, shares: r.runningShares})) };
 }
 function handle(data) {

@@ -200,7 +200,8 @@ def ensure_store_initialized(store_env):
         try:
             db_path = resolve_db_path(config=store_env.get('_config'))
             store = CostBasisStore(
-                db_path, display_timezone=_display_timezone(store_env.get('_config'))
+                db_path, display_timezone=_display_timezone(store_env.get('_config')),
+                fop_writes_enabled=_fop_writes_enabled(store_env.get('_config')),
             ).initialize()
         except CostBasisStoreError as exc:
             logger.error(
@@ -225,6 +226,24 @@ def ensure_store_initialized(store_env):
                     'rows of ledgers deleted before v11 were kept, not removed: %s',
                     migration['preservedOrphans'])
         return store_env
+
+
+def _fop_writes_enabled(config):
+    """[cost_basis] fop_writes_enabled: the FOP ledger's writes, on since its release (plan §13.3 P6).
+
+    Both servers read the same key. false/off/no/0 closes them again (reads,
+    export and deletion stay open); a value that is neither keeps them closed
+    and says so, rather than guessing.
+    """
+    if config is None:
+        return True
+    raw = config.get('cost_basis', 'fop_writes_enabled', fallback='true', raw=True)
+    value = str(raw or '').strip().lower()
+    if value in ('1', 'true', 'yes', 'on'):
+        return True
+    if value not in ('0', 'false', 'no', 'off'):
+        logger.warning('invalid cost_basis.fop_writes_enabled value %r; FOP ledger writes stay closed', raw)
+    return False
 
 
 def _display_timezone(config):

@@ -22,7 +22,7 @@ from cost_basis_fop_test_support import (  # noqa: E402
     CLZ6, EXAMPLES, FOP_META, IDENTITY, LOZ6, at, example_event, package, token, verified_capabilities,
 )
 from cost_basis_store import CostBasisStore  # noqa: E402
-from cost_basis_ws import create_store_env, handle_cost_basis_action  # noqa: E402
+from cost_basis_ws import create_store_env, ensure_store_initialized, handle_cost_basis_action  # noqa: E402
 
 LOZ6_DETAILS = {'conId': 9001, 'secType': 'FOP', 'symbol': 'CL', 'tradingClass': 'LO',
                 'localSymbol': 'LOZ6 C7500', 'exchange': 'NYMEX', 'currency': 'USD', 'right': 'C',
@@ -287,19 +287,70 @@ class FopProtocolTests(unittest.IsolatedAsyncioTestCase):
         listed = await self.call('list_cost_basis_events', bookId=book_id)
         self.assertEqual([e['voidedAtUtc'] for e in listed['events']], [None])
 
-    async def test_the_default_backend_keeps_fop_writes_closed(self):
-        closed = self.make_env(fop_writes_enabled=False)
-        response = await self.create(env=closed)
-        self.assertEqual(response['code'], 'futures_book_frozen')
-        book_id = (await self.create())['book']['bookId']
-        refused = await self.call(
-            'append_cost_basis_event', env=closed, bookId=book_id, clientToken=token(),
-            expectedLedgerVersion=await self.version(book_id), bookIdentity=dict(IDENTITY),
-            fopPackage=package(at(example_event('FUT trade: cash is minus fees, notional stays out'),
-                                  '2026-10-01T14:30:05.000000Z'), contracts=[CLZ6]))
-        self.assertEqual(refused['code'], 'futures_book_frozen')
+    def server_env(self, db_path, switch=None):
+        """The store as both servers build it: create_store_env, then the first request opens it."""
+        config = configparser.ConfigParser()
+        config.read_string(f'[cost_basis]\ndb_path = {db_path}\n'
+                           + ('' if switch is None else f'fop_writes_enabled = {switch}\n'))
+        env = create_store_env(config, environ={})
+        ensure_store_initialized(env)
+        self.assertTrue(env['available'], env)
+        return env
+
+    async def test_the_release_backend_writes_new_fop_ledgers_and_nothing_older(self):
+        # Plan §13.3 P6 step 6: after the release gates, both servers open the
+        # new engine's writes; the old FUT format and synthetic_only row types
+        # stay refused; [cost_basis] fop_writes_enabled = false closes them again.
+        released = self.server_env(pathlib.Path(self._tmp.name) / 'released.db')
+        status = await self.call('request_cost_basis_status', env=released)
+        self.assertTrue(status['features']['fopLedger']['writesReleased'])
+        created = await self.create(env=released)
+        self.assertTrue(created['success'], created)
+        book_id = created['book']['bookId']
+        trade = package(at(example_event('FUT trade: cash is minus fees, notional stays out'),
+                           '2026-10-01T14:30:05.000000Z'), contracts=[CLZ6])
+        version = (await self.call('list_cost_basis_events', env=released, bookId=book_id))['ledgerVersion']
+        written = await self.call('append_cost_basis_event', env=released, bookId=book_id, clientToken=token(),
+                                  expectedLedgerVersion=version, bookIdentity=dict(IDENTITY), fopPackage=trade)
+        self.assertTrue(written['success'], 'a new FOP ledger is writable')
+        version = written['ledgerVersion']
+        # The old FUT format: a FUT ledger without FOP metadata, a stock-path write, an aggregated roll.
+        legacy = await self.call('create_cost_basis_book', env=released, account='U2222222', symbol='ES',
+                                 startDate='2026-01-01', secType='FUT', defaultSharesPerContract=50)
+        self.assertEqual(legacy['code'], 'futures_book_frozen', legacy)
+        stock_path = await self.call('append_cost_basis_event', env=released, bookId=book_id, clientToken=token(),
+                                     event={'kind': 'futures_roll', 'tradeDate': '2026-10-02', 'futureExpiry': '202612',
+                                            'futureContracts': 1, 'price': 70, 'rollToExpiry': '202701',
+                                            'rollToPrice': 71, 'rollGroup': 'r1', 'cashAmount': 0})
+        self.assertEqual(stock_path['code'], 'futures_book_frozen', stock_path)
+        roll = copy.deepcopy(trade)
+        roll['events'][0]['kind'] = 'futures_roll'
+        aggregated = await self.call('append_cost_basis_event', env=released, bookId=book_id, clientToken=token(),
+                                     expectedLedgerVersion=version, bookIdentity=dict(IDENTITY), fopPackage=roll)
+        self.assertFalse(aggregated['success'], aggregated)
+        # A statement row type that no real statement has verified yet writes nothing.
+        example = copy.deepcopy(EXAMPLES['statement import: two rows with their raw fields and the file '
+                                         'registration'])
+        fields = {key: value for key, value in example.items() if key not in ('action', 'requestId')}
+        fields.update(bookId=book_id, bookIdentity=dict(IDENTITY), expectedLedgerVersion=version)
+        synthetic = await self.call('import_cost_basis_events', env=released, **fields)
+        self.assertEqual(synthetic['code'], 'fop_capability_not_verified', synthetic)
+        self.assertEqual((await self.call('list_cost_basis_events', env=released, bookId=book_id))['ledgerVersion'],
+                         version, 'nothing refused was written')
+        # The switch closes FOP writes again; reads stay open.
+        closed = self.server_env(pathlib.Path(self._tmp.name) / 'released.db', switch='false')
+        status = await self.call('request_cost_basis_status', env=closed)
+        self.assertFalse(status['features']['fopLedger']['writesReleased'])
+        refused = await self.call('append_cost_basis_event', env=closed, bookId=book_id, clientToken=token(),
+                                  expectedLedgerVersion=version, bookIdentity=dict(IDENTITY), fopPackage=trade)
+        self.assertEqual(refused['code'], 'futures_book_frozen', refused)
+        self.assertEqual((await self.create(env=closed))['code'], 'futures_book_frozen')
         exported = await self.call('export_cost_basis_backup', env=closed, bookId=book_id)
         self.assertTrue(exported['success'], 'reads stay open')
+        self.assertTrue(self.server_env(pathlib.Path(self._tmp.name) / 'on.db', switch='on')['store']._fop_writes_enabled)
+        with self.assertLogs('cost_basis.ws', 'WARNING'):
+            odd = self.server_env(pathlib.Path(self._tmp.name) / 'odd.db', switch='maybe')
+        self.assertFalse(odd['store']._fop_writes_enabled, 'an unreadable switch keeps writes closed')
 
     async def test_contract_details_are_served_only_where_a_resolver_exists(self):
         book_id = (await self.create())['book']['bookId']

@@ -72,17 +72,19 @@ module.exports = {
             },
         },
         {
-            name: 'the real runner refuses a stage beyond the implemented ones',
+            name: 'every stage through P6 is registered, and the real runner refuses P7, which has no command',
             run() {
+                // P6 registered its suites (plan §13.3 P6), so no stage up to it is empty. P7
+                // has no frozen contract and no command (plan §14.4): the runner does not know it.
+                // (Running --stage P6 here would run this case again, so the refusal is P7's.)
                 const registered = require('./fixtures/cost_basis_fop/manifest.json');
-                const last = STAGES.filter((stage) => registered.suites.some(
-                    (entry) => entry.stage === stage && entry.cases.length > 0)).pop();
-                const next = STAGES[STAGES.indexOf(last) + 1];
-                assert.ok(next, 'every stage is registered; pick a new refusal case');
-                const refused = runStage('P6');
-                assert.equal(refused.status, 1, refused.stdout);
-                assert.match(refused.stdout, new RegExp(`stage ${next} has no registered case`));
-                assert.doesNotMatch(refused.stdout, /passed/);
+                assert.deepEqual(STAGES.filter((stage) => registered.suites.some(
+                    (entry) => entry.stage === stage && entry.cases.length > 0)), STAGES);
+                assert.equal(STAGES[STAGES.length - 1], 'P6');
+                const p7 = runStage('P7');
+                assert.equal(p7.status, 2, p7.stdout);
+                assert.match(p7.stdout, /unknown stage P7/);
+                assert.doesNotMatch(p7.stdout, /passed/);
                 const unknown = runStage('P9');
                 assert.equal(unknown.status, 2, unknown.stdout);
             },

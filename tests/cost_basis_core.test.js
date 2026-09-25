@@ -119,9 +119,6 @@ module.exports = {
                 assert.equal(untagged.combined.netDividends, 60);
                 assert.equal(untagged.combined.netCash, combined.netCash);
                 assert.equal(untagged.combined.blendedCost, combined.blendedCost);
-                const futures = core.computeLedger([], { secType: 'FUT' }).combined;
-                assert.equal(futures.netDividends, 0);
-                assert.equal(futures.withholdingFees, 0);
             },
         },
         {
@@ -215,15 +212,13 @@ module.exports = {
             },
         },
         {
-            name: 'expiry premium honors FOP point values and signed net income',
+            name: 'expiry premium honors the contract multiplier and signed net income',
             run() {
                 const core = loadCore();
                 const ledger = core.computeLedger([
-                    shortCall({ optionSecType: 'FOP', sharesPerContract: 50,
-                        contracts: -2, price: 10, fees: 2 }),
-                    shortCall({ optionSecType: 'FOP', sharesPerContract: 50,
-                        tradeDate: '2026-06-02', contracts: 1, price: 4, fees: 1 }),
-                ], { secType: 'FUT' });
+                    shortCall({ sharesPerContract: 50, contracts: -2, price: 10, fees: 2 }),
+                    shortCall({ sharesPerContract: 50, tradeDate: '2026-06-02', contracts: 1, price: 4, fees: 1 }),
+                ]);
                 const result = core.openShortPremiumByExpiry(ledger);
                 assert.equal(result.totalContracts, 1);
                 assert.equal(result.totalPremium, 499);
@@ -801,12 +796,12 @@ module.exports = {
             },
         },
         {
-            name: 'IBKR C/O reversals preserve cash and quantities in both option engines',
+            name: 'IBKR C/O reversals preserve cash and quantities',
             run() {
                 const core = loadCore();
-                for (const secType of ['STK', 'FUT']) {
+                for (const secType of ['STK']) {
                     for (const direction of [-1, 1]) {
-                        const common = { optionSecType: secType === 'FUT' ? 'FOP' : 'OPT' };
+                        const common = { optionSecType: 'OPT' };
                         const rows = [
                             shortPut({ ...common, contracts: 2 * direction, tag: 'ibkr_open' }),
                             shortPut({ ...common, tradeDate: '2026-06-02',
@@ -828,9 +823,9 @@ module.exports = {
             name: 'IBKR C/O cannot invent a closing lot or silently become a pure close',
             run() {
                 const core = loadCore();
-                for (const secType of ['STK', 'FUT']) {
+                for (const secType of ['STK']) {
                     for (const [prior, delta] of [[0, -4], [2, 4], [2, -2], [4, -2], [-2, 2]]) {
-                        const common = { optionSecType: secType === 'FUT' ? 'FOP' : 'OPT' };
+                        const common = { optionSecType: 'OPT' };
                         const rows = prior ? [shortPut({ ...common, contracts: prior })] : [];
                         const before = core.computeLedger(rows, { secType });
                         rows.push(shortPut({ ...common, tradeDate: '2026-06-02',
@@ -2158,274 +2153,6 @@ module.exports = {
                 assert.equal(result.identityConflicts.length, 0);
                 assert.equal(result.rows.filter(
                     (item) => item.kind === 'option').length, 2);
-            },
-        },
-        {
-            name: 'FUT rolls carry their spread and fees into the current contract cost',
-            run() {
-                const core = loadCore();
-                const ledger = core.computeLedger([
-                    event({
-                        kind: 'futures_trade', tradeDate: '2026-08-01',
-                        futureExpiry: '202609', futureContracts: 1,
-                        sharesPerContract: 50, price: 5000, cashAmount: 0,
-                    }),
-                    event({
-                        kind: 'option_trade', optionSecType: 'FOP',
-                        tradeDate: '2026-08-02', right: 'P', strike: 4900,
-                        expiry: '20260821', contracts: -1,
-                        sharesPerContract: 50, price: 10, cashAmount: 500,
-                    }),
-                    event({
-                        kind: 'option_expiry', optionSecType: 'FOP',
-                        tradeDate: '2026-08-21', right: 'P', strike: 4900,
-                        expiry: '20260821', contracts: 1,
-                        sharesPerContract: 50, cashAmount: 0,
-                    }),
-                    event({
-                        kind: 'futures_roll', tradeDate: '2026-08-24',
-                        futureExpiry: '202609', futureContracts: 1,
-                        sharesPerContract: 50, price: 5100,
-                        rollToExpiry: '202612', rollToPrice: 5120,
-                        rollGroup: 'roll-1', fees: 100, cashAmount: -100,
-                    }),
-                ], { secType: 'FUT' });
-                assert.equal(ledger.combined.futuresContracts, 1);
-                assert.equal(ledger.combined.futuresAvgCost, 5120);
-                // 5000 + (5120 - 5100) + 100/50 - 500/50.
-                assert.equal(ledger.combined.blendedCost, 5012);
-                assert.equal(ledger.openFutures[0].expiry, '202612');
-            },
-        },
-        {
-            name: 'YYYYMM and YYYYMMDD identify the same FUT delivery month',
-            run() {
-                const core = loadCore();
-                assert.equal(core.futureKey({
-                    account: 'U1', futureExpiry: '202609', sharesPerContract: 50,
-                }), core.futureKey({
-                    account: 'U1', futureExpiry: '20260918', sharesPerContract: 50,
-                }));
-            },
-        },
-        {
-            name: 'combined FUT lifetime cash includes every account settlement adjustment',
-            run() {
-                const core = loadCore();
-                const ledger = core.computeLedger([
-                    event({ kind: 'manual_adjust', tradeDate: '2026-08-01',
-                        account: 'U1111111', cashAmount: -40, note: 'settlement' }),
-                    event({ kind: 'manual_adjust', tradeDate: '2026-08-01',
-                        account: 'U2222222', cashAmount: -60, note: 'settlement' }),
-                ], { secType: 'FUT' });
-                assert.equal(ledger.perAccount.U1111111.lifetimeNetCash, -40);
-                assert.equal(ledger.perAccount.U2222222.lifetimeNetCash, -60);
-                assert.equal(ledger.combined.lifetimeNetCash, -100);
-            },
-        },
-        {
-            name: 'open FOP premium is hypothetical until expiry or close',
-            run() {
-                const core = loadCore();
-                const ledger = core.computeLedger([
-                    event({
-                        kind: 'futures_trade', tradeDate: '2026-08-01',
-                        futureExpiry: '202609', futureContracts: 1,
-                        sharesPerContract: 50, price: 5000, cashAmount: 0,
-                    }),
-                    event({
-                        kind: 'option_trade', optionSecType: 'FOP',
-                        tradeDate: '2026-08-02', right: 'P', strike: 4900,
-                        expiry: '20260918', contracts: -1,
-                        sharesPerContract: 50, price: 10, cashAmount: 500,
-                    }),
-                ], { secType: 'FUT' });
-                assert.equal(ledger.combined.blendedCost, 5000);
-                assert.equal(ledger.combined.blendedCostIfExpired, 4990);
-            },
-        },
-        {
-            name: 'an early FOP close applies only its net realized premium',
-            run() {
-                const core = loadCore();
-                const ledger = core.computeLedger([
-                    event({
-                        kind: 'futures_trade', tradeDate: '2026-08-01',
-                        futureExpiry: '202609', futureContracts: 1,
-                        sharesPerContract: 50, price: 5000, cashAmount: 0,
-                    }),
-                    event({
-                        kind: 'option_trade', optionSecType: 'FOP',
-                        tradeDate: '2026-08-02', right: 'P', strike: 4900,
-                        expiry: '20260918', contracts: -1,
-                        sharesPerContract: 50, price: 10, cashAmount: 500,
-                    }),
-                    event({
-                        kind: 'option_trade', optionSecType: 'FOP',
-                        tradeDate: '2026-08-10', right: 'P', strike: 4900,
-                        expiry: '20260918', contracts: 1,
-                        sharesPerContract: 50, price: 4, cashAmount: -200,
-                    }),
-                ], { secType: 'FUT' });
-                assert.equal(ledger.combined.realizedPremium, 300);
-                assert.equal(ledger.combined.openPremium, 0);
-                assert.equal(ledger.combined.blendedCost, 4994);
-            },
-        },
-        {
-            name: 'realized FOP income raises a short FUT break-even sale price',
-            run() {
-                const core = loadCore();
-                const ledger = core.computeLedger([
-                    event({
-                        kind: 'futures_trade', tradeDate: '2026-08-01',
-                        futureExpiry: '202609', futureContracts: -1,
-                        sharesPerContract: 50, price: 5000, cashAmount: 0,
-                    }),
-                    event({
-                        kind: 'option_trade', optionSecType: 'FOP',
-                        tradeDate: '2026-08-02', right: 'C', strike: 5200,
-                        expiry: '20260821', contracts: -1,
-                        sharesPerContract: 50, price: 10, cashAmount: 500,
-                    }),
-                    event({
-                        kind: 'option_expiry', optionSecType: 'FOP',
-                        tradeDate: '2026-08-21', right: 'C', strike: 5200,
-                        expiry: '20260821', contracts: 1,
-                        sharesPerContract: 50, cashAmount: 0,
-                    }),
-                ], { secType: 'FUT' });
-                assert.equal(ledger.combined.blendedCost, 5010);
-                assert.equal(ledger.combined.isShort, true);
-            },
-        },
-        {
-            name: 'the same roll equation carries a short FUT basis',
-            run() {
-                const core = loadCore();
-                const ledger = core.computeLedger([
-                    event({
-                        kind: 'futures_trade', tradeDate: '2026-08-01',
-                        futureExpiry: '202609', futureContracts: -1,
-                        sharesPerContract: 50, price: 5000, cashAmount: 0,
-                    }),
-                    event({
-                        kind: 'futures_roll', tradeDate: '2026-08-24',
-                        futureExpiry: '202609', futureContracts: -1,
-                        sharesPerContract: 50, price: 4900,
-                        rollToExpiry: '202612', rollToPrice: 4880,
-                        rollGroup: 'short-roll', cashAmount: 0,
-                    }),
-                ], { secType: 'FUT' });
-                assert.equal(ledger.combined.futuresAvgCost, 4880);
-                assert.equal(ledger.combined.blendedCost, 4980);
-                assert.equal(ledger.combined.isShort, true);
-            },
-        },
-        {
-            name: 'opposite FUT directions never collapse into a fake blended cost',
-            run() {
-                const core = loadCore();
-                const ledger = core.computeLedger([
-                    event({
-                        kind: 'futures_trade', tradeDate: '2026-08-01',
-                        futureExpiry: '202609', futureContracts: 1,
-                        sharesPerContract: 50, price: 5000, cashAmount: 0,
-                    }),
-                    event({
-                        kind: 'futures_trade', tradeDate: '2026-08-02',
-                        futureExpiry: '202612', futureContracts: -1,
-                        sharesPerContract: 50, price: 5100, cashAmount: 0,
-                    }),
-                ], { secType: 'FUT' });
-                assert.equal(ledger.combined.blendedCost, null);
-                assert.equal(ledger.combined.hasFutures, false);
-                assert.ok(ledger.warnings.includes('mixed_future_directions'));
-            },
-        },
-        {
-            name: 'FOP assignment opens the delivered FUT at strike without notional cash',
-            run() {
-                const core = loadCore();
-                const ledger = core.computeLedger([
-                    event({
-                        kind: 'option_trade', optionSecType: 'FOP',
-                        tradeDate: '2026-08-01', right: 'P', strike: 5000,
-                        expiry: '20260821', contracts: -1,
-                        sharesPerContract: 50, price: 50, cashAmount: 2500,
-                    }),
-                    event({
-                        kind: 'option_assignment', optionSecType: 'FOP',
-                        tradeDate: '2026-08-21', right: 'P', strike: 5000,
-                        expiry: '20260821', contracts: 1,
-                        sharesPerContract: 50, futureExpiry: '202609',
-                        futureContracts: 1, price: 5000, cashAmount: 0,
-                    }),
-                ], { secType: 'FUT' });
-                assert.equal(ledger.combined.futuresAvgCost, 5000);
-                assert.equal(ledger.combined.realizedPremium, 2500);
-                assert.equal(ledger.combined.blendedCost, 4950);
-                assert.equal(ledger.combined.netCash, 2500);
-            },
-        },
-        {
-            name: 'FUT and FOP TWS rows reconcile without being filtered out',
-            run() {
-                const core = loadCore();
-                const ledger = core.computeLedger([
-                    event({
-                        kind: 'futures_trade', tradeDate: '2026-08-01',
-                        futureExpiry: '202609', futureConId: 1001,
-                        futureContracts: 1, sharesPerContract: 50,
-                        price: 5000, cashAmount: 0,
-                    }),
-                    event({
-                        kind: 'option_trade', optionSecType: 'FOP',
-                        tradeDate: '2026-08-02', right: 'C', strike: 5200,
-                        expiry: '20260918', conId: 2001, contracts: -1,
-                        sharesPerContract: 50, price: 10, cashAmount: 500,
-                    }),
-                ], { secType: 'FUT' });
-                const result = core.buildReconciliation({
-                    ledger, secType: 'FUT', symbol: 'ES',
-                    positions: [
-                        { account: 'U1111111', secType: 'FUT', symbol: 'ES',
-                          expDate: '202609', conId: 1001, multiplier: '50', position: 1 },
-                        { account: 'U1111111', secType: 'FOP', symbol: 'ES',
-                          expDate: '20260918', right: 'C', strike: 5200,
-                          conId: 2001, multiplier: '50', position: -1 },
-                    ],
-                });
-                assert.equal(result.rows.length, 2);
-                assert.equal(result.balanced, true);
-                assert.deepEqual(Array.from(result.rows, (row) => row.kind).sort(),
-                    ['future', 'option']);
-            },
-        },
-        {
-            name: 'a possible FOP delivery blocks adopting only the new FUT baseline',
-            run() {
-                const core = loadCore();
-                const ledger = core.computeLedger([event({
-                    kind: 'option_trade', optionSecType: 'FOP',
-                    tradeDate: '2026-08-01', right: 'P', strike: 5000,
-                    expiry: '20260821', contracts: -1,
-                    sharesPerContract: 50, price: 50, cashAmount: 2500,
-                })], { secType: 'FUT' });
-                const result = core.buildReconciliation({
-                    ledger, secType: 'FUT', symbol: 'ES', today: '2026-08-26',
-                    positions: [{ account: 'U1111111', secType: 'FUT', symbol: 'ES',
-                        expDate: '20260918', conId: 1001, multiplier: '50',
-                        position: 1, avgCostPerUnit: 5000 }],
-                });
-                const future = result.rows.find((row) => row.kind === 'future');
-                const option = result.rows.find((row) => row.kind === 'option');
-                assert.equal(future.adoptionBlocked, true);
-                assert.equal(future.possibleDelivery, true);
-                assert.equal(option.possibleDelivery, true);
-                assert.equal(core.buildTwsAdoptionEvent(future, {
-                    secType: 'FUT', today: '2026-08-26',
-                }), null);
             },
         },
         {

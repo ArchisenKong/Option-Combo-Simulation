@@ -2,7 +2,7 @@
   "id": "legacy_fut_migration_list",
   "source": "synthetic",
   "plan": "CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §13.3 P0 step 4",
-  "description": "Old tests that wrote FUT/FOP ledgers through the shared engine. P0 freezes those ledgers, so each test was converted to a rejection check or narrowed. The economic vectors are kept here so P3/P6 can re-assert them against the standalone FOP engine instead of dropping them silently.",
+  "description": "Old tests that wrote FUT/FOP ledgers through the shared engine. P0 freezes those ledgers, so each test was converted to a rejection check or narrowed. The economic vectors are kept here so P3/P6 can re-assert them against the standalone FOP engine instead of dropping them silently. P6 checks every entry against the tests and vectors named in coveredBy before the old FUT/FOP/ROLL branches leave the stock modules.",
   "entries": [
     {
       "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_future_trade_and_roll_round_trip_all_contract_fields",
@@ -12,7 +12,13 @@
         "roll": { "futureExpiry": "202609", "price": 5100, "rollToExpiry": "202612", "rollToConId": 1002, "rollToLocalSymbol": "ESZ6", "rollToPrice": 5120, "fees": 4 },
         "asserted": "every contract field of the roll round-trips"
       },
-      "newEngine": "P2/P3: contract records round-trip; a roll is two real futures_trade rows (plan §6.2), so the aggregated futures_roll shape does not return"
+      "newEngine": "P2/P3: contract records round-trip; a roll is two real futures_trade rows (plan §6.2), so the aggregated futures_roll shape does not return",
+      "coveredBy": [
+        "tests/cost_basis_fop_store_test.py::FopWriteTests.test_fut_fop_and_delivery_writes_read_back_their_quantities",
+        "tests/cost_basis_fop_store_test.py::FopWriteTests.test_contracts_are_one_record_per_contract",
+        "tests/fixtures/cost_basis_fop/core_vectors.json#§5.4 complete long roll",
+        "tests/cost_basis_fop_import_pipeline_test.py::FullHistoryPathTests.test_the_three_rolls_from_one_statement"
+      ]
     },
     {
       "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_negative_futures_prices_are_valid_and_round_trip",
@@ -22,7 +28,12 @@
         "roll": { "closePrice": -30, "rollToLocalSymbol": "CLM20", "rollToPrice": -20 },
         "asserted": "negative prices are stored exactly, no abs()"
       },
-      "newEngine": "P3 F15: zero/negative FUT prices through every path"
+      "newEngine": "P3 F15: zero/negative FUT prices through every path",
+      "coveredBy": [
+        "tests/fixtures/cost_basis_fop/core_vectors.json#§5.4 negative prices",
+        "tests/fixtures/cost_basis_fop/core_vectors.json#F15 a negative average and a negative mark",
+        "tests/cost_basis_fop_randomized_test.py::CampaignTests.test_fixed_seeds_agree_with_the_model_through_every_stage"
+      ]
     },
     {
       "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_month_and_last_trade_date_share_one_futures_timeline",
@@ -31,7 +42,11 @@
         "asserted": "future_key(futureExpiry=202609) == future_key(futureExpiry=20260918)",
         "why_invalid": "true for ES, whose last trade date falls in the delivery month; false for CL, whose last trade date falls in the month before. The same rule is what merges CLZ6 and CLF7 in month_collision.json."
       },
-      "newEngine": "P2/P3 F03, F35: delivery month and last trade date are separate fields and never derived from each other"
+      "newEngine": "P2/P3 F03, F35: delivery month and last trade date are separate fields and never derived from each other",
+      "coveredBy": [
+        "tests/fixtures/cost_basis_fop/core_vectors.json#F35 month collision: two real contracts, nothing realized",
+        "tests/cost_basis_fop_guard.test.js::the month collision gold standard is internally consistent"
+      ]
     },
     {
       "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_book_type_boundary_rejects_cross_asset_events",
@@ -39,7 +54,11 @@
       "vector": {
         "asserted": "a STK ledger refuses futures_trade; a FUT ledger refuses share_trade and an option_trade with optionSecType=OPT"
       },
-      "newEngine": "P2 F46: FOP ledger kind whitelist (plan §8.1)"
+      "newEngine": "P2 F46: FOP ledger kind whitelist (plan §8.1)",
+      "coveredBy": [
+        "tests/cost_basis_fop_store_test.py::FopWriteTests.test_identity_columns_stock_fields_and_other_kinds_are_refused",
+        "tests/cost_basis_fop_contract_test.py::CoverageTests.test_every_event_kind_is_decided"
+      ]
     },
     {
       "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_roll_cannot_transfer_a_month_the_ledger_does_not_hold",
@@ -47,7 +66,10 @@
       "vector": {
         "asserted": "a roll out of 202609 with no 202609 position raises PositionOverdrawError"
       },
-      "newEngine": "P3: closing more than the contract holds is refused (plan §5.1)"
+      "newEngine": "P3: closing more than the contract holds is refused (plan §5.1)",
+      "coveredBy": [
+        "tests/cost_basis_fop_domain_test.py::RuleTests.test_the_replay_refuses_closes_that_overdraw"
+      ]
     },
     {
       "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_fop_assignment_opens_one_future_at_strike_with_fees_only_cash",
@@ -57,7 +79,13 @@
         "assignment": { "contracts": 1, "futureExpiry": "202609", "futureContracts": 1, "fees": 3, "cashAmount": -3 },
         "asserted": "assignment stores price = strike 5000, futureContracts +1, no shares; a futures_trade carrying notional cash -250000 is refused"
       },
-      "newEngine": "P3 F06 and the plan §8.1 per-kind cash rules"
+      "newEngine": "P3 F06 and the plan §8.1 per-kind cash rules",
+      "coveredBy": [
+        "tests/fixtures/cost_basis_fop/core_vectors.json#F06 short put assigned",
+        "tests/fixtures/cost_basis_fop/core_vectors.json#F06 short call assigned",
+        "tests/cost_basis_fop_domain_test.py::RuleTests.test_a_delivery_moves_the_future_the_way_plan_6_1_says",
+        "tests/cost_basis_fop_import_pipeline_test.py::DeliveryTests.test_an_assignment_and_an_exercise_arrive_as_one_event_each"
+      ]
     },
     {
       "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_complete_csv_history_supersedes_an_adopted_future_baseline",
@@ -65,7 +93,10 @@
       "vector": {
         "asserted": "a complete CSV import covering the TWS-adopted baseline supersedes (voids) the baseline row"
       },
-      "newEngine": "P4 F19: complete history atomically replaces a temporary baseline"
+      "newEngine": "P4 F19: complete history atomically replaces a temporary baseline",
+      "coveredBy": [
+        "tests/cost_basis_fop_import_pipeline_test.py::BaselineTests.test_a_baseline_ledger_starts_from_the_statement_and_the_history_replaces_it"
+      ]
     },
     {
       "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_incremental_csv_after_snapshot_keeps_the_adopted_baseline",
@@ -73,7 +104,11 @@
       "vector": {
         "asserted": "an incremental import after the snapshot keeps the adopted baseline"
       },
-      "newEngine": "P4 F19"
+      "newEngine": "P4 F19",
+      "coveredBy": [
+        "tests/cost_basis_fop_import_pipeline_test.py::BaselineTests.test_the_baseline_statement_imports_again_as_a_repeat",
+        "tests/cost_basis_fop_import_pipeline_test.py::FullHistoryPathTests.test_monthly_statements_across_the_year_end"
+      ]
     },
     {
       "source": "tests/cost_basis_store_test.py::FuturesLedgerStoreTests::test_roll_target_identity_can_reconstruct_an_adopted_new_month",
@@ -81,7 +116,11 @@
       "vector": {
         "asserted": "an old-month trade plus an aggregated roll into 202612 reconstructs a TWS-adopted 202612 baseline"
       },
-      "newEngine": "P4 F09/F19 with two real legs instead of an aggregated roll"
+      "newEngine": "P4 F09/F19 with two real legs instead of an aggregated roll",
+      "coveredBy": [
+        "tests/cost_basis_fop_import_pipeline_test.py::BaselineTests.test_a_baseline_ledger_starts_from_the_statement_and_the_history_replaces_it",
+        "tests/cost_basis_fop_import_pipeline_test.py::FullHistoryPathTests.test_the_three_rolls_from_one_statement"
+      ]
     },
     {
       "source": "tests/cost_basis_store_test.py::MigrationTests::test_real_v2_event_table_is_atomically_rebuilt_for_futures",
@@ -89,7 +128,11 @@
       "vector": {
         "asserted": "after migrating a real v2 database, a FUT ledger could be created and a futures_trade appended"
       },
-      "newEngine": "P2 F25: migration of the new FOP tables"
+      "newEngine": "P2 F25: migration of the new FOP tables",
+      "coveredBy": [
+        "tests/cost_basis_fop_store_test.py::MigrationTests.test_a_v10_ledger_migrates_with_foreign_keys_on_and_keeps_every_stock_row",
+        "tests/cost_basis_fop_store_test.py::MigrationTests.test_a_failure_anywhere_leaves_the_v10_file_untouched"
+      ]
     },
     {
       "source": "tests/cost_basis_ws_test.py::test_same_root_can_have_distinct_stock_and_futures_books",
@@ -97,7 +140,10 @@
       "vector": {
         "asserted": "one account can hold an STK and a FUT ledger for the same root; the FUT ledger keeps defaultMultiplier 50"
       },
-      "newEngine": "P1/P2 F02: STK and FOP ledgers for the same root stay isolated"
+      "newEngine": "P1/P2 F02: STK and FOP ledgers for the same root stay isolated",
+      "coveredBy": [
+        "tests/cost_basis_fop_store_test.py::FopWriteTests.test_a_stock_and_a_fop_ledger_of_one_root_stay_apart"
+      ]
     },
     {
       "source": "tests/cost_basis_randomized_test.py::Campaign.verify_futures_store",
@@ -105,7 +151,11 @@
       "vector": {
         "asserted": "a generated FUT history imported into SQLite, and rebuilt from shuffled rows, replays to the oracle snapshot"
       },
-      "newEngine": "P6 randomized regression against the standalone engine (plan §14.2)"
+      "newEngine": "P6 randomized regression against the standalone engine (plan §14.2)",
+      "coveredBy": [
+        "tests/cost_basis_fop_randomized_test.py::CampaignTests.test_fixed_seeds_agree_with_the_model_through_every_stage",
+        "scripts/verify_cost_basis_fop_randomized.py"
+      ]
     },
     {
       "source": "tests/cost_basis_page.test.js::the page exposes a distinct FOP FUT book and its roll controls",
@@ -113,7 +163,11 @@
       "vector": {
         "asserted": "the create form offers FOP / FUT and the entry form has futureExpiry/futureContracts/rollToExpiry/rollToPrice/rollGroup fields"
       },
-      "newEngine": "P1/P5: the standalone FOP page and its own entry form"
+      "newEngine": "P1/P5: the standalone FOP page and its own entry form",
+      "coveredBy": [
+        "tests/cost_basis_fop_page.test.js::manual entries build requests the frozen contract accepts, and refuse what it cannot",
+        "tests/cost_basis_fop_identity.test.js::a FUT ledger shows only its identity and the way to the legacy view"
+      ]
     }
   ]
 }

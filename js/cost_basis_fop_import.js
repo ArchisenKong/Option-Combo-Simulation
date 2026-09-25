@@ -511,6 +511,8 @@
         const plan = {
             statement, format: statement.format, mappingVersion: capabilities.mappingVersion,
             account: book.account, rows: [], contracts: [], bindings: [], bindingRequests: [],
+            // Stored unresolved bindings this file proves, for an explicit adoption (plan §4.3).
+            bindingUpgrades: [],
             sourceRecords: [], events: [], duplicates: [], supersede: [], quantityProof: [],
             openings: [], problems: statement.problems.slice(), warnings: [], timeZone: null,
             period: statement.period, checks: {}, rules,
@@ -815,6 +817,7 @@
                 return record;
             },
             created,
+            stored: ledger.contracts,
         };
     }
 
@@ -2051,6 +2054,18 @@
                     bindings.set(option.contractId, { stored, ref: { bindingId: stored.bindingId,
                         revision: stored.revision } });
                 }
+                // The ledger could not prove this option's future; this file may,
+                // even by a row whose fill is stored already (a cumulative file).
+                // Never silently: the page offers the adoption, a versioned
+                // metadata commit.
+                const offered = plan.bindingUpgrades.some((item) => item.bindingId === stored.bindingId);
+                if (!offered && !stored.futureContractId && stored.status === 'unresolved') {
+                    const future = statedFuture(event, plan, contracts);
+                    if (future) {
+                        plan.bindingUpgrades.push({ bindingId: stored.bindingId, revision: stored.revision, option,
+                            future, evidence: bindingEvidence(event, future, plan) });
+                    }
+                }
                 continue;
             }
             if (bindings.has(option.contractId)) continue;
@@ -2079,8 +2094,11 @@
             if (!binding) continue;
             const record = binding.record || binding.stored;
             if (!record.futureContractId || record.status === 'unresolved' || record.status === 'conflict') {
+                const upgrade = plan.bindingUpgrades.find((item) => item.bindingId === record.bindingId);
                 plan.problems.push(problem('binding_missing', `line ${event.line}: the ${event.kind} of `
-                    + `${event.contract.localSymbol} needs the option's future proven by the statement or the broker`,
+                    + `${event.contract.localSymbol} needs the option's future proven by the statement or the broker`
+                    + (upgrade ? `; this file proves ${upgrade.future.localSymbol || upgrade.future.contractId}: `
+                        + 'adopt that binding first, then preview again' : ''),
                 event.line, true));
             } else if (record.futureContractId !== event.delivered.contractId) {
                 plan.problems.push(problem('binding_conflict', `line ${event.line}: ${event.contract.localSymbol} is `
@@ -2116,20 +2134,36 @@
         return left < right ? -1 : (left > right ? 1 : 0);
     }
 
-    /** The future a statement proves an option delivers, or null. */
+    /**
+     * The future a statement proves an option delivers, or null. It is a
+     * future this file brings, or one the ledger holds already that the file
+     * shows (a row of it or its instrument line): the rows the server checks
+     * the binding credential on (plan §4.3). A later file whose option rows
+     * name that future's conId still binds the option.
+     */
     function bindingFuture(event, plan, contracts) {
-        if (event.delivered) return event.delivered;
+        return event.delivered || statedFuture(event, plan, contracts);
+    }
+
+    /** The future an option row itself names (never the leg a delivery paired with it), or null. */
+    function statedFuture(event, plan, contracts) {
         const reading = event.readings[0];
         if (!reading || !reading.candidate) return null;
+        const shown = (record) => (plan.readings || []).some((item) => item.contract
+            && item.contract.contractId === record.contractId)
+            || Boolean(record.localSymbol && contracts.evidence.bySymbol.get(record.localSymbol))
+            || Boolean(record.conId && contracts.evidence.byConId.get(record.conId));
+        const known = [...contracts.created.values()].concat(contracts.stored.filter(shown))
+            .filter((record) => record.secType === 'FUT');
         let future = null;
         if (reading.futureSymbol) {
-            for (const record of contracts.created.values()) {
-                if (record.secType === 'FUT' && record.localSymbol === reading.futureSymbol) future = record;
+            for (const record of known) {
+                if (record.localSymbol === reading.futureSymbol) future = record;
             }
         }
         if (!future && reading.candidate.underlyingConId) {
-            for (const record of contracts.created.values()) {
-                if (record.secType === 'FUT' && record.conId === reading.candidate.underlyingConId) future = record;
+            for (const record of known) {
+                if (record.conId === reading.candidate.underlyingConId) future = record;
             }
         }
         if (!future && reading.futureSymbol) {
@@ -2212,6 +2246,51 @@
     // ------------------------------------------------------------------
     // Requests (protocol.json ImportRequest, FopRebuildRequest)
     // ------------------------------------------------------------------
+
+    /**
+     * The adoptions of the stored unresolved bindings this file proves (plan
+     * §4.3): one adopt_binding metadata operation per binding the server
+     * signed a verified_statement credential for (results: its
+     * StatementBindingResult items). A binding revision moves the references
+     * of the live deliveries on the old one (an unresolved binding has none);
+     * a future the ledger does not hold yet travels with the first operation
+     * that names it (the operations are committed in order). The server
+     * checks the credential against exactly these records. Returns
+     * {operations, refused: [{bindingId, problems}]}.
+     */
+    function bindingUpgradeAdoptions(plan, graph, book, results) {
+        const byId = new Map((results || []).map((result) => [result.bindingId, result]));
+        const held = new Set(((graph && graph.contracts) || []).map((item) => item.record.contractId));
+        const live = ((graph && graph.events) || []).filter((item) => !item.row.voidedAtUtc).map((item) => item.row);
+        const operations = [];
+        const refused = [];
+        for (const upgrade of plan.bindingUpgrades || []) {
+            const result = byId.get(upgrade.bindingId);
+            if (!result || result.status !== 'verified_statement' || !result.evidenceCredential) {
+                refused.push({ bindingId: upgrade.bindingId, problems: result ? result.problems || [] : ['no answer'] });
+                continue;
+            }
+            const { option, future } = upgrade;
+            const binding = {
+                bindingId: upgrade.bindingId, revision: upgrade.revision + 1, optionContractId: option.contractId,
+                futureContractId: future.contractId, status: 'verified_statement',
+                evidenceSummary: `statement: ${option.localSymbol} delivers ${future.localSymbol} `
+                    + `(${future.futureContractMonth})`,
+                evidenceCredential: result.evidenceCredential, observedAtUtc: future.observedAtUtc,
+            };
+            const affected = live.filter((row) => row.fop.bindingRef && row.fop.bindingRef.bindingId === upgrade.bindingId
+                && row.fop.bindingRef.revision === upgrade.revision).map((row) => ({ eventId: row.eventId,
+                reference: 'binding', before: { id: upgrade.bindingId, revision: upgrade.revision },
+                after: { id: upgrade.bindingId, revision: binding.revision } }));
+            const operation = { kind: 'adopt_binding', binding, affected };
+            if (!held.has(future.contractId)) {
+                operation.contracts = [Object.assign({}, future)];
+                held.add(future.contractId);
+            }
+            operations.push(operation);
+        }
+        return { operations, refused };
+    }
 
     /** The plan with server credentials for its statement bindings. */
     function withCredentials(plan, credentials) {
@@ -2463,6 +2542,7 @@
         readStatement,
         planImport,
         withCredentials,
+        bindingUpgradeAdoptions,
         buildImportRequest,
         buildRebuildRequest,
         claimRows,

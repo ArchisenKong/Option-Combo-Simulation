@@ -982,9 +982,14 @@ owns that graph inside the store's transactions; `cost_basis_fop_domain.py` hold
 the pure rules; `cost_basis_fop_schema.py` checks every FOP message against the
 frozen types in `cost_basis_fop_protocol.json`; `cost_basis_fop_broker.py`
 resolves option -> underlying pairs read-only through an injected contract-details
-function. FOP writes are gated by `fop_writes_enabled`, off in both servers
-until the release stage; a FUT book without FOP metadata stays export and
-delete only. Schema v12 only lets the FOP request log hold statement imports; a
+function. FOP writes are gated by `fop_writes_enabled`, open in both servers
+since the release stage (P6) and closed again by `[cost_basis]
+fop_writes_enabled = false`; a FUT book without FOP metadata stays export and
+delete only. The stock modules (`js/cost_basis_core.js`, `js/cost_basis_import.js`,
+`js/cost_basis.js`, the stock half of `cost_basis_store.py`) carry no FUT/FOP/ROLL
+branch since P6: the stock page sends a FOP ledger to its own page, shows a
+legacy FUT ledger's identity and reason only, and the stock engine and importer
+refuse a FUT ledger. Schema v12 only lets the FOP request log hold statement imports; a
 v10 file goes straight to v12, and a v11 file (the P2 and P3 builds) rebuilds
 that one table behind the same verified backup.
 

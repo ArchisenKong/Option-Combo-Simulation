@@ -10,7 +10,7 @@ Frontend surfaces:
 - `chart_lab.html` for the shared workspace plus experimental daily-bar projection
 - `iv_term_structure.html` for standalone live IV term-structure monitoring
 - `cost_basis.html` for the standalone per-underlying blended-cost ledger
-- `cost_basis_fop.html` for the standalone FOP ledger (under construction; routing only)
+- `cost_basis_fop.html` for the standalone FOP ledger (CL futures and options on futures)
 - `workspace_db_admin.html` for the standalone workspace-database / archive admin page
 
 Backend entry points:
@@ -53,8 +53,13 @@ Do not assume a bare `python` command will work in every shell, especially on Wi
     `cost_basis.db`; it cannot trade or subscribe to market data
   - loads `js/cost_basis_common.js` first: the shared action catalogue and
     ledger routing (`OptionComboCostBasisCore.ALLOWED_CLIENT_ACTIONS` is
-    derived from it). FUT/FOP ledgers are frozen here (read, export, delete
-    only) until the standalone FOP ledger ships
+    derived from it). It lists and computes STK ledgers only: a FOP ledger
+    (a FUT ledger with FOP metadata) is sent to `cost_basis_fop.html`, and a
+    legacy FUT ledger without FOP metadata shows its identity and the reason,
+    and can only be exported (raw rows) or deleted whole; nothing computes or
+    writes it. The stock core, importer and store carry no FUT/FOP/ROLL branch
+    any more (plan §13.3 P6): `computeLedger`, `buildReconciliation`,
+    `buildExecutionImport` and the importer's `parse` refuse a FUT ledger
 
 - `cost_basis_fop.html`
   - standalone FOP ledger, built in phases by
@@ -79,11 +84,19 @@ Do not assume a bare `python` command will work in every shell, especially on Wi
     at a time, the ledger account's own TWS positions, FOP packages, metadata
     commits and reconciliation snapshots), never an order, exercise or
     subscription. Its writes are disabled while the status says
-    `writesReleased` is false, every write is previewed and sent as the
+    `writesReleased` is false (the backend's `[cost_basis] fop_writes_enabled
+    = false`), every write is previewed and sent as the
     previewed request, and every answer is checked against the ledger, reload
     and version it was asked for. Possible duplicates of stored fills stay
     blocked until a person decides them with the check they rest on; the
-    store checks each decision and keeps it in the import's answer
+    store checks each decision and keeps it in the import's answer. A stored
+    unresolved binding that a later statement proves is offered for an
+    explicit adoption (a server credential, one metadata commit), never
+    adopted silently
+  - `scripts/verify_cost_basis_fop_randomized.py` is the seeded release
+    campaign (generated trades -> test-only statement writer -> the page's
+    importer -> temporary store -> core, held to the rational model);
+    `tests/cost_basis_fop_randomized_test.py` keeps a fixed slice of it
   - browser checks run `scripts/cost_basis_fop_browser_assertions.js` in the
     page against `scripts/cost_basis_fop_synthetic_backend.py` (127.0.0.1, a
     temporary database, a simulated broker; it refuses port 8765 and serves a
@@ -187,9 +200,13 @@ Do not assume a bare `python` command will work in every shell, especially on Wi
     contracts; ib_server injects the adapter, historical_server has none) and
     `cost_basis_fop_statement.py` (the server's own
     reading of statement rows for capabilities, manual claims and statement
-    binding credentials). FOP writes stay behind `fop_writes_enabled`, off in
-    both servers until the plan's release stage; the schema migration (v12)
-    takes a verified copy of `cost_basis.db` before it changes anything
+    binding credentials). FOP writes are open in both servers since the
+    plan's release stage (P6); `[cost_basis] fop_writes_enabled = false` in
+    `config.ini` closes them again (an unreadable value keeps them closed).
+    Statement rows still write only for `real_verified` row types, and no row
+    type is verified yet, so CSV rows import only as manual claims. The
+    schema migration (v12) takes a verified copy of `cost_basis.db` before it
+    changes anything
 - Both `websockets.serve` calls must share the explicit
   `[server] max_ws_message_bytes` size. The library's 1 MiB default would
   1009-close a socket that is also carrying order supervision.

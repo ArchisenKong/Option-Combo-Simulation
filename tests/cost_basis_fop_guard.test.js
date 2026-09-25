@@ -156,13 +156,13 @@ module.exports = {
             },
         },
         {
-            name: 'the create form keeps FOP / FUT visible but disabled',
+            name: 'the create form keeps FOP / FUT visible but disabled, pointing to the FOP page',
             run() {
                 const html = read('cost_basis.html');
-                assert.match(html, /<option value="FUT" disabled>FOP \/ FUT（已停用）<\/option>/);
+                assert.match(html, /<option value="FUT" disabled>FOP \/ FUT（在 FOP 账本页建账）<\/option>/);
                 assert.doesNotMatch(html, /<option value="FUT">/);
                 assert.match(html, /<option value="STK">股票 \/ ETF 期权<\/option>/);
-                assert.match(html, /FOP \/ FUT 账本暂停新建/);
+                assert.match(html, /期货与期货期权请在 FOP 账本页面（cost_basis_fop\.html）建账/);
             },
         },
         {
@@ -259,6 +259,39 @@ module.exports = {
                     'test_roll_target_identity_can_reconstruct_an_adopted_new_month',
                 ].forEach((name) => assert.ok(
                     list.entries.some((entry) => entry.source.endsWith(`::${name}`)), name));
+            },
+        },
+        {
+            name: 'every legacy FUT example names the new-engine tests that cover it, and they exist (P6)',
+            run() {
+                // Before the old FUT/FOP/ROLL branches leave the stock modules
+                // (plan §13.3 P6 step 1), each converted test is re-asserted
+                // by named tests or hand-worked vectors of the standalone engine.
+                const list = readJson('tests/fixtures/cost_basis_fop/legacy_fut_migration_list.json');
+                const vectors = readJson('tests/fixtures/cost_basis_fop/core_vectors.json').vectors.map((vector) => vector.name);
+                list.entries.forEach((entry) => {
+                    assert.ok(Array.isArray(entry.coveredBy) && entry.coveredBy.length, entry.source);
+                    entry.coveredBy.forEach((reference) => {
+                        if (reference.includes('#')) {
+                            const [file, name] = reference.split('#');
+                            assert.equal(file, 'tests/fixtures/cost_basis_fop/core_vectors.json', reference);
+                            assert.ok(vectors.includes(name), `no vector named ${name}`);
+                            return;
+                        }
+                        const [file, name] = reference.split('::');
+                        assert.ok(fs.existsSync(path.join(ROOT, file)), `${file} is missing`);
+                        if (!name) return;
+                        const source = read(file);
+                        if (file.endsWith('.py')) {
+                            const [className, test] = name.split('.');
+                            assert.match(source, new RegExp(`^class ${className}\\b`, 'm'), reference);
+                            assert.match(source, new RegExp(`^    (?:async )?def ${test}\\(`, 'm'), reference);
+                        } else {
+                            assert.ok(source.includes(`name: '${name}'`) || source.includes(`name: "${name}"`),
+                                reference);
+                        }
+                    });
+                });
             },
         },
     ],

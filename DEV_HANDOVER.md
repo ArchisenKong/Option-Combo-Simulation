@@ -220,17 +220,23 @@ Persistence and ledger modules, mounted by BOTH backends:
   separate schema-v12 `cost_basis.db` (the upgrade writes a verified
   `cost_basis.pre-v12-from-v10-...db` or `...-from-v11-...db` copy first; older
   builds refuse v12)
-- STK/OPT event replay; FUT/FOP books are frozen (read, export, delete) until
-  the standalone FOP ledger ships (`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`,
-  record in `CODE PLAN/COST_BASIS_FOP_VALIDATION.md`). The standalone page
-  `cost_basis_fop.html` has the P5 page and its closeout (plan §19: duplicate
-  decisions, binding adoption, TWS reconciliation and snapshots, buyer results
-  and statement realized comparison, manual preview, Chinese problems) but its
-  writes stay closed (`fop_writes_enabled`) until P6; check it in a browser only
-  against `scripts/cost_basis_fop_synthetic_backend.py` (it also simulates
-  contract details and TWS positions), never the live backend. New contract
-  record ids carry a short scope of their ledger (two accounts' ledgers in one
-  database hold the same real contract)
+- STK/OPT event replay only: the stock page, core, importer and store have no
+  FUT/FOP/ROLL branch since P6. A FOP ledger opened here goes to
+  `cost_basis_fop.html`; a legacy FUT book without FOP metadata shows its
+  identity and can only be exported or deleted
+  (`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`, record in
+  `CODE PLAN/COST_BASIS_FOP_VALIDATION.md`). The standalone page
+  `cost_basis_fop.html` is released: both servers accept FOP writes unless
+  `[cost_basis] fop_writes_enabled = false`. Every statement row type is still
+  `synthetic_only` (no real statement verified), so CSV rows import only as
+  manual claims. Check the page in a browser only against
+  `scripts/cost_basis_fop_synthetic_backend.py` (it also simulates contract
+  details and TWS positions), never the live backend. New contract record ids
+  carry a short scope of their ledger (two accounts' ledgers in one database
+  hold the same real contract). The seeded release campaign is
+  `scripts/verify_cost_basis_fop_randomized.py --seed 0 --cases 2000 --steps 80
+  --store-cases 300`; the stock one (`scripts/verify_cost_basis_randomized.py`)
+  no longer generates FUT histories
 - CSV/ledger-inferred holdings remain visible while TWS is offline; current
   broker quantities and AvgCost are corroboration, never automatic writes
 - reviewed recent TWS fills import by `execId`; same-batch duplicates block in

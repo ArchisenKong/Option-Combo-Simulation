@@ -48,7 +48,8 @@
     // A FUT ledger with FOP metadata belongs to the new engine; the stock page
     // cannot show its rows, so it gets no link there.
     const FOP_STATE = '独立 FOP 账本：数字由账本流水逐合约回放得到，每个金额都能追到事件与合约。';
-    const WRITES_CLOSED = 'FOP 写入尚未发布（计划 P6 开放）：本页只读，记账、导入、冲销、周期和恢复按钮已停用。';
+    const WRITES_CLOSED = '本后端已关闭 FOP 写入（config.ini 的 [cost_basis] fop_writes_enabled = false）：'
+        + '本页只读，记账、导入、冲销、周期和恢复按钮已停用。';
 
     const state = {
         ws: null,
@@ -764,6 +765,7 @@
         const zone = _readStorage(`${ZONE_STORAGE_PREFIX}${book.bookId}`, '');
         state.ledger = { bookId: book.bookId, book, graph: null, version: null, batches: [], quoteBatch: null,
             zone, importPlan: null, importFile: null, importDecisions: new Map(), duplicateControls: new Map(),
+            adoptingUpgrades: false,
             delivery: null, deliveryControls: null, binding: null, manual: null, positions: null, trace: null,
             snapshots: [], savingSnapshot: false };
         const zoneInput = $('ledger-zone');
@@ -1228,6 +1230,7 @@
             const view = planView(plan, file.name);
             _renderPlan('import', view);
             _renderDuplicateReviews(plan);
+            _renderBindingUpgrades(plan);
             _renderRealizedComparison(plan);
             const undecided = plan.duplicateReviews.filter((review) => review.status !== 'same'
                 && review.status !== 'distinct').length;
@@ -1276,6 +1279,94 @@
     }
 
     /** The possible duplicates of the plan on screen, each with its decision and check. */
+    const EVIDENCE_ROLES = Object.freeze({ option: '期权行', option_instrument: '期权合约信息', future: '期货行',
+        future_instrument: '期货合约信息' });
+
+    /**
+     * The stored unresolved bindings this file proves (plan §4.3): which
+     * future each option delivers and the rows that show it. Adopted only
+     * by an explicit confirmation (_adoptStatementBindings).
+     */
+    function _renderBindingUpgrades(plan) {
+        const upgrades = plan.bindingUpgrades || [];
+        $('import-upgrades-block').hidden = !upgrades.length;
+        _table($('import-upgrades'), ['期权', '本文件证明的期货', '账本中的绑定', '依据'], upgrades.map((item) => [
+            item.option.localSymbol || item.option.contractId,
+            `${item.future.localSymbol || item.future.contractId}（交割月 ${item.future.futureContractMonth}）`,
+            '待补全', item.evidence.rows.map((row) => EVIDENCE_ROLES[row.role] || row.role).join('、'),
+        ]), '');
+    }
+
+    /**
+     * Adopt the bindings this file proves, then preview it again. The server
+     * reads the rows itself and signs each pair it proves; each adoption is
+     * one versioned metadata commit (no economic row changes); the same file
+     * is then previewed against the version they leave. Nothing is adopted
+     * from a preview of another version, and a repeated click asks once.
+     * The commits land one by one: a refusal part way keeps the ones before
+     * it, so the page reads the ledger again either way and says how many
+     * were adopted and which one was not.
+     */
+    async function _adoptStatementBindings() {
+        let ledger = null;
+        try {
+            ledger = _writeContext();
+            const planned = ledger.importPlan;
+            if (!planned || !(planned.plan.bindingUpgrades || []).length) throw new Error('这份报表没有可采纳的绑定');
+            if (ledger.adoptingUpgrades) return;
+            if (planned.version.digest !== ledger.version.digest) throw new Error('账本已在预览后变化；请重新预览');
+            ledger.adoptingUpgrades = true;
+            const { Import, Forms } = modules();
+            const upgrades = planned.plan.bindingUpgrades;
+            _status('import-status', '正在请求报表绑定凭据…');
+            const answer = await client.request('request_cost_basis_fop_statement_bindings', { bookId: ledger.bookId,
+                bindings: upgrades.map((item) => ({ bindingId: item.bindingId, option: item.option, future: item.future,
+                    evidence: item.evidence })) });
+            if (state.ledger !== ledger || ledger.importPlan !== planned) return;
+            const { operations, refused } = Import.bindingUpgradeAdoptions(planned.plan, ledger.graph, ledger.book,
+                answer.results);
+            if (refused.length) {
+                throw new Error(`服务器没有确认报表证明了这些绑定：${refused.map((item) => (item.problems || [])
+                    .join('；')).join('；')}`);
+            }
+            let version = ledger.version;
+            let adopted = 0;
+            let stopped = null;
+            for (const operation of operations) {
+                try {
+                    const message = Forms.metadataRequest(operation, _formsContext(ledger), { requestId: token('req'),
+                        clientToken: token('adopt'), expectedLedgerVersion: version,
+                        bookIdentity: identityOf(ledger.book) });
+                    const result = await _send('commit_cost_basis_fop_metadata', message);
+                    version = result.ledgerVersion;
+                    adopted += 1;
+                } catch (error) {
+                    const upgrade = upgrades.find((item) => item.bindingId === operation.binding.bindingId);
+                    stopped = { error, option: upgrade.option.localSymbol || upgrade.option.contractId };
+                    break;
+                }
+            }
+            const { file } = planned;
+            const decisions = ledger.importDecisions;
+            await _afterWrite('import-status', stopped
+                ? `已采纳 ${adopted} 个报表证明的绑定（共 ${operations.length} 个），正在重新读取账本…`
+                : `已采纳 ${operations.length} 个报表证明的绑定，正在按新版本重新预览…`);
+            if (state.ledger === ledger) {
+                ledger.importFile = file;
+                ledger.importDecisions = decisions;
+                _planImport();
+                if (stopped) {
+                    _status('import-status', `已采纳 ${adopted} 个报表证明的绑定（共 ${operations.length} 个）；`
+                        + `${stopped.option} 未采纳：${_refusal(stopped.error)}。已按账本的当前版本重新预览。`);
+                }
+            }
+        } catch (error) {
+            _status('import-status', `未采纳：${_refusal(error)}`);
+        } finally {
+            if (ledger) ledger.adoptingUpgrades = false;
+        }
+    }
+
     function _renderDuplicateReviews(plan) {
         const ledger = state.ledger;
         const block = $('import-duplicates-block');
@@ -2050,6 +2141,7 @@
         _on('import-confirm-account', 'change', _planImport);
         _on('import-submit', 'click', () => { void _submitImport(); });
         _on('import-decide', 'click', _decideDuplicates);
+        _on('import-adopt-upgrades', 'click', _adoptStatementBindings);
         _on('manual-kind', 'change', _toggleManualFields);
         for (const id of MANUAL_FIELDS) {
             const retire = () => _clearManualPreview('输入已改变，旧的预览已作废；请重新预览。');

@@ -120,7 +120,7 @@ function loadStockPage(books) {
     vm.runInContext(read('js/cost_basis.js').replace('globalScope.OptionComboCostBasisPage = {', `
         globalScope.stockPageHarness = {
             state, loadBooks: _loadBooks, selectBook: _selectBook, createBook: _createBook,
-            refreshControls: _refreshControls,
+            refreshControls: _refreshControls, recompute: _recompute,
             stub(requestHandler) {
                 request = requestHandler;
                 _loadEvents = async () => { globalScope.loadedBooks.push(state.bookId); };
@@ -165,8 +165,10 @@ function loadStockPage(books) {
     };
     const alerts = [];
     const sent = [];
+    const replaced = [];
     context.alert = (message) => alerts.push(message);
     context.confirm = () => true;
+    context.location = { search: '', replace(url) { replaced.push(url); } };
     context.loadedBooks = [];
     const h = context.stockPageHarness;
     h.stub(async (action, fields) => {
@@ -178,7 +180,8 @@ function loadStockPage(books) {
         return {};
     });
     Object.assign(h.state, { connection: 'connected', status: { available: true } });
-    return { h, alerts, sent, loaded: context.loadedBooks, node: (id) => context.document.getElementById(id) };
+    return { h, alerts, sent, replaced, loaded: context.loadedBooks,
+        node: (id) => context.document.getElementById(id) };
 }
 
 const OTHER_ACCOUNT_BOOK = {
@@ -476,6 +479,40 @@ module.exports = {
                 const plain = loadStockPage([STK_BOOK, OTHER_ACCOUNT_BOOK]);
                 await plain.h.loadBooks();
                 assert.deepEqual(Array.from(plain.loaded), ['stkbook0001']);
+            },
+        },
+        {
+            name: 'the stock page sends a FOP ledger to its own page and never computes a legacy FUT ledger (P6)',
+            async run() {
+                const fop = Object.assign({}, FUT_BOOK, { bookId: 'fopbook0001', symbol: 'CL', legacyFutures: false,
+                    fop: { engineVersion: 1, productRules: 'NYMEX-CL-v1', historyScope: 'full_history' } });
+                const legacy = Object.assign({}, FUT_BOOK, { legacyFutures: true, fop: null });
+                // A link to a FOP ledger goes to the FOP page before anything opens.
+                const linked = loadStockPage([STK_BOOK, fop, legacy]);
+                Object.assign(linked.h.state, { bookId: 'fopbook0001', linkedBookId: 'fopbook0001' });
+                await linked.h.loadBooks();
+                assert.deepEqual(linked.replaced, ['cost_basis_fop.html?bookId=fopbook0001']);
+                assert.deepEqual(Array.from(linked.loaded), []);
+                // Listed, the FOP ledger is left out; a legacy FUT ledger stays for export and delete.
+                const page = loadStockPage([STK_BOOK, fop, legacy]);
+                await page.h.loadBooks();
+                assert.deepEqual(page.h.state.books.map((book) => book.bookId), ['stkbook0001', 'futbook0001']);
+                assert.deepEqual(page.node('book-select').children.map((option) => option.value),
+                    ['stkbook0001', 'futbook0001']);
+                await page.h.selectBook('futbook0001');
+                page.h.state.allEvents = [{ eventId: 'e1', kind: 'futures_trade', account: 'U1111111',
+                    tradeDate: '2026-02-01', futureExpiry: '202603', futureContracts: 1, price: 5000, cashAmount: 0 }];
+                page.h.recompute();
+                assert.equal(page.h.state.ledger, null, 'nothing is computed');
+                assert.equal(page.h.state.reconciliation, null);
+                assert.match(page.node('book-meta').textContent, /旧格式 FUT[\s\S]*只能导出原始记录或整本删除/);
+                page.h.refreshControls();
+                for (const id of ['btn-submit-event', 'btn-export-csv', 'btn-save-snapshot', 'btn-fetch-executions',
+                    'import-file', 'btn-import-commit', 'restore-backup-file']) {
+                    assert.equal(page.node(id).disabled, true, id);
+                }
+                assert.equal(page.node('btn-export-backup').disabled, false, 'the raw export stays');
+                assert.equal(page.node('btn-delete-book').disabled, false, 'the whole-book delete stays');
             },
         },
         {

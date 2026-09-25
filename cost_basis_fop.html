@@ -192,6 +192,12 @@
                             <div id="import-duplicates"></div>
                             <button type="button" id="import-decide">按所选决定重新预览</button>
                         </div>
+                        <div id="import-upgrades-block" hidden>
+                            <h3>报表证明的期权绑定</h3>
+                            <p class="fop-state">这些期权在账本里还没有已证明的对应期货，本文件的行写明了它们的标的期货。采纳后绑定以“报表验证”保存：服务器自己读这些行并核对，每个绑定一次版本受控的元数据提交，不改任何经济行；随后按新版本重新预览本文件。</p>
+                            <div class="fop-table-wrap" id="import-upgrades"></div>
+                            <button type="button" id="import-adopt-upgrades" data-writes>采纳报表证明的绑定并重新预览</button>
+                        </div>
                         <h3>提示</h3>
                         <ul class="fop-issues" id="import-warnings"></ul>
                         <h3>事件</h3>
@@ -396,12 +402,12 @@
     <script src="js/cost_basis_common.js?v=b750cfdf979f"></script>
     <script src="js/cost_basis_import_common.js?v=68181c7c6bc1"></script>
     <script src="js/cost_basis_fop_core.js?v=b31e61dbd423"></script>
-    <script src="js/cost_basis_fop_import.js?v=c7fc9e7a46c3"></script>
+    <script src="js/cost_basis_fop_import.js?v=889fd8c95514"></script>
     <script src="js/cost_basis_fop_quotes.js?v=4cc345ef481e"></script>
-    <script src="js/cost_basis_fop_messages.js?v=62f6734bfe3a"></script>
+    <script src="js/cost_basis_fop_messages.js?v=10e0481f13c2"></script>
     <script src="js/cost_basis_fop_view.js?v=bc561af9cbd9"></script>
     <script src="js/cost_basis_fop_forms.js?v=969fd0fcddc6"></script>
     <script src="js/cost_basis_fop_reconcile.js?v=87a6049b4b0f"></script>
-    <script src="js/cost_basis_fop.js?v=b34141300d16"></script>
+    <script src="js/cost_basis_fop.js?v=758b60330820"></script>
 </body>
 </html>

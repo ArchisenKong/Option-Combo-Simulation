@@ -46,7 +46,7 @@ class Bridge:
 
 def check_snapshot(actual, expected, label):
     for key in ('netCash','shares','fees','optionPremiumNet','realizedPremium',
-                'openPremium','realizedShortPremium','openShortPremium','stockRealizedPnl','futuresRealizedPnl'):
+                'openPremium','realizedShortPremium','openShortPremium','stockRealizedPnl'):
         value=actual['combined'].get(key,0)
         assert value is not None and abs(value-expected[key]) <= 0.0001, (label,key,value,expected[key])
     for key,value in actual['combined'].items():
@@ -56,8 +56,6 @@ def check_snapshot(actual, expected, label):
         assert abs(actual['combined']['stockAvgCost']-expected['stockAvgCost'])<0.0001, (label,'stockAvgCost')
     positions={option_key(e):e['contracts'] for e in actual['options']}
     assert positions==expected['positions'], (label,'positions',positions,expected['positions'])
-    futures={e['expiry'][:6]:e['contracts'] for e in actual['futures']}
-    assert futures==expected['futures'], (label,'futures',futures,expected['futures'])
 
 
 def replay_expected(rows):
@@ -76,14 +74,14 @@ class Campaign:
         self.bridge.close()
     def verify_case(self, seed, steps=60, store=False):
         self.last_stage='core-prefixes'
-        case=generate(seed,steps,sec_type='FUT' if seed%2 else 'STK',extras=True)
+        case=generate(seed,steps,extras=True)
         self.last_case=case
         self.coverage.update(case['coverage'])
         core_case=case
         result=self.bridge.call(op='prefixes',rows=case['rows'],options=case['book'])
         for i,(actual,expected) in enumerate(zip(result,case['expected'])):
             check_snapshot(actual,expected,(seed,'prefix',i))
-            allowed=('net_short_shares','split_crosses_open_option:','mixed_future_directions','legacy_split_same_day:')
+            allowed=('net_short_shares','split_crosses_open_option:','legacy_split_same_day:')
             assert all(w.startswith(allowed) for w in actual['warnings']), (seed,i,actual['warnings'])
         self.coverage['core_prefixes'] += len(result)
         # Input array order may change; explicit broker time + stable seq is truth.
@@ -132,7 +130,7 @@ class Campaign:
             self.last_stage='sqlite-state-machine'
             self.verify_store(case,pages['activity'])
             self.verify_invalid_store(seed)
-            if core_case['book']['secType']=='FUT': self.verify_futures_store_frozen(core_case)
+            if seed%2: self.verify_futures_store_frozen(core_case)
         self.coverage['seeds']+=1
 
     def verify_invalid(self, seed):
@@ -305,11 +303,11 @@ class Campaign:
             self.coverage['backup_corruption_and_voided_duplicate']+=2
 
     def verify_futures_store_frozen(self, case):
-        # FUT/FOP ledgers are frozen until the standalone FOP ledger ships
-        # (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §13.3 P0). The pure-core
-        # FUT prefixes above still run; the persisted-import and unordered
-        # rebuild checks move to the new engine (P6), recorded in
-        # tests/fixtures/cost_basis_fop/legacy_fut_migration_list.json.
+        # The stock path never creates a FUT ledger (plan §13.3 P0, P6). The
+        # FUT histories this campaign once replayed through the retired engine
+        # now run against the standalone FOP ledger
+        # (scripts/verify_cost_basis_fop_randomized.py, recorded in
+        # tests/fixtures/cost_basis_fop/legacy_fut_migration_list.json).
         seed=case['seed']
         with tempfile.TemporaryDirectory(prefix='cost-basis-futures-random-') as directory:
             store=CostBasisStore(pathlib.Path(directory)/'ledger.db').initialize()

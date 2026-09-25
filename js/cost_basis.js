@@ -72,8 +72,6 @@
         split: '拆股',
         option_split: '期权随拆股调整',
         manual_adjust: '手工调整',
-        futures_trade: '期货买卖',
-        futures_roll: '期货换月',
     };
 
     function _eventKindLabel(event) {
@@ -106,9 +104,6 @@
         // Cash-only by design. Position corrections use typed events so a
         // quantity cannot be accepted by the form and ignored by the core.
         manual_adjust: [],
-        futures_trade: ['futureExpiry', 'futureContracts', 'sharesPerContract', 'price'],
-        futures_roll: ['futureExpiry', 'futureContracts', 'sharesPerContract', 'price',
-            'rollToExpiry', 'rollToPrice', 'rollGroup'],
     };
 
     // Short names for the same lenses, matching the 口径 selector's options.
@@ -130,9 +125,6 @@
         tax_adjusted: '税务调整口径：被指派合约的权利金滚进股票成本'
             + '（短 Put 成本 = K − 每股权利金，短 Call 卖价 = K + 每股权利金），'
             + '其余权利金独立列示。用于解释纯股票均价与券商成本基准视图的残余差异。',
-        futures: 'FOP / FUT 口径：当前 FUT 开仓基础，加换月已实现价差和费用，'
-            + '再减已到期 / 已结算 FOP 卖方权利金。尚未到期的卖方权利金已收取，'
-            + '但只在「若全部归零」一行中抵扣成本。',
     };
 
     const state = {
@@ -580,19 +572,6 @@
     }
 
     function _describeContract(event) {
-        if (event.kind === 'futures_roll') {
-            return `${event.futureExpiry || ''} → ${event.rollToExpiry || ''}`.trim();
-        }
-        if (event.kind === 'futures_trade') {
-            return `${event.futureExpiry || ''} FUT`.trim();
-        }
-        if ((event.kind === 'option_assignment' || event.kind === 'option_exercise')
-            && event.optionSecType === 'FOP') {
-            const strike = event.strike === null || event.strike === undefined
-                ? '' : event.strike;
-            return `${event.expiry || ''} ${event.right || ''}${strike}`.trim()
-                + ` → ${event.futureExpiry || ''} FUT`;
-        }
         if (event.kind === 'option_split') {
             return `${event.expiry || ''} ${event.right || ''}${event.strike} → `
                 + `${event.right || ''}${event.splitToStrike}`;
@@ -617,11 +596,8 @@
             return `${_quantity(-_numberOrZero(event.contracts))} → `
                 + `${_quantity(event.splitToContracts)}`;
         }
-        const quantity = event.futureContracts !== null
-            && event.futureContracts !== undefined
-            ? event.futureContracts
-            : (event.contracts !== null && event.contracts !== undefined
-                ? event.contracts : event.shares);
+        const quantity = event.contracts !== null && event.contracts !== undefined
+            ? event.contracts : event.shares;
         return _quantity(quantity);
     }
 
@@ -859,35 +835,6 @@
             && (!book.account
                 || String(item.account || '').toUpperCase()
                     === String(book.account).toUpperCase())));
-        if (secType === 'FUT') {
-            const byAccount = new Map();
-            matched.forEach((item) => {
-                const account = String(item.account || '');
-                const contracts = Number(item.position) || 0;
-                const multiplier = Math.abs(Number(item.multiplier))
-                    || Number(book.defaultSharesPerContract) || 1;
-                const avgCost = Number(item.avgCostPerUnit);
-                if (!Number.isFinite(avgCost) || !contracts) return;
-                const current = byAccount.get(account) || { exposure: 0, basis: 0 };
-                current.exposure += contracts * multiplier;
-                current.basis += avgCost * contracts * multiplier;
-                byAccount.set(account, current);
-                const marketPrice = Number(item.marketPrice);
-                if (Number.isFinite(marketPrice) && marketPrice > 0) {
-                    state.marketPrice = marketPrice;
-                    state.marketPriceFetchedAt = '';
-                }
-            });
-            byAccount.forEach((entry, account) => {
-                if (Math.abs(entry.exposure) > 1e-6) {
-                    state.avgCostByAccount[account] = {
-                        avgCost: entry.basis / entry.exposure,
-                        marketPrice: state.marketPrice,
-                    };
-                }
-            });
-            return;
-        }
         matched.forEach((item) => {
             state.avgCostByAccount[String(item.account || '')] = {
                 avgCost: Number(item.avgCostPerUnit),
@@ -1077,7 +1024,15 @@
 
     async function _loadBooks() {
         const response = await request('list_cost_basis_books');
-        state.books = Array.isArray(response.books) ? response.books : [];
+        const listed = Array.isArray(response.books) ? response.books : [];
+        // A FOP ledger belongs to its own page (plan §1.1): a link to one goes
+        // there, and this page never lists, computes or writes it.
+        const linkedFop = listed.find((book) => book.bookId === state.linkedBookId && book.fop);
+        if (linkedFop) {
+            globalScope.location.replace(globalScope.OptionComboCostBasisCommon.bookUrl(linkedFop));
+            return;
+        }
+        state.books = listed.filter((book) => !book.fop);
         // A deleted book must not leave its price behind: book ids are not
         // reused today, but a stale entry would silently prime whatever
         // took its place.
@@ -1259,47 +1214,39 @@
             String(item.account || '').toUpperCase() === account));
     }
 
+    /**
+     * A legacy FUT ledger (sec_type FUT without FOP metadata; plan §8.2 item
+     * 3): shown with its identity and the reason, exported or deleted whole,
+     * never computed or written. A FOP ledger never opens here (_loadBooks
+     * sends it to cost_basis_fop.html).
+     */
     function _bookIsFutures() {
         const book = _currentBook();
         return Boolean(book && String(book.secType || 'STK').toUpperCase() === 'FUT');
     }
 
     function _fieldsForKind(kind) {
-        let visible = (KIND_FIELDS[kind] || []).slice();
-        if (_bookIsFutures()
-            && (kind === 'option_assignment' || kind === 'option_exercise')) {
-            visible = visible.filter((field) => field !== 'shares');
-            visible.push('futureExpiry', 'futureContracts');
-        }
-        return visible;
+        return (KIND_FIELDS[kind] || []).slice();
     }
 
     function _syncBookMode() {
         const book = _currentBook();
-        const futures = _bookIsFutures();
-        const allowed = futures
-            ? new Set(['option_trade', 'option_assignment', 'option_exercise',
-                'option_expiry', 'futures_trade', 'futures_roll', 'fee', 'manual_adjust'])
-            : new Set(['option_trade', 'option_assignment', 'option_exercise',
-                'option_expiry', 'share_trade', 'opening_balance', 'dividend',
-                'fee', 'split', 'manual_adjust']);
+        const allowed = new Set(['option_trade', 'option_assignment', 'option_exercise',
+            'option_expiry', 'share_trade', 'opening_balance', 'dividend',
+            'fee', 'split', 'manual_adjust']);
         Array.from($('field-kind').options).forEach((option) => {
             option.disabled = !allowed.has(option.value);
         });
         if (!allowed.has($('field-kind').value)) {
-            $('field-kind').value = futures ? 'option_trade' : 'share_trade';
-        }
-        if (futures) {
-            state.basisMode = 'net_cash';
-            $('basis-select').value = 'net_cash';
+            $('field-kind').value = 'share_trade';
         }
         if (book && book.account) {
             state.scope = 'split';
             $('scope-select').value = 'split';
         }
         $('scope-select').disabled = Boolean(book && book.account);
-        $('basis-select').disabled = futures;
-        _text($('field-spc-label'), futures ? 'FUT 点值 / 期权乘数' : '每张股数');
+        $('basis-select').disabled = false;
+        _text($('field-spc-label'), '每张股数');
         if (book && Number(book.defaultSharesPerContract) > 0) {
             $('field-spc').value = String(book.defaultSharesPerContract);
         }
@@ -1307,7 +1254,7 @@
         $('field-account').readOnly = Boolean(book && book.account);
         $('field-account').title = book && book.account
             ? '事件账户由当前账本固定' : '旧版未限定账户的账本可手工选择事件账户';
-        _text($('flow-position-heading'), futures ? '累计 FUT 净张数' : '累计股数');
+        _text($('flow-position-heading'), '累计股数');
         _applyKindVisibility();
     }
 
@@ -1732,34 +1679,18 @@
      * and no safe reconciliation suggestion. They keep the CSV-derived position visible
      * while making the missing live verification explicit.
      */
-    function buildLedgerPositionPreview(ledger, symbol, bookSecType) {
+    function buildLedgerPositionPreview(ledger, symbol) {
         if (!ledger) return [];
         const rows = [];
         const normalizedSymbol = String(symbol || '').trim().toUpperCase();
-        const futures = String(bookSecType || 'STK').toUpperCase() === 'FUT';
-
-        if (futures) {
-            (ledger.openFutures || []).forEach((position) => {
-                const quantity = Number(position.contracts);
-                if (!Number.isFinite(quantity) || Math.abs(quantity) < 1e-6) return;
-                rows.push({
-                    kind: 'future',
-                    account: String(position.account || ''),
-                    label: `${normalizedSymbol} ${position.expiry || ''} FUT`.trim(),
-                    ledger: quantity,
-                    identityConflict: Boolean(position.identityConflict),
-                });
+        Object.keys(ledger.perAccount || {}).sort().forEach((account) => {
+            const quantity = Number((ledger.perAccount[account] || {}).shares);
+            if (!Number.isFinite(quantity) || Math.abs(quantity) < 1e-6) return;
+            rows.push({
+                kind: 'shares', account, label: '股票', ledger: quantity,
+                identityConflict: false,
             });
-        } else {
-            Object.keys(ledger.perAccount || {}).sort().forEach((account) => {
-                const quantity = Number((ledger.perAccount[account] || {}).shares);
-                if (!Number.isFinite(quantity) || Math.abs(quantity) < 1e-6) return;
-                rows.push({
-                    kind: 'shares', account, label: '股票', ledger: quantity,
-                    identityConflict: false,
-                });
-            });
-        }
+        });
 
         (ledger.openOptions || []).forEach((position) => {
             const quantity = Number(position.contracts);
@@ -1787,13 +1718,18 @@
             _renderAll();
             return;
         }
+        if (_bookIsFutures()) {
+            // A legacy FUT ledger is never computed here (plan §8.2 item 3).
+            state.ledger = null;
+            state.reconciliation = null;
+            _renderAll();
+            return;
+        }
         const reference = state.referencePrice !== null
             ? state.referencePrice
             : state.marketPrice;
-        const secType = String(book.secType || 'STK').toUpperCase();
         state.ledger = core.computeLedger(state.allEvents, {
             referencePrice: reference,
-            secType,
         });
         // An empty snapshot is meaningful only after IB explicitly reports
         // that position synchronization completed. Treating a disconnect or
@@ -1805,7 +1741,6 @@
                 ledger: state.ledger,
                 positions: _positionsForBook(book),
                 symbol: book.symbol,
-                secType,
                 today: _todayIso(),
                 defaultSharesPerContract: book.defaultSharesPerContract,
             })
@@ -1844,7 +1779,7 @@
         }
         const futures = String(book.secType || 'STK').toUpperCase() === 'FUT';
         _text(node, `${book.account || '旧版未限定账户'} · ${book.symbol}`
-            + ` · ${futures ? 'FOP / FUT' : '股票 / ETF'} · 起算日 ${book.startDate}`
+            + ` · ${futures ? '旧格式 FUT' : '股票 / ETF'} · 起算日 ${book.startDate}`
             + ` · ${futures ? '点值' : '每张交割股数'} ${book.defaultSharesPerContract === null
                 || book.defaultSharesPerContract === undefined
                 ? '见合约记录' : book.defaultSharesPerContract}`
@@ -1889,18 +1824,14 @@
         const body = table.querySelector('tbody');
         _clear(head);
         _clear(body);
-        const book = _currentBook();
-        const futures = Boolean(book
-            && String(book.secType || 'STK').toUpperCase() === 'FUT');
-        _text($('basis-explainer'), futures
-            ? BASIS_EXPLAINERS.futures : (BASIS_EXPLAINERS[state.basisMode] || ''));
+        _text($('basis-explainer'), BASIS_EXPLAINERS[state.basisMode] || '');
 
         const columns = _summaryColumns();
         if (!columns.length) {
             const row = globalScope.document.createElement('tr');
             const cell = globalScope.document.createElement('td');
             cell.className = 'empty';
-            cell.textContent = '未选择账本';
+            cell.textContent = _bookIsFutures() ? '旧格式 FUT 账本不计算' : '未选择账本';
             row.appendChild(cell);
             body.appendChild(row);
             return;
@@ -1917,17 +1848,15 @@
         });
         head.appendChild(headRow);
 
-        _summaryRow(body, futures ? '当前 FUT 净张数' : '当前股票净头寸', columns,
-            (summary) => _quantity(futures
-                ? summary.futuresContracts : summary.shares));
+        _summaryRow(body, '当前股票净头寸', columns,
+            (summary) => _quantity(summary.shares));
         _headlineRow(body, columns);
         _summaryRow(body, '若未平仓卖方期权全部归零', columns,
             (summary) => (summary.blendedCostIfExpired === null
                 ? '—' : _money(summary.blendedCostIfExpired, 4)));
-        _summaryRow(body, futures ? '当前 FUT 开仓均价' : '纯股票均价', columns,
-            (summary) => ((futures ? summary.futuresAvgCost : summary.stockAvgCost) === null
-                ? '—' : _money(futures
-                    ? summary.futuresAvgCost : summary.stockAvgCost, 4)));
+        _summaryRow(body, '纯股票均价', columns,
+            (summary) => (summary.stockAvgCost === null
+                ? '—' : _money(summary.stockAvgCost, 4)));
         _twsAvgCostRow(body, columns);
 
         _sectionRow(body, '现金分解', columns.length);
@@ -1937,20 +1866,17 @@
             (summary) => _money(summary.realizedShortPremium));
         _summaryRow(body, '尚未到期卖方权利金', columns,
             (summary) => _money(summary.openShortPremium));
-        _summaryRow(body, futures ? 'FUT 换月 / 平仓已实现盈亏' : '股票已实现盈亏', columns,
-            (summary) => _money(futures
-                ? summary.futuresRealizedPnl : summary.stockRealizedPnl));
-        if (!futures) {
-            _summaryRow(body, '税后股息', columns, (summary) => _money(_netDividends(summary)));
-            _summaryRow(body, '　其中：税前股息', columns, (summary) => _money(summary.dividends));
-            _summaryRow(body, '　其中：股息预扣税', columns,
-                (summary) => _signedMoney(Number(summary.dividendWithholding || 0)));
-        }
+        _summaryRow(body, '股票已实现盈亏', columns,
+            (summary) => _money(summary.stockRealizedPnl));
+        _summaryRow(body, '税后股息', columns, (summary) => _money(_netDividends(summary)));
+        _summaryRow(body, '　其中：税前股息', columns, (summary) => _money(summary.dividends));
+        _summaryRow(body, '　其中：股息预扣税', columns,
+            (summary) => _signedMoney(Number(summary.dividendWithholding || 0)));
         // Account view, same as the cash card above: fees are money paid
         // out, so both places show them negative. The table used to print
         // the same figure positive under the same label. Dividend
         // withholding is already inside after-tax dividends above.
-        _summaryRow(body, futures ? '费用合计' : '费用合计（不含股息预扣税）', columns,
+        _summaryRow(body, '费用合计（不含股息预扣税）', columns,
             (summary) => _signedMoney(-_feesExcludingWithholding(summary)));
 
         _sectionRow(body, '按参考价', columns.length);
@@ -1968,7 +1894,7 @@
     /**
      * Decide what the hero figure says for one cost lens.
      *
-     * `no_shares`/`no_futures` is the ONLY unavailable state with a lifetime
+     * `no_shares` is the ONLY unavailable state with a lifetime
      * figure behind it. Every other one leaves an open position whose
      * selected lens simply has no number, and captioning that "no position"
      * asserts something the ledger does not support.
@@ -1980,24 +1906,19 @@
      * not read as the more confident of the two.
      */
     function describeHeadlineCost(rendered, options) {
-        const futures = Boolean(options && options.futures);
         const basisMode = (options && options.basisMode) || 'net_cash';
         const marks = [];
         let source;
         let caption;
-        if (rendered.state === 'no_shares' || rendered.state === 'no_futures') {
+        if (rendered.state === 'no_shares') {
             source = 'lifetime_net_cash';
-            caption = futures
-                ? '当前无 FUT 持仓：显示全周期累计净现金'
-                : '当前无持股：显示全周期累计净现金';
+            caption = '当前无持股：显示全周期累计净现金';
         } else if (!rendered.available) {
             source = 'unavailable';
-            caption = futures
-                ? '当前口径无可用成本'
-                : `当前口径（${BASIS_LABELS[basisMode] || basisMode}）无可用成本`;
+            caption = `当前口径（${BASIS_LABELS[basisMode] || basisMode}）无可用成本`;
         } else {
             source = 'cost';
-            caption = futures ? '每 FUT 点综合成本' : '每股综合成本';
+            caption = '每股综合成本';
             if (rendered.state === 'recovered') {
                 marks.push('recovered');
                 caption += ' · 成本已全部收回';
@@ -2068,24 +1989,16 @@
             _text($('what-if-result-caption'), '按上方选中的成本口径');
             return;
         }
-        const futures = String(book.secType || 'STK').toUpperCase() === 'FUT';
-        const expiries = _renderWhatIfExpiryOptions(
-            state.ledger.openOptions || [], futures);
-        input.disabled = futures || !expiries.length;
+        const expiries = _renderWhatIfExpiryOptions(state.ledger.openOptions || []);
+        input.disabled = !expiries.length;
         followInput.disabled = input.disabled;
         currentButton.textContent = state.marketPriceRefreshPending
             ? '刷新中…' : '使用当前价';
-        currentButton.disabled = futures || !expiries.length
+        currentButton.disabled = !expiries.length
             || state.marketPriceRefreshPending || state.connection !== 'connected';
-        stressButton.disabled = futures || !expiries.length;
+        stressButton.disabled = !expiries.length;
         stressNavButton.disabled = stressButton.disabled;
         _text($('what-if-price-label'), `${book.symbol} 假设到期结算价`);
-        if (futures) {
-            input.value = '';
-            _text($('what-if-context'), 'What If 期权结算情景目前仅适用于股票 / ETF 账本。');
-            _text($('what-if-result-caption'), '期货请使用 FUT 成本口径');
-            return;
-        }
         if (!expiries.length) {
             input.value = '';
             _text($('what-if-context'), `${book.symbol} 当前没有可用于情景测算的未平期权。`);
@@ -2116,7 +2029,6 @@
             return;
         }
         const scenario = core.computeOptionSettlementScenario(state.allEvents, price, {
-            secType: book.secType || 'STK',
             throughExpiry: state.whatIfExpiry,
         });
         if (!scenario.available) {
@@ -4215,12 +4127,10 @@
         }
         const book = _currentBook();
         const summary = state.ledger.combined;
-        const futures = String(book.secType || 'STK').toUpperCase() === 'FUT';
         const rendered = core.summarizeCost(summary, state.basisMode);
         const headline = $('headline-cost');
         headline.className = 'hero-value';
-        const hero = describeHeadlineCost(rendered,
-            { futures, basisMode: state.basisMode });
+        const hero = describeHeadlineCost(rendered, { basisMode: state.basisMode });
         if (hero.source === 'lifetime_net_cash') {
             _text(headline, _signedMoney(rendered.lifetimeNetCash));
         } else if (hero.source === 'unavailable') {
@@ -4230,13 +4140,12 @@
         }
         hero.marks.forEach((mark) => headline.classList.add(mark));
         _text($('headline-cost-caption'), hero.caption);
-        _text($('headline-position'), _quantity(futures
-            ? summary.futuresContracts : summary.shares));
+        _text($('headline-position'), _quantity(summary.shares));
         _text($('headline-expired-cost'), summary.blendedCostIfExpired === null
             ? '—' : _money(summary.blendedCostIfExpired, 4));
         const reference = state.referencePrice !== null
             ? state.referencePrice : state.marketPrice;
-        const exposure = futures ? summary.futureExposure : summary.shares;
+        const exposure = summary.shares;
         const currency = book.currency || 'USD';
         const marketMetrics = computeMarketMetrics(
             reference, exposure, rendered.available ? rendered.value : null);
@@ -4249,9 +4158,8 @@
             ? 'metric-positive' : (dilutedPnl < 0 ? 'metric-negative' : '');
         _text(pnlNode, dilutedPnl === null
             ? '—' : _currencyAmount(currency, dilutedPnl, 2, true));
-        _text($('headline-stock-cost'), (futures
-            ? summary.futuresAvgCost : summary.stockAvgCost) === null
-            ? '—' : _money(futures ? summary.futuresAvgCost : summary.stockAvgCost, 4));
+        _text($('headline-stock-cost'), summary.stockAvgCost === null
+            ? '—' : _money(summary.stockAvgCost, 4));
         const accountKey = book.account || 'combined';
         const twsEntry = _twsAvgCostFor({ key: accountKey, summary });
         _text($('headline-tws-cost'), twsEntry && Number.isFinite(twsEntry.avgCost)
@@ -4265,16 +4173,10 @@
         // leaves the fee card so it is subtracted exactly once.
         const netDividends = _netDividends(summary);
         const withholding = Number(summary.dividendWithholding || 0);
-        const realizedTotal = futures
-            ? summary.futuresRealizedPnl
-            : netDividends + Number(summary.stockRealizedPnl || 0);
+        const realizedTotal = netDividends + Number(summary.stockRealizedPnl || 0);
         _text($('cash-dividends'), _signedMoney(realizedTotal));
-        _text($('cash-realized-label'), futures
-            ? 'FUT 换月 / 平仓已实现盈亏'
-            : '税后股息 + 股票已实现盈亏');
-        _text($('cash-dividends-caption'), futures
-            ? '已实现 FUT 损益'
-            : `税后股息 ${_signedMoney(netDividends)}`
+        _text($('cash-realized-label'), '税后股息 + 股票已实现盈亏');
+        _text($('cash-dividends-caption'), `税后股息 ${_signedMoney(netDividends)}`
                 + (Math.abs(withholding) > 1e-9
                     ? `（税前 ${_signedMoney(summary.dividends)} · 预扣税 ${_signedMoney(withholding)}）`
                     : '')
@@ -4321,21 +4223,17 @@
      */
     function _headlineRow(body, columns) {
         const row = globalScope.document.createElement('tr');
-        const book = _currentBook();
-        const futures = Boolean(book
-            && String(book.secType || 'STK').toUpperCase() === 'FUT');
-        const modeLabel = futures ? '综合成本 / FUT 点'
-            : ({
+        const modeLabel = {
             net_cash: '综合成本 / 股（净现金）',
             stock_only: '综合成本 / 股（纯股票）',
             tax_adjusted: '综合成本 / 股（税务）',
-        }[state.basisMode]);
+        }[state.basisMode];
         _cell(row, modeLabel);
         columns.forEach((column) => {
             const rendered = core.summarizeCost(column.summary, state.basisMode);
             if (!rendered.available) {
                 const label = rendered.state === 'no_shares'
-                    ? `无${futures ? ' FUT 持仓' : '持股'}（累计净现金 ${_signedMoney(rendered.lifetimeNetCash)}）`
+                    ? `无持股（累计净现金 ${_signedMoney(rendered.lifetimeNetCash)}）`
                     : '—';
                 // A closed-out book still shows a lifetime figure here, and
                 // it is just as incomplete as a per-share cost would be.
@@ -4379,16 +4277,12 @@
             return state.avgCostByAccount[column.key] || null;
         }
         if (!state.ledger) return null;
-        const book = _currentBook();
-        const futures = Boolean(book
-            && String(book.secType || 'STK').toUpperCase() === 'FUT');
         let shares = 0;
         let basis = 0;
         const accounts = state.ledger.accounts;
         for (let index = 0; index < accounts.length; index += 1) {
             const summary = state.ledger.perAccount[accounts[index]];
-            const exposure = summary
-                ? (futures ? summary.futureExposure : summary.shares) : 0;
+            const exposure = summary ? summary.shares : 0;
             if (!summary || Math.abs(exposure) < 1e-6) continue;
             const entry = state.avgCostByAccount[accounts[index]];
             if (!entry || !Number.isFinite(entry.avgCost) || entry.avgCost <= 0) {
@@ -4403,11 +4297,7 @@
 
     function _twsAvgCostRow(body, columns) {
         const row = globalScope.document.createElement('tr');
-        const book = _currentBook();
-        const futures = Boolean(book
-            && String(book.secType || 'STK').toUpperCase() === 'FUT');
-        _cell(row, futures ? 'TWS FUT 均价（当前合约）'
-            : 'TWS 均价（对账纯股票口径）');
+        _cell(row, 'TWS 均价（对账纯股票口径）');
         columns.forEach((column) => {
             const entry = _twsAvgCostFor(column);
             if (!entry || !Number.isFinite(entry.avgCost) || entry.avgCost <= 0) {
@@ -4416,8 +4306,7 @@
                 _cell(row, '不可用', 'value-unavailable');
                 return;
             }
-            const ours = futures
-                ? column.summary.futuresAvgCost : column.summary.stockAvgCost;
+            const ours = column.summary.stockAvgCost;
             if (ours === null) {
                 _cell(row, _money(entry.avgCost, 4));
                 return;
@@ -4455,9 +4344,6 @@
     function _describeWarning(warning) {
         if (warning === 'net_short_shares') {
             return '当前为净空头股票；已按空头回补水位计算';
-        }
-        if (warning === 'mixed_future_directions') {
-            return '同一视图同时有多头和空头 FUT，无法用一个综合成本表示';
         }
         if (warning === 'split_ratio_invalid') return '拆股比例无效';
         if (warning.startsWith('legacy_split_same_day:')) {
@@ -4582,8 +4468,7 @@
         const description = entry.kind === 'shares'
             ? `${book ? book.symbol : ''} 股票`
             : entry.label;
-        const quantity = entry.kind === 'shares' ? event.shares
-            : (entry.kind === 'future' ? event.futureContracts : event.contracts);
+        const quantity = entry.kind === 'shares' ? event.shares : event.contracts;
         const confirmed = globalScope.confirm(
             `采信 TWS 的 ${description} 持仓 ${_quantity(quantity)}，`
             + `按 TWS 均价 ${_money(event.price, 4)} 直接登记到账本？\n\n`
@@ -4594,6 +4479,7 @@
         const copy = Object.assign({}, event);
         copy.externalRef = `tws-position-${_stableHash16([
             state.bookId, copy.tradeDate, copy.account, copy.kind, copy.conId || '',
+            // Two slots of the retired FUT fields stay empty: stored references keep their hash.
             copy.futureConId || '', copy.futureExpiry || '',
             copy.localSymbol || '', copy.right || '', copy.strike || '',
             copy.expiry || '', copy.contracts || '', copy.shares || '', copy.price,
@@ -4750,13 +4636,11 @@
             const adoption = state.positionsConnected
                 ? core.buildTwsAdoptionEvent(entry, {
                     today: _todayIso(), snapshotTimestamp: state.positionsTimestamp,
-                    secType: (_currentBook() || {}).secType || 'STK',
                 })
                 : null;
             const avgCostDraft = state.positionsConnected && !adoption
                 ? core.buildTwsAvgCostGapDraft(entry, {
                     today: _todayIso(),
-                    secType: (_currentBook() || {}).secType || 'STK',
                 })
                 : null;
             const row = globalScope.document.createElement('tr');
@@ -4892,17 +4776,10 @@
         });
 
         const summary = state.ledger.combined;
-        const futures = summary.secType === 'FUT';
-        _text($('premium-annualized-label'), futures
-            ? '相对 FUT 名义金额年化' : '相对占用资金年化');
-        _text($('premium-annualized-detail'), futures
-            ? '按近 365 天已到期 / 已结算 FOP 卖方权利金 / 当前 FUT 名义金额（非保证金收益率）'
-            : '按近 365 天已到期 / 已结算卖方权利金 / 当前持仓成本');
-        const committed = futures
-            ? (summary.hasFutures && summary.futuresAvgCost !== null
-                ? Math.abs(summary.futureExposure * summary.futuresAvgCost) : 0)
-            : (summary.hasShares && summary.stockAvgCost !== null
-                ? Math.abs(summary.shares * summary.stockAvgCost) : 0);
+        _text($('premium-annualized-label'), '相对占用资金年化');
+        _text($('premium-annualized-detail'), '按近 365 天已到期 / 已结算卖方权利金 / 当前持仓成本');
+        const committed = summary.hasShares && summary.stockAvgCost !== null
+            ? Math.abs(summary.shares * summary.stockAvgCost) : 0;
         _text($('premium-annualized'), committed > 0
             ? `${_money((yearly / committed) * 100, 2)}%`
             : '—');
@@ -4957,10 +4834,8 @@
                     ? '—' : _money(event.price, 4), 'numeric');
                 _cell(row, _money(event.cashAmount), 'numeric'
                     + (event.derivedMismatch ? ' mismatch-flag' : ''));
-                _cell(row, _quantity(_bookIsFutures()
-                    ? entry.runningFuturesContracts : entry.runningShares), 'numeric');
-                const runningCost = _bookIsFutures()
-                    ? entry.runningFuturesCost : entry.runningCostPerShare;
+                _cell(row, _quantity(entry.runningShares), 'numeric');
+                const runningCost = entry.runningCostPerShare;
                 _cell(row, runningCost === null
                     ? '—' : _money(runningCost, 4), 'numeric');
                 _cell(row, event.source || '');
@@ -5005,7 +4880,7 @@
     // Advisory notes (a split across an open option, identity notes) and
     // anything the stored history already carried are shown, never blocking:
     // the store accepted that history, so an unrelated import must not stall.
-    const REPLAY_BLOCKING_WARNING = /^(closes_more_than_open|ibkr_close_open_invalid|ibkr_open_opposes_existing|roll_closes_more_than_open|contract_identity_ambiguous|future_identity_conflict|split_ratio_invalid|split_group_invalid|split_leg_mismatch|split_series_unconverted)(:|$)/;
+    const REPLAY_BLOCKING_WARNING = /^(closes_more_than_open|ibkr_close_open_invalid|ibkr_open_opposes_existing|contract_identity_ambiguous|split_ratio_invalid|split_group_invalid|split_leg_mismatch|split_series_unconverted)(:|$)/;
 
     function importReplayBlockingWarnings(result) {
         const preview = (result && result.ledgerPreview) || {};
@@ -5111,6 +4986,22 @@
         if (stateNote) {
             _text(stateNote, stale ? `预览已失效：${_importBindingProblem()}，请重新选择文件。` : '');
             stateNote.hidden = !stale;
+        }
+        if (hasBook && _bookIsFutures()) {
+            // A legacy FUT ledger: its backup export (raw rows) and whole-book
+            // delete stay; nothing is computed, imported or written (plan §8.2 item 3).
+            ['btn-submit-event', 'btn-export-csv', 'btn-save-snapshot', 'btn-fetch-executions',
+                'btn-batch-executions', 'import-file', 'import-replace', 'import-account-confirm',
+                'btn-import-commit', 'restore-backup-file'].forEach((id) => {
+                if ($(id)) $(id).disabled = true;
+            });
+            ['import-file', 'restore-backup-file'].forEach((id) => {
+                const label = globalScope.document.querySelector(`label[for="${id}"]`);
+                if (label) {
+                    label.classList.add('is-disabled');
+                    label.setAttribute('aria-disabled', 'true');
+                }
+            });
         }
     }
 
@@ -5417,7 +5308,7 @@
             source: 'manual',
         };
         if (kind.indexOf('option_') === 0) {
-            event.optionSecType = _bookIsFutures() ? 'FOP' : 'OPT';
+            event.optionSecType = 'OPT';
         }
         if (visible.indexOf('right') >= 0) event.right = $('field-right').value;
         if (visible.indexOf('strike') >= 0) event.strike = _numberOrNull($('field-strike').value);
@@ -5431,23 +5322,6 @@
             event.sharesPerContract = _numberOrNull($('field-spc').value);
         }
         if (visible.indexOf('shares') >= 0) event.shares = _numberOrNull($('field-shares').value);
-        if (visible.indexOf('futureExpiry') >= 0) {
-            event.futureExpiry = String($('field-future-expiry').value || '')
-                .replace(/-/g, '');
-        }
-        if (visible.indexOf('futureContracts') >= 0) {
-            event.futureContracts = _numberOrNull($('field-future-contracts').value);
-        }
-        if (visible.indexOf('rollToExpiry') >= 0) {
-            event.rollToExpiry = String($('field-roll-to-expiry').value || '')
-                .replace(/-/g, '');
-        }
-        if (visible.indexOf('rollToPrice') >= 0) {
-            event.rollToPrice = _numberOrNull($('field-roll-to-price').value);
-        }
-        if (visible.indexOf('rollGroup') >= 0) {
-            event.rollGroup = $('field-roll-group').value.trim();
-        }
         if (visible.indexOf('price') >= 0) event.price = _numberOrNull($('field-price').value);
         if (visible.indexOf('splitRatio') >= 0) {
             event.splitRatio = _numberOrNull($('field-ratio').value);
@@ -5458,7 +5332,7 @@
         const action = actionNode && typeof actionNode.value === 'string' ? actionNode.value : '';
         if (action === 'buy' || action === 'sell') {
             const sign = action === 'buy' ? 1 : -1;
-            ['contracts', 'shares', 'futureContracts'].forEach((field) => {
+            ['contracts', 'shares'].forEach((field) => {
                 if (event[field] !== null && event[field] !== undefined) {
                     event[field] = sign * Math.abs(event[field]);
                 }
@@ -5514,15 +5388,6 @@
             || (book && book.defaultSharesPerContract) || 100;
         $('field-shares').value = draft.shares === null || draft.shares === undefined
             ? '' : draft.shares;
-        $('field-future-expiry').value = draft.futureExpiry
-            ? `${draft.futureExpiry.slice(0, 4)}-${draft.futureExpiry.slice(4, 6)}` : '';
-        $('field-future-contracts').value = draft.futureContracts === null
-            || draft.futureContracts === undefined ? '' : draft.futureContracts;
-        $('field-roll-to-expiry').value = draft.rollToExpiry
-            ? `${draft.rollToExpiry.slice(0, 4)}-${draft.rollToExpiry.slice(4, 6)}` : '';
-        $('field-roll-to-price').value = draft.rollToPrice === null
-            || draft.rollToPrice === undefined ? '' : draft.rollToPrice;
-        $('field-roll-group').value = draft.rollGroup || '';
         $('field-price').value = draft.price === null || draft.price === undefined
             ? '' : draft.price;
         $('field-ratio').value = draft.splitRatio || '';
@@ -5631,11 +5496,6 @@
         $('field-strike').value = '';
         $('field-contracts').value = '';
         $('field-shares').value = '';
-        $('field-future-expiry').value = '';
-        $('field-future-contracts').value = '';
-        $('field-roll-to-expiry').value = '';
-        $('field-roll-to-price').value = '';
-        $('field-roll-group').value = '';
         $('field-price').value = '';
         $('field-ratio').value = '';
         $('field-split-rule').value = '';
@@ -5747,7 +5607,6 @@
             return {
                 existingOpen: [],
                 existingEvents: [],
-                existingOpenFutures: [],
                 existingSharesByAccount: {},
                 existingExternalRefs: [],
             };
@@ -5762,12 +5621,8 @@
                 return timestamp && timestamp <= cutoff;
             })
             : null;
-        const secType = ledger && ledger.combined && ledger.combined.secType === 'FUT'
-            ? 'FUT' : 'STK';
         const baselineLedger = eventsThroughCutoff
-            ? (secType === 'FUT'
-                ? core.computeLedger(eventsThroughCutoff, { secType })
-                : core.computeLedger(eventsThroughCutoff))
+            ? core.computeLedger(eventsThroughCutoff)
             : ledger;
         const sharesByAccount = {};
         if (baselineLedger) {
@@ -5778,7 +5633,6 @@
         return {
             existingOpen: baselineLedger ? baselineLedger.openOptions : [],
             existingEvents: baselineEvents,
-            existingOpenFutures: baselineLedger ? (baselineLedger.openFutures || []) : [],
             existingSharesByAccount: sharesByAccount,
             existingExternalRefs: (allEvents || [])
                 .filter((event) => Boolean(event.externalRef))
@@ -5933,7 +5787,6 @@
         if (!event) return null;
         if (['option_trade', 'option_assignment', 'option_exercise', 'option_expiry'].includes(event.kind)) return Number(event.contracts);
         if (event.kind === 'share_trade') return Number(event.shares);
-        if (event.kind === 'futures_trade' || event.kind === 'futures_roll') return Number(event.futureContracts);
         return null;
     }
 
@@ -5944,13 +5797,6 @@
             if (core.contractKey(left) !== core.contractKey(right)) return false;
             return !(left.conId && right.conId
                 && String(left.conId) !== String(right.conId));
-        }
-        if (left.kind === 'futures_trade' || left.kind === 'futures_roll') {
-            if (core.futureKey(left) !== core.futureKey(right)) return false;
-            if (left.kind === 'futures_roll' && (core.futureKey(left, true) !== core.futureKey(right, true)
-                || (left.rollToConId && right.rollToConId && String(left.rollToConId) !== String(right.rollToConId)))) return false;
-            return !(left.futureConId && right.futureConId
-                && String(left.futureConId) !== String(right.futureConId));
         }
         return left.kind === 'share_trade';
     }
@@ -6107,12 +5953,12 @@
             !event.voidedAtUtc && event.includeInCost !== false
             && event.source === 'execution_report'
             && (event.tag === 'ibkr_exec' || event.tag === 'ibkr_close')
-            && ['option_trade', 'share_trade', 'futures_trade'].includes(event.kind)));
+            && ['option_trade', 'share_trade'].includes(event.kind)));
         const storedStatementRows = ledger.filter((event) => (
             !event.voidedAtUtc && event.includeInCost !== false
             && event.source === 'csv_import' && event.externalRef
             && !/^prior-/.test(String(event.externalRef))
-            && ['option_trade', 'share_trade', 'futures_trade'].includes(event.kind)));
+            && ['option_trade', 'share_trade'].includes(event.kind)));
         const rebates = new Map();
         ledger.forEach((event) => {
             if (!event.voidedAtUtc && event.includeInCost !== false
@@ -6138,17 +5984,16 @@
         // planner checks their economics before they may be called replays.
         const rows = (result.events || []).filter((event) => (
             event.source === 'csv_import'
-            && ['option_trade', 'share_trade', 'futures_trade', 'futures_roll'].includes(event.kind)
+            && ['option_trade', 'share_trade'].includes(event.kind)
             && !knownRefs.has(`${event.account}\u0000${event.sourceRef || event.externalRef}`)));
         // Earlier orders claim their fills first, so a later order on the
         // same contract cannot steal a fill out of an earlier group.
-        const timed = rows.filter((event) => Boolean(_exactBrokerTimestamp(event))
-            && event.kind !== 'futures_roll').sort((left, right) => (
+        const timed = rows.filter((event) => Boolean(_exactBrokerTimestamp(event))).sort((left, right) => (
             String(_exactBrokerTimestamp(left)).localeCompare(
                 String(_exactBrokerTimestamp(right)))
             || (left.lineNumber || 0) - (right.lineNumber || 0)));
         const unresolved = new Set(timed);
-        rows.filter((event) => event.kind !== 'futures_roll' && !_exactBrokerTimestamp(event)).forEach((event) => {
+        rows.filter((event) => !_exactBrokerTimestamp(event)).forEach((event) => {
             if (active.some((prior) => _sameExecutionContract(event, prior) && prior.tradeDate === event.tradeDate)) {
                 problems.push({ lineNumber: event.lineNumber || 0,
                     reason: 'CSV row may overlap stored TWS executions but has no exact broker timestamp; import is blocked for review', raw: _describeRow(event) });
@@ -6296,25 +6141,6 @@
             unresolved.delete(csvEvent);
         });
 
-        // Roll legs: each broker leg of a derived FUT roll against a stored
-        // TWS futures fill, so a roll TWS already delivered is not booked twice.
-        rows.filter((event) => event.kind === 'futures_roll').forEach((roll) => {
-            (roll.sourceLegs || []).forEach((leg) => {
-                if (knownRefs.has(`${leg.account}\u0000${leg.sourceRef}`)) return;
-                const legEvent = Object.assign({ kind: 'futures_trade' }, leg);
-                const execution = active.find((event) => (
-                    remaining.has(event) && _sameExecutionIdentity(legEvent, event)
-                    && Math.abs(_tradeQuantity(event) - Number(leg.futureContracts)) < 1e-6
-                    && Math.abs(Number(event.price) - Number(leg.price)) < 1e-8
-                    && Math.abs(_executionNetCash(event, rebates) - Number(leg.cashAmount)) < 0.011));
-                if (execution) {
-                    remaining.delete(execution);
-                    aliases[`${leg.account}\u0000${leg.sourceRef}`] = execution.externalRef;
-                    matched.push({ csvEvent: roll, execution, executions: [execution], leg });
-                }
-            });
-        });
-
         // Pass 4: whatever is still unresolved and still looks related is a
         // conflict, named with both sides so the operator can decide.
         unresolved.forEach((csvEvent) => {
@@ -6380,15 +6206,14 @@
      */
     function _importEconomicsDifferences(left, right) {
         const differences = [];
-        ['kind', 'tradeDate', 'account', 'right', 'expiry', 'futureExpiry', 'rollToExpiry'].forEach((key) => {
+        ['kind', 'tradeDate', 'account', 'right', 'expiry'].forEach((key) => {
             if (String(left[key] || '') !== String(right[key] || '')) differences.push(key);
         });
-        ['conId', 'localSymbol', 'optionSecType', 'futureConId', 'futureLocalSymbol',
-            'rollToConId', 'rollToLocalSymbol', 'brokerTimestamp'].forEach((key) => {
+        ['conId', 'localSymbol', 'optionSecType', 'brokerTimestamp'].forEach((key) => {
             if (left[key] && right[key] && String(left[key]) !== String(right[key])) differences.push(key);
         });
-        ['strike', 'sharesPerContract', 'contracts', 'shares', 'futureContracts',
-            'rollToPrice', 'splitRatio', 'price', 'fees', 'cashAmount'].forEach((key) => {
+        ['strike', 'sharesPerContract', 'contracts', 'shares', 'splitRatio', 'price', 'fees',
+            'cashAmount'].forEach((key) => {
             const tolerance = key === 'cashAmount' || key === 'fees' ? 0.011 : 1e-8;
             if (Math.abs(Number(left[key] || 0) - Number(right[key] || 0)) > tolerance) differences.push(key);
         });
@@ -6613,38 +6438,6 @@
             : planExecutionReportAliases(importResult, allEvents);
     }
 
-    function _futureDeltaForKey(event, key) {
-        if (!event || !key) return 0;
-        if (event.kind === 'futures_trade') {
-            return core.futureKey(event) === key ? Number(event.futureContracts || 0) : 0;
-        }
-        if (event.kind === 'futures_roll') {
-            if (core.futureKey(event) === key) return -Number(event.futureContracts || 0);
-            if (core.futureKey(event, true) === key) return Number(event.futureContracts || 0);
-            return 0;
-        }
-        if ((event.kind === 'option_assignment' || event.kind === 'option_exercise')
-            && String(event.optionSecType || '').toUpperCase() === 'FOP') {
-            return core.futureKey(event) === key ? Number(event.futureContracts || 0) : 0;
-        }
-        return 0;
-    }
-
-    function _futureSupersessionIdentityIsSafe(baseline, events, key) {
-        const baselineId = baseline.futureConId === null
-            || baseline.futureConId === undefined || baseline.futureConId === ''
-            ? '' : String(baseline.futureConId);
-        const ids = new Set();
-        events.forEach((event) => {
-            if (core.futureKey(event) === key && event.futureConId) {
-                ids.add(String(event.futureConId));
-            }
-            if (event.kind === 'futures_roll' && core.futureKey(event, true) === key
-                && event.rollToConId) ids.add(String(event.rollToConId));
-        });
-        return ids.size <= 1 && (!baselineId || !ids.size || ids.has(baselineId));
-    }
-
     /**
      * Find provisional TWS baselines for which reviewed broker history now
      * supplies the real executions. CSV and TWS API rows must independently
@@ -6699,9 +6492,7 @@
             const needsTargetedReplay = result.format === 'tws_api'
                 && baseline.kind === 'option_trade' && !_recordedBrokerTimestamp(baseline);
             const label = baseline.kind === 'opening_balance' ? 'shares'
-                : (baseline.kind === 'futures_trade'
-                    ? `${baseline.futureExpiry || ''} FUT`
-                    : `${baseline.expiry || ''} ${baseline.right || ''}${baseline.strike || ''}`);
+                : `${baseline.expiry || ''} ${baseline.right || ''}${baseline.strike || ''}`;
             problems.push({
                 lineNumber: 0,
                 reason: needsTargetedReplay
@@ -6715,30 +6506,6 @@
         }
 
         candidates.forEach((baseline) => {
-            if (baseline.kind === 'futures_trade') {
-                const key = core.futureKey(baseline);
-                const sameFuture = historyEvents.filter(
-                    (event) => Math.abs(_futureDeltaForKey(event, key)) > 1e-6);
-                const ambiguous = sameFuture.filter(
-                    (event) => _eventVsAdoptedSnapshot(event, baseline) === 'ambiguous');
-                const matching = sameFuture.filter(
-                    (event) => _eventVsAdoptedSnapshot(event, baseline) === 'before');
-                if (!matching.length && !ambiguous.length) return;
-                if (ambiguous.length
-                    || !_futureSupersessionIdentityIsSafe(baseline, matching, key)) {
-                    conflict(baseline);
-                    return;
-                }
-                const reconstructed = matching.reduce(
-                    (total, event) => total + _futureDeltaForKey(event, key), 0);
-                if (Math.abs(reconstructed
-                    - Number(baseline.futureContracts || 0)) < 1e-6) {
-                    selected.push(baseline);
-                } else {
-                    conflict(baseline);
-                }
-                return;
-            }
             if (baseline.kind === 'option_trade') {
                 const key = core.contractKey(baseline);
                 const hasRecordedBrokerClock = Boolean(
@@ -6985,9 +6752,7 @@
             _cell(row, event.account || '—');
             _cell(row, _eventKindLabel(event));
             _cell(row, _describeContract(event));
-            const quantity = event.futureContracts !== undefined
-                ? event.futureContracts
-                : (event.contracts !== undefined ? event.contracts : event.shares);
+            const quantity = event.contracts !== undefined ? event.contracts : event.shares;
             _cell(row, _quantity(quantity), 'numeric');
             _cell(row, event.price === null || event.price === undefined
                 ? '—' : _money(event.price, 4), 'numeric');
@@ -7071,12 +6836,10 @@
     function _renderOpenings(result) {
         const node = $('import-openings');
         const openings = result.openings;
-        const openingFutures = openings && Array.isArray(openings.openingFutures)
-            ? openings.openingFutures : [];
         const shareDrafts = openings && Array.isArray(openings.shareDrafts)
             ? openings.shareDrafts : [];
         if (!openings || (!openings.drafts.length && !openings.openingShares
-            && !openingFutures.length && !shareDrafts.length)) {
+            && !shareDrafts.length)) {
             node.hidden = true;
             return;
         }
@@ -7102,11 +6865,6 @@
         }
         if (shareDrafts.length) {
             parts.push('期初股票持仓的现金已由 IBKR 完整卖出行的 Basis 还原。');
-        }
-        if (openingFutures.length) {
-            parts.push(`报表期初已有 ${openingFutures.length} 个 FUT 月份持仓，`
-                + '但本文件不含它们的建仓价。导入已阻断：请使用更早的累计报表，'
-                + '或先人工确认 TWS / 手工 FUT 基线后再追加。');
         }
         node.textContent = parts.join(' ');
     }
@@ -7145,8 +6903,6 @@
      * own period-end inventory.
      */
     function _computeLedgerPreview(result, replacing, ignoredEventIds) {
-        const book = _currentBook();
-        const secType = book && book.secType === 'FUT' ? 'FUT' : 'STK';
         const ignored = new Set(ignoredEventIds || []);
         const baselineEvents = replacing ? [] : state.allEvents.filter(
             (event) => !event.voidedAtUtc && !ignored.has(event.eventId));
@@ -7169,8 +6925,8 @@
         let before;
         let after;
         try {
-            before = core.computeLedger(through(baselineEvents), { secType });
-            after = core.computeLedger(through(baselineEvents.concat(newRows)), { secType });
+            before = core.computeLedger(through(baselineEvents));
+            after = core.computeLedger(through(baselineEvents.concat(newRows)));
         } catch (error) {
             const failure = `回放失败：${error.message}`;
             return { warnings: [failure], newWarnings: [failure], positions: [] };
@@ -7214,21 +6970,6 @@
         if (shareBefore || shareAfter || statementShares) {
             positions.unshift({ key: 'shares', label: '股票', before: shareBefore,
                 after: shareAfter, statement: statementShares });
-        }
-        if (secType === 'FUT') {
-            const futures = new Map();
-            const collectFutures = (items, field) => (items || []).forEach((item) => {
-                const key = core.futureKey(Object.assign({}, item, { futureExpiry: item.futureExpiry || item.expiry }));
-                const entry = futures.get(key) || { key: `future-${key}`, label: `期货 ${item.futureExpiry || item.expiry || ''}`, before: 0, after: 0, statement: null };
-                entry[field] = Number(item.futureContracts ?? item.contracts ?? item.quantity ?? 0);
-                futures.set(key, entry);
-            });
-            collectFutures(before.openFutures, 'before');
-            collectFutures(after.openFutures, 'after');
-            const closingFutures = result.openings?.closingFutures;
-            collectFutures(closingFutures, 'statement');
-            if (closingFutures) futures.forEach((item) => { if (item.statement === null) item.statement = 0; });
-            positions.push(...futures.values());
         }
         const afterWarnings = (after.combined && after.combined.warnings) || [];
         // Count occurrences so a second stranded close on a contract that
@@ -7827,7 +7568,7 @@
         const selectedRefs = new Set(events.map(refKey));
         const unselected = new Map();
         (result.events || []).filter((event) => (
-            ['option_trade', 'share_trade', 'futures_trade'].includes(event.kind)
+            ['option_trade', 'share_trade'].includes(event.kind)
             && !selectedRefs.has(refKey(event)))).forEach((event) => {
             const alreadyExplained = event.kind === 'option_trade'
                 && (targets || []).some((target) => (
@@ -7836,9 +7577,6 @@
             if (alreadyExplained) return;
             let key = `${core.contractKey(event)}|${event.conId || ''}`;
             if (event.kind === 'share_trade') key = `shares|${event.account || ''}`;
-            if (event.kind === 'futures_trade') {
-                key = `future|${core.futureKey(event)}|${event.futureConId || ''}`;
-            }
             if (!unselected.has(key)) unselected.set(key, []);
             unselected.get(key).push(event);
         });
@@ -7856,8 +7594,8 @@
                 return;
             }
             skipped.push({ key,
-                label: sample.kind === 'share_trade' ? '股票' : `期货 ${sample.futureExpiry || ''}`,
-                reason: summary + '批量归账只处理期权持仓差异，股票/期货成交不会写入。'
+                label: '股票',
+                reason: summary + '批量归账只处理期权持仓差异，股票成交不会写入。'
                     + '请确认或取消本次预览后使用「拉取 TWS 成交」，或导入完整报表。' });
         });
         // An execution that could not be read never became an event. Unless a
@@ -8513,10 +8251,9 @@
 
     function _syncNewBookType() {
         const type = String($('new-book-type').value || '');
-        const futures = type === 'FUT';
-        _text($('new-book-spc-label'), futures ? 'FUT 点值 / 乘数' : '每张交割股数');
+        _text($('new-book-spc-label'), '每张交割股数');
         $('new-book-spc').value = type === 'STK' ? '100' : '';
-        $('new-book-spc').placeholder = futures ? '必填，例如 ES=50' : (type ? '' : '先选择账本类型');
+        $('new-book-spc').placeholder = type ? '' : '先选择账本类型';
         _refreshControls();
     }
 
@@ -8848,8 +8585,7 @@
             $(id).addEventListener('change', _renderSplitPreview);
         });
         ['field-contracts', 'field-shares', 'field-price', 'field-spc', 'field-fees',
-            'field-cash', 'field-strike', 'field-future-contracts',
-            'field-roll-to-price'].forEach((id) => {
+            'field-cash', 'field-strike'].forEach((id) => {
             $(id).addEventListener('input', _updateCashHint);
         });
         $('event-form').addEventListener('submit', _submitEvent);

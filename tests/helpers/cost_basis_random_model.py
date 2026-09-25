@@ -27,11 +27,8 @@ class Oracle:
         self.realized = F(0)
         self.short_realized = F(0)
         self.premium = F(0)
-        self.futures = Counter()
         self.stock_lots = []
         self.stock_realized = F(0)
-        self.future_lots = {}
-        self.future_realized = F(0)
 
     @staticmethod
     def retire_lots(lots, delta, price, fee=F(0)):
@@ -52,11 +49,6 @@ class Oracle:
         lots[:] = [lot for lot in lots if lot[0]]
         return realized
 
-    def future_fill(self, month, quantity, price, multiplier):
-        self.futures[month] += quantity
-        self.future_realized += self.retire_lots(
-            self.future_lots.setdefault(month, []), F(quantity), F(str(price)) * multiplier)
-
 
     def quantity(self, event):
         return sum((lot[0] for lot in self.lots.get(option_key(event), [])), F(0))
@@ -74,11 +66,6 @@ class Oracle:
             self.shares += F(str(e.get('shares', 0)))
             if e.get('shares'):
                 self.stock_realized += self.retire_lots(self.stock_lots, F(str(e['shares'])), F(str(e.get('price', e.get('strike', 0)))), fee)
-        if e['kind'] == 'futures_roll':
-            self.future_fill(e['futureExpiry'][:6], -e['futureContracts'], e['price'], e['sharesPerContract'])
-            self.future_fill(e['rollToExpiry'][:6], e['futureContracts'], e['rollToPrice'], e['sharesPerContract'])
-        elif e.get('futureContracts'):
-            self.future_fill(e['futureExpiry'][:6], e['futureContracts'], e.get('strike') if e['kind'].startswith('option_') else e['price'], e['sharesPerContract'])
         if e['kind'] not in OPTION_KINDS:
             return
         lots = self.lots.setdefault(option_key(e), [])
@@ -111,19 +98,18 @@ class Oracle:
                     optionPremiumNet=float(self.premium), realizedPremium=float(self.realized),
                     openPremium=float(open_money), realizedShortPremium=float(self.short_realized),
                     openShortPremium=float(short_money), stockRealizedPnl=float(self.stock_realized),
-                    futuresRealizedPnl=float(self.future_realized),
                     stockAvgCost=float(sum((lot[1] for lot in self.stock_lots),F(0))/self.shares) if self.shares else None,
-                    positions={k:float(sum(l[0] for l in lots)) for k,lots in self.lots.items() if lots},
-                    futures={k:v for k,v in self.futures.items() if v})
+                    positions={k:float(sum(l[0] for l in lots)) for k,lots in self.lots.items() if lots})
 
-def generate(seed, steps=60, sec_type='STK', extras=False):
+def generate(seed, steps=60, extras=False):
+    """A stock ledger history (FUT ledgers are the FOP campaign's: tests/cost_basis_fop_randomized_test.py)."""
     rng = random.Random(seed)
     oracle, events, expected, coverage = Oracle(), [], [], Counter()
-    multiplier = rng.choice([50, 100, 130]) if sec_type == 'STK' else 50
+    multiplier = rng.choice([50, 100, 130])
     contracts = [dict(account=ACCOUNT, right=right, strike=strike, expiry='20261218',
                       sharesPerContract=multiplier, conId=900000 + i,
                       localSymbol=f'TQQQ 18DEC26 {strike} {right}',
-                      optionSecType='OPT' if sec_type == 'STK' else 'FOP')
+                      optionSecType='OPT')
                  for i,(right,strike) in enumerate((('C',50),('P',50),('C',55),('P',55),('C',60),('P',60)))]
     def add(row, label=None):
         i = len(events)
@@ -136,37 +122,21 @@ def generate(seed, steps=60, sec_type='STK', extras=False):
         oracle.apply(row)
         expected.append(oracle.snapshot())
         coverage[label or row['kind']] += 1
-    if sec_type == 'STK':
-        add(dict(kind='share_trade', shares=2000, price=50, cashAmount=-100000, tag='ibkr_open'))
-    else:
-        add(dict(kind='futures_trade', futureExpiry='202612', futureContracts=2,
-                 sharesPerContract=50, price=5100, cashAmount=0))
+    add(dict(kind='share_trade', shares=2000, price=50, cashAmount=-100000, tag='ibkr_open'))
     for i in range(steps):
         instrument = dict(contracts[i % 6] if i < 12 else rng.choice(contracts))
         prior = int(oracle.quantity(instrument))
         fee = rng.randrange(0, 300) / 100
         size = rng.randint(1, 8)
         if extras and i > 12 and i % 9 == 0:
-            if sec_type == 'STK':
-                kind = rng.choice(['share_trade','split','dividend','fee','manual_adjust'])
-                if kind == 'share_trade':
-                    q, p = rng.choice([-1,1])*rng.randint(1,500), rng.randrange(2000,8000)/100
-                    add(dict(kind=kind, shares=q, price=p, fees=fee, cashAmount=round(-q*p-fee,2)))
-                elif kind == 'split':
-                    add(dict(kind=kind, splitRatio=rng.choice([0.5,2]), cashAmount=0))
-                else:
-                    add(dict(kind=kind, cashAmount=round((1 if kind=='dividend' else -1)*size-fee,2)))
+            kind = rng.choice(['share_trade','split','dividend','fee','manual_adjust'])
+            if kind == 'share_trade':
+                q, p = rng.choice([-1,1])*rng.randint(1,500), rng.randrange(2000,8000)/100
+                add(dict(kind=kind, shares=q, price=p, fees=fee, cashAmount=round(-q*p-fee,2)))
+            elif kind == 'split':
+                add(dict(kind=kind, splitRatio=rng.choice([0.5,2]), cashAmount=0))
             else:
-                month = rng.choice(['202612','202703'])
-                quantity = oracle.futures[month]
-                if quantity and rng.choice([True,False]):
-                    add(dict(kind='futures_roll', futureExpiry=month, futureContracts=quantity,
-                             rollToExpiry='202703' if month=='202612' else '202612',
-                             sharesPerContract=50, price=5100, rollToPrice=5120,
-                             rollGroup=f'roll-{i}', fees=fee, cashAmount=-fee))
-                else:
-                    add(dict(kind='futures_trade', futureExpiry=month, futureContracts=rng.choice([-3,-1,1,3]),
-                             sharesPerContract=50, price=5100+rng.randint(-30,30), fees=fee, cashAmount=-fee))
+                add(dict(kind=kind, cashAmount=round((1 if kind=='dividend' else -1)*size-fee,2)))
             continue
         action = 'open' if not prior else (rng.choice(['open','close','reverse','settle']))
         if i < 6: action = 'open'
@@ -188,10 +158,7 @@ def generate(seed, steps=60, sec_type='STK', extras=False):
             row['cashAmount'] = round(-delta*multiplier*price-fee,2)
         else:
             delivered = delta if instrument['right']=='P' else -delta
-            if sec_type == 'STK':
-                row.update(shares=delivered*multiplier, cashAmount=round(-delivered*multiplier*price-fee,2))
-            else:
-                row.update(futureExpiry='202612', futureContracts=delivered, cashAmount=-fee)
+            row.update(shares=delivered*multiplier, cashAmount=round(-delivered*multiplier*price-fee,2))
         # Same-second sequence is meaningful; excluded independent opens must
         # never provide backing to another contract's subsequent closes.
         add(row, action + ('_long' if (prior or delta)>0 else '_short'))
@@ -204,8 +171,8 @@ def generate(seed, steps=60, sec_type='STK', extras=False):
             events[-1]['tradeDate']='2026-12-18'
             events[-1]['brokerTimestamp']='2026-12-18T16:00:00'
     return dict(seed=seed, rows=events, expected=expected, coverage=dict(coverage),
-                book=dict(account=ACCOUNT,symbol='TQQQ' if sec_type=='STK' else 'ES',
-                          secType=sec_type,currency='USD',defaultSharesPerContract=multiplier))
+                book=dict(account=ACCOUNT,symbol='TQQQ',
+                          secType='STK',currency='USD',defaultSharesPerContract=multiplier))
 
 def csv_text(case, format_name='activity', rows=None):
     """Serialize generated economic events to independent broker-shaped CSV.

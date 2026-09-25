@@ -20,6 +20,10 @@
 //        {op: 'split', planId, maxEvents} -> {batches: [{from, through, planId, events}]}
 //        {op: 'preview', planId, graph, options} -> {output} (read-only preview)
 //        {op: 'compute', graph, options} -> {output}
+//        {op: 'previewGraph', planId, graph, book} -> {graph} (the ledger the preview replays)
+//        {op: 'adoption', planId, graph, book, results} -> {operations, refused} (the bindings a file proves)
+//        {op: 'statement', kind: 'activity'|'flex', options} -> {text} (the test-only statement writer)
+//        {op: 'forget'} -> {} (drops every kept plan; a long campaign calls it per case)
 'use strict';
 
 const assert = require('node:assert/strict');
@@ -53,6 +57,8 @@ function summarize(plan) {
         bindings: plan.bindings.map((record) => ({ bindingId: record.bindingId, status: record.status })),
         bindingRequests: plan.bindingRequests.map((item) => ({ bindingId: item.bindingId, option: item.option,
             future: item.future, evidence: item.evidence })),
+        bindingUpgrades: plan.bindingUpgrades.map((item) => ({ bindingId: item.bindingId, revision: item.revision,
+            option: item.option, future: item.future, evidence: item.evidence })),
         quantityProof: plan.quantityProof, timeZone: plan.timeZone, period: plan.period,
         eventTimes: plan.events.map((event) => event.time), coverage: plan.coverage, checks: plan.checks,
         duplicateReviews: plan.duplicateReviews, decisions: plan.decisions,
@@ -101,6 +107,18 @@ function serve() {
                     Import.previewGraph(message.graph || null, plan, message.book), message.options || {})) };
             } else if (message.op === 'compute') {
                 answer = { output: plain(Core.computeLedger(message.graph, message.options || {})) };
+            } else if (message.op === 'adoption') {
+                answer = plain(Import.bindingUpgradeAdoptions(plans.get(message.planId), message.graph, message.book,
+                    message.results));
+            } else if (message.op === 'previewGraph') {
+                answer = { graph: plain(Import.previewGraph(message.graph || null, plans.get(message.planId),
+                    message.book)) };
+            } else if (message.op === 'statement') {
+                if (!['activity', 'flex'].includes(message.kind)) throw new Error(`unknown statement ${message.kind}`);
+                answer = { text: statements[message.kind](message.options) };
+            } else if (message.op === 'forget') {
+                plans.clear();
+                answer = {};
             } else {
                 throw new Error(`unknown op ${message.op}`);
             }

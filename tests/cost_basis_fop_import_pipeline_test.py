@@ -1200,6 +1200,172 @@ class DeliveryTests(_PipelineCase):
         self.assertEqual({row['bindingStatus'] for row in ledger.graph()['bindings']} if False else
                          {binding['status'] for binding in ledger.graph()['bindings']}, {'verified_statement'})
 
+    def test_a_later_file_binds_an_option_to_the_stored_future_its_rows_name(self):
+        # Found by the P6 campaign: CLZ6 arrived in an earlier statement; a Flex
+        # file names the option's underlying only by conId 555. The file shows
+        # CLZ6 itself (its delivery leg), so the statement proves the binding
+        # (plan §4.3) and the delivery imports, as the server's own check agrees.
+        ledger = Ledger(self, 'later')
+        ledger.import_text(statement('flex', fills=[
+            {'symbol': 'CLZ6', 'local': '2026-10-01T10:00:00', 'qty': 1, 'price': 70, 'codes': 'O', 'tradeId': '1'}]),
+            timeZone='America/New_York')
+        text = statement('flex', fills=[
+            {'symbol': 'LOZ6 P6500', 'local': '2026-10-05T11:30:00', 'qty': -1, 'price': 0.8, 'codes': 'O',
+             'tradeId': '2'},
+            {'symbol': 'LOZ6 P6500', 'local': '2026-10-09T16:30:00', 'qty': 1, 'price': 0, 'codes': 'A', 'tradeId': '3'},
+            {'symbol': 'CLZ6', 'local': '2026-10-09T16:30:00', 'qty': 1, 'price': 65, 'codes': 'A', 'tradeId': '4'}])
+        result, summary = ledger.import_text(text, timeZone='America/New_York')
+        self.assertEqual((result['inserted'], summary['kinds']), (2, ['option_trade', 'option_assignment']))
+        [binding] = ledger.graph()['bindings']
+        clz6 = next(item['record'] for item in ledger.graph()['contracts'] if item['record']['localSymbol'] == 'CLZ6')
+        self.assertEqual((binding['status'], binding['futureContractId']), ('verified_statement', clz6['contractId']))
+        self.assertEqual(ledger.output({'CLZ6': 66})['futures'][0]['contracts']['value'], 2)
+        # A file that never shows the future cannot prove it: the option stays unresolved, its trade still imports.
+        other = Ledger(self, 'unshown')
+        other.import_text(statement('flex', fills=[
+            {'symbol': 'CLZ6', 'local': '2026-10-01T10:00:00', 'qty': 1, 'price': 70, 'codes': 'O', 'tradeId': '1'}]),
+            timeZone='America/New_York')
+        result, summary = other.import_text(statement('flex', fills=[
+            {'symbol': 'LOZ6 P6500', 'local': '2026-10-05T11:30:00', 'qty': -1, 'price': 0.8, 'codes': 'O',
+             'tradeId': '2'}]), timeZone='America/New_York')
+        self.assertEqual([item['status'] for item in other.graph()['bindings']], ['unresolved'])
+
+    def test_a_later_file_that_proves_a_stored_unresolved_binding_offers_its_adoption(self):
+        # Found by the P6 campaign: LOF7 C8000 arrived in a file that never
+        # showed CLF7, so its binding is stored unresolved. A later file names
+        # its underlying (conId 556) and shows CLF7: the statement proves the
+        # binding, the page offers an explicit adoption (plan §4.3), and after
+        # it the blocked assignment imports.
+        ledger = Ledger(self, 'upgrade')
+        zone = {'timeZone': 'America/New_York'}
+        ledger.import_text(statement('flex', fills=[
+            {'symbol': 'CLF7', 'local': '2026-10-01T10:00:00', 'qty': 1, 'price': 70, 'codes': 'O', 'tradeId': '1'}]),
+            **zone)
+        ledger.import_text(statement('flex', fills=[
+            {'symbol': 'LOF7 C8000', 'local': '2026-10-05T11:30:00', 'qty': -1, 'price': 1.5, 'codes': 'O',
+             'tradeId': '2'}]), **zone)
+        [stored] = ledger.graph()['bindings']
+        self.assertEqual(stored['status'], 'unresolved')
+        text = statement('flex', fills=[
+            {'symbol': 'LOF7 C8000', 'local': '2026-10-09T16:30:00', 'qty': 1, 'price': 0, 'codes': 'A', 'tradeId': '3'},
+            {'symbol': 'CLF7', 'local': '2026-10-09T16:30:00', 'qty': -1, 'price': 80, 'codes': 'A', 'tradeId': '4'}])
+        plan_id, summary = ledger.plan(text, **zone)
+        self.assertEqual([item['code'] for item in summary['problems']], ['binding_missing'])
+        self.assertIn('this file proves CLF7: adopt that binding first', summary['problems'][0]['message'])
+        [upgrade] = summary['bindingUpgrades']
+        self.assertEqual((upgrade['bindingId'], upgrade['revision'], upgrade['future']['localSymbol']),
+                         (stored['bindingId'], 1, 'CLF7'))
+        # The server reads the rows itself and signs the pair; the page builds the adoption from it.
+        results = ledger.store.issue_statement_binding_credentials(ledger.book_id, [
+            {key: upgrade[key] for key in ('bindingId', 'option', 'future', 'evidence')}])
+        self.assertEqual(results[0]['status'], 'verified_statement', results[0]['problems'])
+        adoption = self.node.call(op='adoption', planId=plan_id, graph=ledger.graph(), book=ledger.book(),
+                                  results=results)
+        [operation] = adoption['operations']
+        self.assertEqual((operation['kind'], operation['binding']['revision'], operation['binding']['status'],
+                          operation['affected']), ('adopt_binding', 2, 'verified_statement', []))
+        before = ledger.graph()['events']
+        ledger.store.commit_fop_metadata(ledger.book_id, operation, client_token=token('adopt'),
+                                         expected_ledger_version=ledger.ledger.version(),
+                                         book_identity=dict(ledger.ledger.identity), engine_version=1)
+        self.assertEqual(ledger.graph()['events'], before, 'an adoption writes no economic row')
+        # A credential for another pair is refused by the store, whatever the page sends.
+        forged = copy.deepcopy(operation)
+        forged['binding'].update(revision=3, status='verified_statement')
+        forged['binding']['evidenceCredential'] = results[0]['evidenceCredential'][:-2] + 'xx'
+        with self.assertRaisesRegex(CostBasisStoreError, 'not issued by this server'):
+            ledger.store.commit_fop_metadata(ledger.book_id, forged, client_token=token('forged'),
+                                             expected_ledger_version=ledger.ledger.version(),
+                                             book_identity=dict(ledger.ledger.identity), engine_version=1)
+        result, summary = ledger.import_text(text, **zone)
+        self.assertEqual((result['inserted'], summary['kinds'], summary['bindingUpgrades']),
+                         (1, ['option_assignment'], []))
+        current = [item for item in ledger.graph()['bindings'] if item['supersededByRevision'] is None]
+        self.assertEqual([(item['status'], item['revision']) for item in current], [('verified_statement', 2)])
+        self.assertEqual(ledger.output()['futures'], [])
+
+    def adopt(self, ledger, plan_id, summary):
+        """Adopt every binding the file proves, one metadata commit each, as the page does."""
+        results = ledger.store.issue_statement_binding_credentials(ledger.book_id, [
+            {key: item[key] for key in ('bindingId', 'option', 'future', 'evidence')}
+            for item in summary['bindingUpgrades']])
+        self.assertEqual([item['status'] for item in results], ['verified_statement'] * len(results),
+                         [item['problems'] for item in results])
+        adoption = self.node.call(op='adoption', planId=plan_id, graph=ledger.graph(), book=ledger.book(),
+                                  results=results)
+        self.assertEqual(adoption['refused'], [])
+        for operation in adoption['operations']:
+            ledger.store.commit_fop_metadata(ledger.book_id, operation, client_token=token('adopt'),
+                                             expected_ledger_version=ledger.ledger.version(),
+                                             book_identity=dict(ledger.ledger.identity), engine_version=1)
+        return adoption['operations']
+
+    def test_two_options_that_prove_one_new_future_adopt_it_once(self):
+        # Review of P6: C75 and P65 were sold in a file that never showed CLZ6;
+        # a later file assigns both with CLZ6's legs. Both adoptions name CLZ6,
+        # which the ledger does not hold yet: the first brings it, the second
+        # refers to it (bringing revision 1 again was refused part way).
+        ledger = Ledger(self, 'shared-future')
+        zone = {'timeZone': 'America/New_York'}
+        ledger.import_text(statement('flex', fills=[
+            {'symbol': 'LOZ6 C7500', 'local': '2026-10-05T11:00:00', 'qty': -1, 'price': 1.2, 'codes': 'O',
+             'tradeId': '1'},
+            {'symbol': 'LOZ6 P6500', 'local': '2026-10-05T11:30:00', 'qty': -1, 'price': 0.8, 'codes': 'O',
+             'tradeId': '2'}]), **zone)
+        self.assertEqual([item['status'] for item in ledger.graph()['bindings']], ['unresolved', 'unresolved'])
+        text = statement('flex', fills=[
+            {'symbol': 'LOZ6 C7500', 'local': '2026-10-09T16:20:00', 'qty': 1, 'price': 0, 'codes': 'A', 'tradeId': '3'},
+            {'symbol': 'CLZ6', 'local': '2026-10-09T16:20:00', 'qty': -1, 'price': 75, 'codes': 'A', 'tradeId': '4'},
+            {'symbol': 'LOZ6 P6500', 'local': '2026-10-09T16:30:00', 'qty': 1, 'price': 0, 'codes': 'A', 'tradeId': '5'},
+            {'symbol': 'CLZ6', 'local': '2026-10-09T16:30:00', 'qty': 1, 'price': 65, 'codes': 'A', 'tradeId': '6'}])
+        plan_id, summary = ledger.plan(text, **zone)
+        self.assertEqual([item['code'] for item in summary['problems']], ['binding_missing', 'binding_missing'])
+        self.assertEqual([item['future']['localSymbol'] for item in summary['bindingUpgrades']], ['CLZ6', 'CLZ6'])
+        operations = self.adopt(ledger, plan_id, summary)
+        self.assertEqual([[record['localSymbol'] for record in operation.get('contracts', [])]
+                          for operation in operations], [['CLZ6'], []])
+        result, summary = ledger.import_text(text, **zone)
+        self.assertEqual((result['inserted'], summary['bindingUpgrades']), (2, []))
+        current = [item for item in ledger.graph()['bindings'] if item['supersededByRevision'] is None]
+        self.assertEqual([(item['status'], item['revision']) for item in current], [('verified_statement', 2)] * 2)
+        self.assertEqual([record['record']['localSymbol'] for record in ledger.graph()['contracts']
+                          if record['record']['secType'] == 'FUT'], ['CLZ6'])
+
+    def test_a_repeated_fill_in_a_cumulative_file_still_proves_its_binding(self):
+        # Review of P6: the option's fill arrived in a file that never showed
+        # CLZ6. A cumulative file repeats that fill and shows CLZ6: the fill is
+        # not written again, but the file proves the binding and offers it.
+        zone = {'timeZone': 'America/New_York'}
+        sale = {'symbol': 'LOZ6 C7500', 'local': '2026-10-05T11:00:00', 'qty': -1, 'price': 1.2, 'codes': 'O',
+                'tradeId': '1'}
+        future = {'symbol': 'CLZ6', 'local': '2026-10-06T10:00:00', 'qty': 1, 'price': 70, 'codes': 'O',
+                  'tradeId': '2'}
+        cumulative = statement('flex', fills=[sale, future])
+        # Into an empty ledger the same file binds the option at once.
+        fresh = Ledger(self, 'fresh')
+        fresh.import_text(cumulative, **zone)
+        self.assertEqual([item['status'] for item in fresh.graph()['bindings']], ['verified_statement'])
+        ledger = Ledger(self, 'cumulative')
+        ledger.import_text(statement('flex', fills=[sale]), **zone)
+        [stored] = ledger.graph()['bindings']
+        self.assertEqual(stored['status'], 'unresolved')
+        plan_id, summary = ledger.plan(cumulative, **zone)
+        self.assertFalse(summary['blocking'], summary['problems'])
+        [upgrade] = summary['bindingUpgrades']
+        self.assertEqual((upgrade['bindingId'], upgrade['future']['localSymbol']), (stored['bindingId'], 'CLZ6'))
+        before = [item['row']['eventId'] for item in ledger.graph()['events']]
+        [operation] = self.adopt(ledger, plan_id, summary)
+        self.assertEqual([record['localSymbol'] for record in operation['contracts']], ['CLZ6'])
+        self.assertEqual([item['row']['eventId'] for item in ledger.graph()['events']], before,
+                         'an adoption writes no economic row')
+        result, summary = ledger.import_text(cumulative, **zone)
+        self.assertEqual((result['inserted'], len(result['duplicates']), summary['bindingUpgrades']), (1, 1, []))
+        current = [item for item in ledger.graph()['bindings'] if item['supersededByRevision'] is None]
+        self.assertEqual([(item['status'], item['revision']) for item in current], [('verified_statement', 2)])
+        # The same figures as the fresh ledger (contract ids are scoped to their ledger).
+        unscoped = lambda output: dict(figures(output), options=[row[1:] for row in figures(output)['options']])  # noqa: E731
+        self.assertEqual(unscoped(ledger.output({'CLZ6': 70})), unscoped(fresh.output({'CLZ6': 70})))
+
     def test_a_delivery_without_its_other_row_blocks(self):
         fills = [{'symbol': 'LOZ6 C7500', 'local': '2026-10-01T11:00:00', 'qty': -1, 'price': 1.2, 'codes': 'O'},
                  {'symbol': 'LOZ6 C7500', 'local': '2026-11-17T16:20:00', 'qty': 1, 'price': 0, 'codes': 'A'}]

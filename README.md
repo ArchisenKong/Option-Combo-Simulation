@@ -10,7 +10,7 @@ The repo currently has five frontend surfaces:
 2. `chart_lab.html` - shared workspace plus experimental daily-bar projection
 3. `iv_term_structure.html` - standalone live ETF / futures-option IV term-structure monitor
 4. `cost_basis.html` - standalone per-account, per-underlying blended-cost ledger
-   - `cost_basis_fop.html` - the standalone FOP ledger (CL futures and options on futures); its writes open at the release stage
+   - `cost_basis_fop.html` - the standalone FOP ledger (CL futures and options on futures)
 5. `workspace_db_admin.html` - standalone workspace-database and archive admin page
 
 It also has two optional Python WebSocket backends:
@@ -179,9 +179,9 @@ never the trading shell — and writes its own `cost_basis.db`. It cannot place
 an order or subscribe to market data. Full details in
 [Blended Cost Ledger](#blended-cost-ledger-cost_basishtml) below.
 
-`cost_basis_fop.html` is the standalone FOP ledger that will replace the frozen
-`FUT` books. It is being built in phases (`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`);
-it routes a stock ledger to `cost_basis.html` and a legacy `FUT` book to its
+`cost_basis_fop.html` is the standalone FOP ledger that replaced the retired
+`FUT` books of the stock page (`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md`, record
+in `CODE PLAN/COST_BASIS_FOP_VALIDATION.md`); it routes a stock ledger to `cost_basis.html` and a legacy `FUT` book to its
 identity, and shows a FOP ledger in full: the economic P&L and its parts, the
 break-even card (only with exactly one FUT contract open), completeness per
 item, the futures months, the options with their bound futures, delivery
@@ -194,13 +194,16 @@ confirmed), voids, cycle boundaries, backups and restores. A statement row that
 may repeat a stored fill blocks until you decide, row by row and with the check
 you rely on, whether it is that fill or another one. An option whose future is
 unproven can be asked about at the broker (read-only) and the proven binding
-adopted after a preview. The page reads the ledger account's TWS positions and
+adopted after a preview; when a later statement names that future itself, the
+import preview offers to adopt the statement-proven binding and previews the
+file again. The page reads the ledger account's TWS positions and
 compares quantity, AvgCost, binding and cash separately (cash is never
 reconciled yet), and can save that comparison as a snapshot of the ledger
 version. It shows the buyer's options apart and puts a statement's own realized
 P&L beside the ledger's (evidence only). Problems are explained in Chinese with
-the next step. The backend refuses every FOP write until the release stage, and
-the page keeps those controls disabled meanwhile. Statement rows write only
+the next step. Both backends accept FOP writes; `[cost_basis]
+fop_writes_enabled = false` in `config.ini` makes every FOP ledger read-only
+again, and the page then keeps its write controls disabled. Statement rows write only
 after a real statement accepts each row type (`cost_basis_fop_capabilities.json`)
 or as row-by-row manual claims. Without a ledger it still previews a statement
 CSV.
@@ -438,12 +441,13 @@ accounts may keep independent books for the same symbol. A book is explicitly ei
 (stock/ETF plus OPT) or `FUT` (deliverable FOP plus FUT); the create form
 preselects neither, and the server refuses a create request without a type. A
 link `cost_basis.html?bookId=…` opens that book, and when the book no longer
-exists the page says so instead of opening another one. **`FUT` books are
-frozen for now:** this engine keys a futures position by the first six digits
-of its date, so a CL last-trade date and another contract's delivery month can
-merge silently. New `FUT` books cannot be created, and an existing one is
-read-only (view, export or delete) until the standalone FOP ledger in
-`CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md` replaces this path. The ledger, CSV,
+exists the page says so instead of opening another one. **This page no longer
+computes `FUT` books:** its old engine keyed a futures position by the first six
+digits of its date, so a CL last-trade date and another contract's delivery
+month could merge silently, and it has been retired. Futures and options on
+futures live in `cost_basis_fop.html` (a link to a FOP ledger goes there, and
+this page does not list one); a legacy `FUT` book without FOP metadata only
+shows its identity and can be exported (raw rows) or deleted whole. The ledger, CSV,
 manual-entry, export, snapshot and scenario-replay paths work against either
 backend. Current positions/AvgCost, recent executions, fresh prices, option IV
 and discount-curve inputs require the live IB backend; without it the page
@@ -752,15 +756,9 @@ Calls and Puts. A 100-share lot bought at 50 plus a long Put costing 200 will
 therefore show 52 in the running full-cash column and 50 in the headline; that
 is intentional, not a reconciliation error.
 
-Those three selectable lenses apply to an `STK` book. A `FUT` book (frozen, see
-above) instead
-shows the current FUT entry average and one blended cost in futures points:
-the current contract basis, minus realized FUT P&L and realized FOP premium,
-plus fees, divided by signed point exposure. Open FOP premium remains at risk
-and appears only in the separate "all open options expire at zero" figure.
-For a roll, this carries the old economic basis as
-`old basis + new open price - old close price + fees/(contracts × multiplier)`;
-the same signed equation works for long and short futures.
+Those three selectable lenses apply to every book here (all are `STK`). The
+FOP ledger has its own figures: economic P&L and its parts, the seller lens
+and, with exactly one FUT contract open, a break-even (see `cost_basis_fop.html`).
 
 ### Recording events
 
@@ -875,12 +873,9 @@ expiry rather than an earlier paid close. Those gaps therefore show advice
 only and never manufacture assignment, exercise, expiry, share, or FUT
 events. Import the broker statement or enter the verified historical event.
 
-An `STK` book reconciles only `STK/OPT`; a `FUT` book reconciles only `FUT/FOP`.
-Futures remain separated by actual contract month, multiplier and broker
-identity, so different delivery months cannot silently cancel each other. If
-a vanished FOP could explain a newly visible FUT, standalone FUT adoption is
-blocked: recording only the FUT would leave the option premium incorrectly
-open in the ledger.
+A book here reconciles only `STK/OPT`; FUT and FOP positions and fills belong
+to the FOP ledger (`cost_basis_fop.html`, which reconciles them against its own
+contracts and keeps delivery months apart).
 
 For a whole position that exists only in TWS, `ib.positions()` also supplies
 the broker average cost. `采信 TWS` records that quantity and average cost

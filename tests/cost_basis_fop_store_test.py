@@ -451,6 +451,32 @@ class FopWriteTests(unittest.TestCase):
             store.create_book(account='U2222222', symbol='SPY', start_date='2026-01-01',
                               default_shares_per_contract=None)
 
+    def test_a_stock_and_a_fop_ledger_of_one_root_stay_apart(self):
+        # P6 migration list: one account holds a STK and a FOP ledger for the same root (F02).
+        store = self.ledger.store
+        stock = store.create_book(account=IDENTITY['account'], symbol='CL', start_date='2026-01-01',
+                                  sec_type='STK', default_shares_per_contract=100)
+        self.ledger.append(fut_trade(), contracts=[CLZ6])
+        store.append_event(stock['bookId'], {
+            'kind': 'share_trade', 'tradeDate': '2026-10-01', 'account': IDENTITY['account'], 'shares': 10,
+            'price': 60, 'cashAmount': -600}, client_token=token())
+        listed = {(book['symbol'], book['secType']): book for book in store.list_books()}
+        self.assertEqual(set(listed), {('CL', 'STK'), ('CL', 'FUT')})
+        self.assertEqual((listed[('CL', 'STK')]['defaultSharesPerContract'],
+                          listed[('CL', 'FUT')]['fop']['engineVersion']), (100, 1))
+        self.assertEqual([event['kind'] for event in store.list_events(stock['bookId'])['events']],
+                         ['share_trade'])
+        self.assertEqual([event['kind'] for event in self.ledger.events()], ['futures_trade'])
+        with self.assertRaises(FuturesBookFrozenError, msg='the stock path never writes the FOP ledger'):
+            store.append_event(self.book_id, {'kind': 'share_trade', 'tradeDate': '2026-10-01',
+                                              'account': IDENTITY['account'], 'shares': 1, 'price': 60,
+                                              'cashAmount': -60}, client_token=token())
+        with self.assertRaises(cost_basis_store.CostBasisStoreError, msg='the FOP path never writes the stock ledger'):
+            store.append_fop_event(stock['bookId'], package(fut_trade(), contracts=[CLZ6]), client_token=token(),
+                                   expected_ledger_version=store.ledger_version(stock['bookId']),
+                                   book_identity=dict(IDENTITY, secType='STK'))
+        self.assertEqual(len(store.list_events(stock['bookId'])['events']), 1)
+
     def test_fut_fop_and_delivery_writes_read_back_their_quantities(self):
         fut, call, assigned = self.build_assigned_call()
         self.assertEqual((fut['futureContracts'], fut['contracts']), (1, None))

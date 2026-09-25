@@ -14,9 +14,6 @@ def legal_history(rows):
                 if prior*delta>=0 or abs(delta)>abs(prior): return False
             elif tag=='ibkr_open' and prior*delta<0: return False
             elif tag=='ibkr_close_open' and (prior*delta>=0 or abs(delta)<=abs(prior)): return False
-        if e['kind']=='futures_roll':
-            prior=oracle.futures[e['futureExpiry'][:6]]
-            if prior*e['futureContracts']<=0 or abs(e['futureContracts'])>abs(prior): return False
         oracle.apply(e)
     return True
 

@@ -635,7 +635,7 @@ module.exports = {
                 assert.match(h.alerts[0],/历史回放未通过/);
                 assert.equal(p.importReplayBlockingWarnings({ledgerPreview:{warnings:['net_short_shares']}}).length,0);
                 for(const warning of ['closes_more_than_open:x','ibkr_open_opposes_existing:x',
-                    'contract_identity_ambiguous:x','roll_closes_more_than_open:x']) {
+                    'contract_identity_ambiguous:x']) {
                     assert.equal(p.importReplayBlockingWarnings({ledgerPreview:{warnings:[warning]}}).length,1);
                     // The same error already carried by stored history is only reported.
                     const carried={ledgerPreview:{warnings:[warning],newWarnings:[]}};
@@ -643,8 +643,7 @@ module.exports = {
                     assert.deepEqual(Array.from(p.importReplayNotices(carried)),[warning]);
                 }
                 // Advisory notes never block, even when this batch introduces them.
-                for(const warning of ['split_crosses_open_option:x','contract_identity_conflict:x',
-                    'future_identity_or_multiplier_missing:x']) {
+                for(const warning of ['split_crosses_open_option:x','contract_identity_conflict:x']) {
                     const added={ledgerPreview:{warnings:[warning],newWarnings:[warning]}};
                     assert.equal(p.importReplayBlockingWarnings(added).length,0,warning);
                     assert.deepEqual(Array.from(p.importReplayNotices(added)),[warning]);
@@ -3179,54 +3178,34 @@ module.exports = {
             // FUT/FOP ledgers are frozen until the standalone FOP ledger ships
             // (tests/cost_basis_fop_guard.test.js); the legacy entry fields stay
             // until P6 retires this page's FUT branches.
-            name: 'the page keeps the frozen FOP FUT option and its legacy roll fields',
+            name: 'the stock page, its engine and its importer carry no FUT branch (P6)',
             run() {
+                // Plan §13.3 P6 step 1: FUT ledgers are the standalone FOP ledger's.
                 const html = readPage();
                 const source = readScript();
-                assert.match(html, /<option value="FUT" disabled>FOP \/ FUT（已停用）<\/option>/);
-                ['futureExpiry', 'futureContracts', 'rollToExpiry',
-                    'rollToPrice', 'rollGroup'].forEach((field) => {
-                    assert.ok(html.includes(`data-field="${field}"`));
+                assert.match(html, /<option value="FUT" disabled>FOP \/ FUT（在 FOP 账本页建账）<\/option>/);
+                ['futureExpiry', 'futureContracts', 'rollToExpiry', 'rollToPrice', 'rollGroup'].forEach((field) => {
+                    assert.ok(!html.includes(`data-field="${field}"`), field);
                 });
-                assert.match(source, /const secType = String\(\$\('new-book-type'\)\.value \|\| ''\);/);
-                assert.match(source, /secType:\s*book \? \(book\.secType \|\| 'STK'\)/);
-                assert.match(source, /core\.computeLedger\(state\.allEvents, \{/);
-                assert.match(source, /core\.buildReconciliation\(\{[\s\S]{0,180}secType/);
-            },
-        },
-        {
-            name: 'complete CSV FUT history supersedes its temporary TWS baseline',
-            run() {
-                const page = loadPage().OptionComboCostBasisPage;
-                const adopted = {
-                    eventId: 'adopted-fut-1', kind: 'futures_trade',
-                    tradeDate: '2026-08-26', account: 'U1',
-                    futureExpiry: '202609', futureConId: 1001,
-                    futureContracts: 1, sharesPerContract: 50,
-                    price: 5000, cashAmount: 0, fees: 0,
-                    source: 'reconcile', tag: 'tws_snapshot',
-                    note: 'Snapshot timestamp 2026-08-26T12:00:00.',
-                };
-                const covering = {
-                    format: 'activity', account: 'U1',
-                    statementThrough: '2026-08-26T23:59:59',
-                    openings: { drafts: [], openingShares: 0 }, problems: [],
-                    events: [{
-                        kind: 'futures_trade', tradeDate: '2026-08-25',
-                        brokerTimestamp: '2026-08-25T10:00:00', account: 'U1',
-                        futureExpiry: '202609', futureConId: 1001,
-                        futureContracts: 1, sharesPerContract: 50,
-                        price: 4990, cashAmount: 0, fees: 0,
-                        source: 'csv_import', tag: '',
-                    }],
-                };
-                assert.deepEqual(Array.from(
-                    page.planTwsBaselineSupersession(covering, [adopted]).eventIds),
-                ['adopted-fut-1']);
-                covering.events[0].brokerTimestamp = '2026-08-26T13:00:00';
-                covering.events[0].tradeDate = '2026-08-26';
-                assert.deepEqual(Array.from(
-                    page.planTwsBaselineSupersession(covering, [adopted]).eventIds), []);
+                assert.doesNotMatch(html, /value="futures_(?:trade|roll)"/);
+                const legacy = /futureKey|futures_roll|futures_trade|openFutures|futuresAvgCost|future_leg|'FOP'/;
+                const read = (file) => fs.readFileSync(path.join(PROJECT_ROOT, file), 'utf8');
+                assert.doesNotMatch(source, legacy);
+                assert.doesNotMatch(read('js/cost_basis_core.js'), legacy);
+                assert.doesNotMatch(read('js/cost_basis_import.js'), legacy);
+                const core = loadPage().OptionComboCostBasisCore;
+                assert.throws(() => core.computeLedger([], { secType: 'FUT' }), /standalone FOP ledger/);
+                assert.throws(() => core.buildReconciliation({ secType: 'FUT' }), /standalone FOP ledger/);
+                assert.throws(() => core.buildExecutionImport([], { secType: 'FUT' }), /standalone FOP ledger/);
+                // FUT and FOP fills of a stock ledger's account are skipped, never booked.
+                const fill = (secType, execId) => ({ execId, account: 'U7654321', symbol: 'TQQQ', secType, conId: 42,
+                    localSymbol: 'TQQQ', expiry: '20260918', right: 'P', strike: 71, multiplier: 100, side: 'BOT',
+                    quantity: 1, price: 1.25, brokerTimestamp: '2026-09-01T10:15:20', commission: 1,
+                    commissionAvailable: true });
+                const fills = core.buildExecutionImport([fill('FUT', '0001.01'), fill('FOP', '0001.02')],
+                    { account: 'U7654321', symbol: 'TQQQ', secType: 'STK', defaultSharesPerContract: 100,
+                        existingExternalRefs: [] });
+                assert.deepEqual([fills.events.length, fills.summary.skipped], [0, 2]);
             },
         },
         {

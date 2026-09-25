@@ -225,12 +225,6 @@ function verify() {
  assert.equal(sameTimeAppend.ledgerPreview.warnings.length,0,
   'preview must use the same insertion sequence as the store for same-second trades');
  assert.ok(sameTimeAppend.ledgerPreview.positions.every(p=>p.after===p.statement));
- setup([]);
- h.state.books[0].secType='FUT';h.state.books[0].symbol='ES';h.state.books[0].defaultSharesPerContract=50;
- const future={kind:'futures_trade',account,tradeDate:'2026-09-01',futureExpiry:'202609',futureContracts:1,sharesPerContract:50,price:5100,cashAmount:-2,fees:2,source:'csv_import',externalRef:'future-1'};
- const preview=h.preview({events:[future],openings:{closingFutures:[{account,futureExpiry:'202609',sharesPerContract:50,quantity:1}]}},false,[]);
- const position=preview.positions.find(p=>p.key.startsWith('future-'));
- assert.equal(position.before,0);assert.equal(position.after,1);assert.equal(position.statement,1);
 
  // Stored history already strands one close (a legacy overdraw row the store
  // accepted). That is reported but cannot block an unrelated row; a second
