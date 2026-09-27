@@ -7,7 +7,7 @@
     "Python suites are checked for their listed cases and run separately with unittest (§14.4).",
     "A requirement tag with a parenthesised qualifier covers only that part of the F item; the item is complete only when its last dependent stage passes (§14.4)."
   ],
-  "stages": ["P0", "P1", "P2", "P3", "P4", "P5", "P6"],
+  "stages": ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7"],
   "sources": ["synthetic", "deidentified_real"],
   "suites": [
     {
@@ -52,7 +52,7 @@
         { "name": "a stage with no registered case fails, and so does every later stage", "requirements": ["§14.4 (stage runner)"] },
         { "name": "a gap before the target stage fails even when the target has cases", "requirements": ["§14.4 (stage runner)"] },
         { "name": "an unknown stage is a usage error", "requirements": ["§14.4 (stage runner)"] },
-        { "name": "every stage through P6 is registered, and the real runner refuses P7, which has no command", "requirements": ["§14.4 (stage runner)"] }
+        { "name": "every stage through P7 is registered, and the real runner refuses P8, which the plan does not have", "requirements": ["§14.4 (stage runner)"] }
       ]
     },
     {
@@ -477,6 +477,30 @@
         { "name": "CampaignTests.test_generated_histories_are_valid_and_keep_their_instants_apart", "requirements": ["P6 step 2 (generator validity)"] },
         { "name": "CampaignTests.test_a_wrong_figure_is_caught_and_reduced_to_the_same_stage", "requirements": ["P6 step 2 (a failure is caught and reduced to a replayable case)"] }
       ]
+    },
+    {
+      "stage": "P7",
+      "runtime": "python",
+      "file": "tests/cost_basis_fop_stress_contract_test.py",
+      "cases": [
+        { "name": "PricerTests.test_every_pricer_case", "requirements": ["P7 design: model domain (stress contract §3)", "F15"] },
+        { "name": "PricerTests.test_the_black76_steps_are_the_formula", "requirements": ["P7 design: hand-computable Black-76 (stress contract §3.3)"] },
+        { "name": "CalibrationTests.test_round_trips_and_bounds", "requirements": ["P7 design: implied volatility and its stops (stress contract §4.1)"] },
+        { "name": "ScenarioTests.test_every_vector_reproduces", "requirements": ["P7 design: every stress vector (stress contract §12)"] },
+        { "name": "ScenarioTests.test_t0_is_the_ledger_valuation", "requirements": ["P7 design: t=0 equals the ledger (plan §13.3 P7)"] },
+        { "name": "ScenarioTests.test_futures_without_options_are_linear_month_by_month", "requirements": ["P7 design: futures-only P&L is linear per month (plan §13.3 P7)", "F15"] },
+        { "name": "ScenarioTests.test_an_early_assignment_of_a_short_gains_exactly_the_time_value", "requirements": ["P7 design: early delivery conserves (plan §13.3 P7)"] },
+        { "name": "ScenarioTests.test_an_option_is_priced_off_its_own_future", "requirements": ["P7 design: per-month curve (plan §12.2)"] },
+        { "name": "ScenarioTests.test_the_band_holds_the_center", "requirements": ["P7 design: IV band (stress contract §7.4)"] },
+        { "name": "ScenarioTests.test_a_scenario_changes_none_of_its_inputs", "requirements": ["P7 design: scenarios write nothing (plan §13.3 P7)"] },
+        { "name": "IndependenceTests.test_the_reference_model_uses_no_production_code", "requirements": ["P7 design: independent reference model (plan §14.2)"] },
+        { "name": "BoundaryTests.test_a_date_only_last_trade_is_read_on_the_exchange_date", "requirements": ["P7 design review: a date-only last trade, by the Chicago date (stress contract §6.2)"] },
+        { "name": "BoundaryTests.test_a_date_only_expiry_is_1330_chicago_through_daylight_saving", "requirements": ["P7 design review: a date-only expiry at 13:30 Chicago, CDT and CST (stress contract §3.4)"] },
+        { "name": "BoundaryTests.test_an_early_delivery_moves_the_pnl_by_n_mult_intrinsic_minus_value", "requirements": ["P7 design review: early delivery sign for shorts and longs (stress contract §6.3)"] },
+        { "name": "BoundaryTests.test_only_an_american_option_in_the_money_is_delivered_early", "requirements": ["P7 design review: which early deliveries are refused or not made (stress contract §6.3)"] },
+        { "name": "BoundaryTests.test_at_expiry_a_non_positive_future_still_has_its_intrinsic_value", "requirements": ["P7 design review: tau = 0 before the F <= 0 stop (stress contract §3.1)", "F15"] },
+        { "name": "BoundaryTests.test_a_flat_ledger_has_nothing_to_move", "requirements": ["P7 design review: no open position (stress contract §7.5)"] }
+      ]
     }
   ],
   "fixtures": [
@@ -491,6 +515,7 @@
     { "id": "core_output", "file": "tests/fixtures/cost_basis_fop/contract/core_output.json", "source": "synthetic", "requirements": ["P1 step 3"] },
     { "id": "runtime_protocol", "file": "cost_basis_fop_protocol.json", "source": "synthetic", "requirements": ["P2 item 1"] },
     { "id": "core_vectors", "file": "tests/fixtures/cost_basis_fop/core_vectors.json", "source": "synthetic", "requirements": ["P3 step 1", "§5.4", "§9.6"] },
-    { "id": "statements", "file": "tests/fixtures/cost_basis_fop/statements/README.md", "source": "synthetic", "requirements": ["P4 step 1", "F21", "F22"] }
+    { "id": "statements", "file": "tests/fixtures/cost_basis_fop/statements/README.md", "source": "synthetic", "requirements": ["P4 step 1", "F21", "F22"] },
+    { "id": "stress_vectors", "file": "tests/fixtures/cost_basis_fop/stress_vectors.json", "source": "synthetic", "requirements": ["P7 design acceptance (stress contract §12)"] }
   ]
 }

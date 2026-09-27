@@ -12,7 +12,7 @@
 >
 > 数据现状（2026-09-24 确认）：macOS 本机 `cost_basis.db` 只有 STK 账本，用户确认 Windows 机器上也没有 FUT 账本。因此本计划不设计旧 FUT/FOP 数据的语义迁移（§8.2）。
 >
-> 2026-09-24 的审计意见已并入正文，逐项处理记录见 §16；第二轮实施就绪审查见 §17；第三轮修订见 §18。各阶段执行清单见 §13.3，验证入口见 §14.4。**可以开始 P0–P1。存储 DDL 与协议按领域模型冻结，不等待真实报表；CSV 导入按“行类型能力清单”（§9.7）逐类经真实报表验收后才开放写入，未验收的行类型只能预览。P7 尚不是可直接实施的方案。**
+> 2026-09-24 的审计意见已并入正文，逐项处理记录见 §16；第二轮实施就绪审查见 §17；第三轮修订见 §18。各阶段执行清单见 §13.3，验证入口见 §14.4。**可以开始 P0–P1。存储 DDL 与协议按领域模型冻结，不等待真实报表；CSV 导入按“行类型能力清单”（§9.7）逐类经真实报表验收后才开放写入，未验收的行类型只能预览。P7 的压力契约（[COST_BASIS_FOP_STRESS_CONTRACT.md](COST_BASIS_FOP_STRESS_CONTRACT.md)）已于 2026-09-27 通过设计验收，按契约 §13 实施；实施完成并经复核前压力按钮不可用。**
 >
 > [原 FUT/FOP/ROLL 计划](COST_BASIS_FOP_FUTURES_ROLL_PLAN.md)保留为历史实现记录；本计划定义下一版 FOP 的产品与实现契约。股票账本继续遵守[账本设计](COST_BASIS_LEDGER_PAGE_PLAN.md)、[导入完整性](COST_BASIS_IMPORT_INTEGRITY.md)、[公司行动计划](COST_BASIS_CORPORATE_ACTIONS_PLAN.md)中的适用规则。
 
@@ -808,6 +808,10 @@ D月市价71.8时，累计经济盈亏 = -500 + 1000 + 1200 − 30 = 1670
 
 #### P7 — 后续设计门槛，当前不得直接进入实现
 
+**2026-09-26：** 契约与可运行的设计验收已提交，见[压力契约](COST_BASIS_FOP_STRESS_CONTRACT.md)：逐月价格与 IV 输入、模型适用范围、负 FUT、到期与提前交割路径、版本/取消协议、18 个情景向量和独立参考模型，由 `--stage P7` 运行。实施清单在契约 §13。
+
+**2026-09-27：** 经一轮复核修正（日期回退、提前交割的符号与范围、到期时的非正期货价、无持仓），设计验收通过。下一步按契约 §13 实施。
+
 本阶段尚无冻结的期限曲线输入、模型选择/校准、逐腿截止/交割路径和Worker协议，因此不能说已经有完整编码步骤。下一项具体工作是单独提交 FOP 压力契约：给出逐月价格与IV输入、模型适用范围、负FUT处理、到期路径、输入版本/取消协议和可手算向量，再写该阶段代码/测试清单。设计验收至少证明 t=0 与账本估值一致、无期权组合为逐月线性盈亏、到期/提前交割路径守恒、缺报价/不支持模型停止、场景不写库；通过后另定实施阶段。它不阻塞P0–P6基础记账发布。
 
 ## 14. 验收矩阵
@@ -902,7 +906,7 @@ D月市价71.8时，累计经济盈亏 = -500 + 1000 + 1200 − 30 = 1670
 | P4 | `node tests/run_cost_basis_fop.js --stage P4`；`python3 -m unittest discover -s tests -p 'cost_basis_fop_*_test.py'` | pipeline必须调用真实预览/真实store；实样与synthetic分别统计 |
 | P5 | `node tests/run_cost_basis_fop.js --stage P5`；`node scripts/verify_cost_basis_fop_browser.js --fixture-set synthetic`，或按 §13.3 P5 的替代方式在应用内浏览器执行 `scripts/cost_basis_fop_browser_assertions.js` | 两种方式都没有实际运行断言脚本即未验收；记录所用方式；无真实网络，页面错误为0 |
 | P6 | `node tests/run.js`；`python3 -m unittest discover -s tests -p '*_test.py'`；浏览器断言按P5的方式对 `real` 集合执行；`python3 scripts/verify_cost_basis_fop_randomized.py --seed 0 --cases 2000 --steps 80 --store-cases 300`；`python3 scripts/stamp_asset_versions.py --check` | real集合只含已取得样本的行类型，逐键判定；缺样本的键保持 `synthetic_only`，不算失败；随机失败可重放；依赖相关的关键skip不得计为通过；备份演练/文档/敏感信息检查另签 |
-| P7 | 待独立压力契约确定后定义 | 当前没有实施命令，不假装已纳入基础记账测试 |
+| P7 | 设计验收：`python3 -m unittest discover -s tests -p 'cost_basis_fop_stress_contract_test.py'`；`node tests/run_cost_basis_fop.js --stage P7`。实施后另加契约 §13 的 JS、页面、worker 与浏览器套件 | 向量来自手算与独立参考模型，不来自生产代码；设计已验收（2026-09-27），实施完成并经复核前压力按钮不可用 |
 
 测试产物写临时目录并输出其位置；发布记录只保存脱敏摘要及可复跑方式。对每个F编号可有多个阶段的子断言，只有最后依赖阶段及真实格式门槛都通过才整体标完成。所有无效请求同时断言数据库图和覆盖证明不变；仅断言返回报错不足以证明原子性。
 
@@ -919,7 +923,7 @@ D月市价71.8时，累计经济盈亏 = -500 + 1000 + 1200 − 30 = 1670
 - [ ] P1 DDL/协议按领域模型冻结。
 - [ ] 各行类型取得真实样本并按 §9.7 逐键验收（持续进行，不阻塞发布）。
 - [ ] P0–P6 实现与验收。
-- [ ] P7 FOP 完整压力分析的独立契约、实现与验收。
+- [ ] P7 FOP 完整压力分析的独立契约、实现与验收（契约已通过设计验收，2026-09-27；实现未开始）。
 
 本文件的勾选只表示计划内容已写明，不表示任何新增运行功能、数据库迁移或真实 CL 验收已经完成。
 

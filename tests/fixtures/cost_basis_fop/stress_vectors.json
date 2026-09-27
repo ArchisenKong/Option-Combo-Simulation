@@ -1,0 +1,2334 @@
+{
+ "format": "cost-basis-fop-stress-vectors",
+ "version": 1,
+ "source": "synthetic",
+ "contract": "CODE PLAN/COST_BASIS_FOP_STRESS_CONTRACT.md",
+ "description": "Vectors of the FOP stress contract (plan §12.2, §13.3 P7). A vector is a ledger in the compact event form of core_vectors.json over this catalogue, the quotes of one batch (bid/ask for a live mid, or mark and level), a discount rate and scenario points. Hand-worked figures are kept under hand* keys; model figures (sigma, option values, changes with open options) come from the independent reference model tests/helpers/cost_basis_fop_stress_model.py, never from production code. economicPnlModelAnchored is the rational ledger model's replay of the ledger plus the scenario settlements at the scenario marks; change is the position-based change against the anchor, and the two agree (conservation).",
+ "pointFields": {
+  "shift": "dollars per barrel added to every futures month",
+  "slope": "dollars per barrel per contract month after the reference month",
+  "horizonDays": "whole days after asOf",
+  "ivScale": "factor on every implied volatility",
+  "early": "options delivered at the horizon"
+ },
+ "contracts": {
+  "F7": {
+   "secType": "FUT",
+   "contractId": "fut-clf7-0001",
+   "localSymbol": "CLF7",
+   "month": "202701",
+   "lastTrade": "2026-12-17",
+   "lastTradeAt": "2026-12-17T19:30:00Z",
+   "conId": 556
+  },
+  "G7": {
+   "secType": "FUT",
+   "contractId": "fut-clg7-0001",
+   "localSymbol": "CLG7",
+   "month": "202702",
+   "lastTrade": "2027-01-20",
+   "lastTradeAt": "2027-01-20T19:30:00Z",
+   "conId": 557
+  },
+  "C80": {
+   "secType": "FOP",
+   "contractId": "fop-lof7-c80-01",
+   "localSymbol": "LOF7 C8000",
+   "right": "C",
+   "strike": 80,
+   "expiry": "2026-12-14",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "future": "F7",
+   "exerciseStyle": "american",
+   "conId": 9101
+  },
+  "P65": {
+   "secType": "FOP",
+   "contractId": "fop-lof7-p65-01",
+   "localSymbol": "LOF7 P6500",
+   "right": "P",
+   "strike": 65,
+   "expiry": "2026-12-14",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "future": "F7",
+   "exerciseStyle": "american",
+   "conId": 9102
+  },
+  "A70": {
+   "secType": "FOP",
+   "contractId": "fop-lof7-c70-01",
+   "localSymbol": "LOF7 C7000",
+   "right": "C",
+   "strike": 70,
+   "expiry": "2026-12-14",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "future": "F7",
+   "exerciseStyle": "american",
+   "conId": 9103
+  },
+  "E70": {
+   "secType": "FOP",
+   "contractId": "fop-e-f7-c70-01",
+   "localSymbol": "E F7 C7000",
+   "right": "C",
+   "strike": 70,
+   "expiry": "2026-12-14",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "future": "F7",
+   "exerciseStyle": "european",
+   "conId": 9104
+  },
+  "G85": {
+   "secType": "FOP",
+   "contractId": "fop-log7-c85-01",
+   "localSymbol": "LOG7 C8500",
+   "right": "C",
+   "strike": 85,
+   "expiry": "2027-01-14",
+   "expiryAt": "2027-01-14T19:30:00Z",
+   "future": "G7",
+   "exerciseStyle": "american",
+   "conId": 9105
+  },
+  "U80": {
+   "secType": "FOP",
+   "contractId": "fop-lof7-c80-u1",
+   "localSymbol": "LOF7 C8000 (unbound)",
+   "right": "C",
+   "strike": 80,
+   "expiry": "2026-12-14",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "future": null,
+   "exerciseStyle": "american",
+   "conId": 9106
+  },
+  "Z6": {
+   "secType": "FUT",
+   "contractId": "fut-clz6-0001",
+   "localSymbol": "CLZ6",
+   "month": "202612",
+   "lastTrade": "2026-11-19",
+   "conId": 555
+  },
+  "D7": {
+   "secType": "FUT",
+   "contractId": "fut-clf7-date",
+   "localSymbol": "CLF7 (date only)",
+   "month": "202701",
+   "lastTrade": "2026-12-17",
+   "conId": 5561
+  },
+  "ZC70": {
+   "secType": "FOP",
+   "contractId": "fop-loz6-c70-date",
+   "localSymbol": "LOZ6 C7000 (date only)",
+   "right": "C",
+   "strike": 70,
+   "expiry": "2026-10-30",
+   "future": "Z6",
+   "exerciseStyle": "american",
+   "conId": 9107
+  },
+  "W80": {
+   "secType": "FOP",
+   "contractId": "fop-lof7-c80-date",
+   "localSymbol": "LOF7 C8000 (date only)",
+   "right": "C",
+   "strike": 80,
+   "expiry": "2026-12-14",
+   "future": "F7",
+   "exerciseStyle": "american",
+   "conId": 9108
+  },
+  "DP65": {
+   "secType": "FOP",
+   "contractId": "fop-lof7-p65-date",
+   "localSymbol": "LOF7 P6500 (on the date-only CLF7)",
+   "right": "P",
+   "strike": 65,
+   "expiry": "2026-12-14",
+   "future": "D7",
+   "exerciseStyle": "american",
+   "conId": 9109
+  }
+ },
+ "pricers": [
+  {
+   "name": "Black-76 call step by step (European)",
+   "model": "black76",
+   "right": "C",
+   "future": 72,
+   "strike": 70,
+   "asOf": "2026-11-16T15:00:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "tau": 0.07722602739726027,
+    "discount": 0.9969157250826521,
+    "d1": 0.33826637204177323,
+    "d2": 0.24100287243290464,
+    "Nd1": 0.6324187685904528,
+    "Nd2": 0.59522355487265,
+    "value": 3.8565709722065895
+   }
+  },
+  {
+   "name": "Black-76 put by put-call parity: P = C - exp(-rT)(F - K)",
+   "model": "black76",
+   "right": "P",
+   "future": 72,
+   "strike": 70,
+   "asOf": "2026-11-16T15:00:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": 1.8627395220412855,
+    "parity": 1.8627395220412852
+   }
+  },
+  {
+   "name": "American (CRR 201 steps, futures) is at least the European value",
+   "model": "american",
+   "right": "C",
+   "future": 72,
+   "strike": 70,
+   "asOf": "2026-11-16T15:00:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": 3.861769659964328,
+    "europeanValue": 3.8565709722065895
+   }
+  },
+  {
+   "name": "at a zero rate early exercise is worth nothing: CRR is Black-76 up to the tree error",
+   "model": "american",
+   "right": "C",
+   "future": 72,
+   "strike": 70,
+   "asOf": "2026-11-16T15:00:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.0,
+   "sigma": 0.35,
+   "expect": {
+    "value": 3.871627189417507,
+    "europeanValue": 3.8685024974271016,
+    "treeErrorBound": 0.01
+   }
+  },
+  {
+   "name": "zero volatility: the American value on a future is its intrinsic value",
+   "model": "american",
+   "right": "C",
+   "future": 72,
+   "strike": 70,
+   "asOf": "2026-11-16T15:00:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.0,
+   "expect": {
+    "value": 2.0
+   }
+  },
+  {
+   "name": "zero volatility: the European value is the discounted intrinsic value",
+   "model": "black76",
+   "right": "C",
+   "future": 72,
+   "strike": 70,
+   "asOf": "2026-11-16T15:00:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.0,
+   "expect": {
+    "value": 1.9938314501653043
+   }
+  },
+  {
+   "name": "american stops at a future price of 0 (no epsilon)",
+   "model": "american",
+   "right": "P",
+   "future": 0,
+   "strike": 65,
+   "asOf": "2026-11-16T15:00:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": null
+   }
+  },
+  {
+   "name": "american stops at a future price of -3 (no epsilon)",
+   "model": "american",
+   "right": "P",
+   "future": -3,
+   "strike": 65,
+   "asOf": "2026-11-16T15:00:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": null
+   }
+  },
+  {
+   "name": "black76 stops at a future price of 0 (no epsilon)",
+   "model": "black76",
+   "right": "P",
+   "future": 0,
+   "strike": 65,
+   "asOf": "2026-11-16T15:00:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": null
+   }
+  },
+  {
+   "name": "black76 stops at a future price of -3 (no epsilon)",
+   "model": "black76",
+   "right": "P",
+   "future": -3,
+   "strike": 65,
+   "asOf": "2026-11-16T15:00:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": null
+   }
+  },
+  {
+   "name": "american at expiry: P K=65 at F=-3 is intrinsic 68.0 (F <= 0 allowed)",
+   "model": "american",
+   "right": "P",
+   "future": -3,
+   "strike": 65,
+   "asOf": "2026-12-14T19:30:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": 68.0
+   }
+  },
+  {
+   "name": "american at expiry: P K=65 at F=0 is intrinsic 65.0 (F <= 0 allowed)",
+   "model": "american",
+   "right": "P",
+   "future": 0,
+   "strike": 65,
+   "asOf": "2026-12-14T19:30:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": 65.0
+   }
+  },
+  {
+   "name": "american at expiry: C K=65 at F=-3 is intrinsic 0.0 (F <= 0 allowed)",
+   "model": "american",
+   "right": "C",
+   "future": -3,
+   "strike": 65,
+   "asOf": "2026-12-14T19:30:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": 0.0
+   }
+  },
+  {
+   "name": "black76 at expiry: P K=65 at F=-3 is intrinsic 68.0 (F <= 0 allowed)",
+   "model": "black76",
+   "right": "P",
+   "future": -3,
+   "strike": 65,
+   "asOf": "2026-12-14T19:30:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": 68.0
+   }
+  },
+  {
+   "name": "black76 at expiry: P K=65 at F=0 is intrinsic 65.0 (F <= 0 allowed)",
+   "model": "black76",
+   "right": "P",
+   "future": 0,
+   "strike": 65,
+   "asOf": "2026-12-14T19:30:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": 65.0
+   }
+  },
+  {
+   "name": "black76 at expiry: C K=65 at F=-3 is intrinsic 0.0 (F <= 0 allowed)",
+   "model": "black76",
+   "right": "C",
+   "future": -3,
+   "strike": 65,
+   "asOf": "2026-12-14T19:30:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": 0.0
+   }
+  },
+  {
+   "name": "at expiry (tau = 0) the value is intrinsic whatever the sign of F - K",
+   "model": "american",
+   "right": "P",
+   "future": 60,
+   "strike": 65,
+   "asOf": "2026-12-14T19:30:00Z",
+   "expiryAt": "2026-12-14T19:30:00Z",
+   "rate": 0.04,
+   "sigma": 0.35,
+   "expect": {
+    "value": 5.0
+   }
+  }
+ ],
+ "calibration": [
+  {
+   "name": "C80 mid 1.2 round trip",
+   "option": "C80",
+   "future": 72,
+   "mark": 1.2,
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "expect": {
+    "sigma": 0.4745681485418277,
+    "repriced": 1.2000000000000015
+   }
+  },
+  {
+   "name": "P65 mid 0.5 round trip",
+   "option": "P65",
+   "future": 72,
+   "mark": 0.5,
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "expect": {
+    "sigma": 0.350360233790889,
+    "repriced": 0.5000000000000312
+   }
+  },
+  {
+   "name": "A70 (intrinsic 2 at F=72) mid 1.9: quote_below_model_floor",
+   "option": "A70",
+   "future": 72,
+   "mark": 1.9,
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "expect": {
+    "stop": "quote_below_model_floor"
+   }
+  },
+  {
+   "name": "A70 (intrinsic 2 at F=72) mid 72.5: quote_above_model_ceiling",
+   "option": "A70",
+   "future": 72,
+   "mark": 72.5,
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "expect": {
+    "stop": "quote_above_model_ceiling"
+   }
+  }
+ ],
+ "vectors": [
+  {
+   "name": "t=0: the anchor is the ledger valuation",
+   "contract": "§7.1",
+   "requirements": [
+    "P7 design: t=0 equals the ledger"
+   ],
+   "note": "Ledger at quote mids: Uf=1000*(72-70)=2000, Co=+1500-800=700, Vo=-1000*1.2+1000*0.5=-700, economicPnl=2000. At the anchor point the change is exactly 0: both sides are the same model evaluation.",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "C80",
+     "q": -1,
+     "price": 1.5
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-02T15:10:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.8
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "C80": {
+     "bid": 1.19,
+     "ask": 1.21
+    },
+    "P65": {
+     "bid": 0.49,
+     "ask": 0.51
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "F7": 72.0
+     },
+     "sigma": {
+      "C80": 0.4745681485418277,
+      "P65": 0.350360233790889
+     },
+     "value": {
+      "C80": 1.2000000000000015,
+      "P65": 0.5000000000000312
+     },
+     "ledgerEconomicPnl": 2000.0,
+     "reference": "F7",
+     "handLedgerEconomicPnl": 2000
+    },
+    "points": [
+     {
+      "available": true,
+      "futures": {
+       "F7": 72.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "C80": 1.2000000000000015,
+       "P65": 0.5000000000000312
+      },
+      "notDelivered": [],
+      "change": 0.0,
+      "economicPnlModelAnchored": 2000.0000000000298,
+      "handChange": 0,
+      "handEconomicPnl": 2000
+     },
+     {
+      "shift": 5,
+      "available": true,
+      "futures": {
+       "F7": 77.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "C80": 2.796007268597244,
+       "P65": 0.11311040233725131
+      },
+      "notDelivered": [],
+      "change": 3017.1031337399772,
+      "economicPnlModelAnchored": 5017.103133740007
+     },
+     {
+      "shift": -5,
+      "available": true,
+      "futures": {
+       "F7": 67.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "C80": 0.3950554061808818,
+       "P65": 1.6829666028058317
+      },
+      "notDelivered": [],
+      "change": -3012.0888033750794,
+      "economicPnlModelAnchored": -1012.0888033750501
+     },
+     {
+      "horizonDays": 10,
+      "available": true,
+      "futures": {
+       "F7": 72.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "C80": 0.676542018061112,
+       "P65": 0.23889718309388355
+      },
+      "notDelivered": [],
+      "change": 262.3551650327418,
+      "economicPnlModelAnchored": 2262.3551650327718
+     },
+     {
+      "ivScale": 1.2,
+      "available": true,
+      "futures": {
+       "F7": 72.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "C80": 1.8105272682561089,
+       "P65": 0.8374945134589117
+      },
+      "notDelivered": [],
+      "change": -273.0327547972269,
+      "economicPnlModelAnchored": 1726.9672452028028
+     }
+    ],
+    "band": {
+     "fraction": 0.2,
+     "points": [
+      {
+       "shift": 0,
+       "lower": -273.0327547972269,
+       "upper": 266.9076111137323
+      },
+      {
+       "shift": 5,
+       "lower": 2383.273918758125,
+       "upper": 3719.2126656913115
+      },
+      {
+       "horizonDays": 10,
+       "lower": 47.510131756769496,
+       "upper": 461.264825872461
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "no options: every futures month moves linearly, negative prices included",
+   "contract": "§7.2",
+   "requirements": [
+    "P7 design: futures-only P&L is linear per month",
+    "F15"
+   ],
+   "note": "Ledger: Uf = 2*1000*(72-70) - 1*1000*(72.5-71) = 2500. change = 2*1000*d - 1000*(d + s*1) (G7 is one month after the reference month F7). d=-100 puts CLF7 at -28: valid for futures. Time changes nothing without options; 40 days passes CLF7's last trade (2026-12-17) and stops.",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 2,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:01:00Z",
+     "kind": "futures_trade",
+     "contract": "G7",
+     "q": -1,
+     "price": 71
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "mark": 72,
+     "level": "mid"
+    },
+    "G7": {
+     "mark": 72.5,
+     "level": "one_sided_conservative"
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "F7": 72,
+      "G7": 72.5
+     },
+     "sigma": {},
+     "value": {},
+     "ledgerEconomicPnl": 2500.0,
+     "reference": "F7",
+     "handLedgerEconomicPnl": 2500
+    },
+    "points": [
+     {
+      "shift": -100,
+      "available": true,
+      "futures": {
+       "F7": -28,
+       "G7": -27.5
+      },
+      "positions": {
+       "F7": 2,
+       "G7": -1
+      },
+      "settlements": [],
+      "values": {},
+      "notDelivered": [],
+      "change": -100000.0,
+      "economicPnlModelAnchored": -97500.0,
+      "handChange": -100000,
+      "handEconomicPnl": -97500
+     },
+     {
+      "shift": -10,
+      "available": true,
+      "futures": {
+       "F7": 62,
+       "G7": 62.5
+      },
+      "positions": {
+       "F7": 2,
+       "G7": -1
+      },
+      "settlements": [],
+      "values": {},
+      "notDelivered": [],
+      "change": -10000.0,
+      "economicPnlModelAnchored": -7500.0,
+      "handChange": -10000,
+      "handEconomicPnl": -7500
+     },
+     {
+      "shift": 0,
+      "available": true,
+      "futures": {
+       "F7": 72,
+       "G7": 72.5
+      },
+      "positions": {
+       "F7": 2,
+       "G7": -1
+      },
+      "settlements": [],
+      "values": {},
+      "notDelivered": [],
+      "change": 0.0,
+      "economicPnlModelAnchored": 2500.0,
+      "handChange": 0,
+      "handEconomicPnl": 2500
+     },
+     {
+      "shift": 5,
+      "available": true,
+      "futures": {
+       "F7": 77,
+       "G7": 77.5
+      },
+      "positions": {
+       "F7": 2,
+       "G7": -1
+      },
+      "settlements": [],
+      "values": {},
+      "notDelivered": [],
+      "change": 5000.0,
+      "economicPnlModelAnchored": 7500.0,
+      "handChange": 5000,
+      "handEconomicPnl": 7500
+     },
+     {
+      "slope": 0.5,
+      "available": true,
+      "futures": {
+       "F7": 72.0,
+       "G7": 73.0
+      },
+      "positions": {
+       "F7": 2,
+       "G7": -1
+      },
+      "settlements": [],
+      "values": {},
+      "notDelivered": [],
+      "change": -500.0,
+      "economicPnlModelAnchored": 2000.0,
+      "handChange": -500,
+      "handEconomicPnl": 2000
+     },
+     {
+      "shift": 5,
+      "slope": 0.5,
+      "available": true,
+      "futures": {
+       "F7": 77.0,
+       "G7": 78.0
+      },
+      "positions": {
+       "F7": 2,
+       "G7": -1
+      },
+      "settlements": [],
+      "values": {},
+      "notDelivered": [],
+      "change": 4500.0,
+      "economicPnlModelAnchored": 7000.0,
+      "handChange": 4500,
+      "handEconomicPnl": 7000
+     },
+     {
+      "shift": 5,
+      "horizonDays": 20,
+      "available": true,
+      "futures": {
+       "F7": 77,
+       "G7": 77.5
+      },
+      "positions": {
+       "F7": 2,
+       "G7": -1
+      },
+      "settlements": [],
+      "values": {},
+      "notDelivered": [],
+      "change": 5000.0,
+      "economicPnlModelAnchored": 7500.0,
+      "handChange": 5000,
+      "handEconomicPnl": 7500
+     },
+     {
+      "shift": 5,
+      "horizonDays": 40,
+      "available": false,
+      "reason": "future_past_last_trade:F7"
+     }
+    ]
+   }
+  },
+  {
+   "name": "expiry inside the horizon: a delivery keeps the economic P&L",
+   "contract": "§6.2",
+   "requirements": [
+    "P7 design: expiry path conserves",
+    "F06"
+   ],
+   "note": "Horizon 2026-12-16 15:00Z: both options expired on 2026-12-14 at the scenario price, CLF7 still trades. CLF7 60: the put is exercised (FUT -1 at 65 closes the long: Rf=-5000), the call expires; with Co=700 the P&L is -4300. 65: both expire, Uf=-5000, -4300. 80: both expire, Uf=10000, 10700. 90: the call is assigned (-1 at 80 closes the long: Rf=10000), 10700. -3: the put still delivers at 65, so a negative CLF7 needs no option model: -4300.",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "C80",
+     "q": -1,
+     "price": 1.5
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-02T15:10:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.8
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "C80": {
+     "bid": 1.19,
+     "ask": 1.21
+    },
+    "P65": {
+     "bid": 0.49,
+     "ask": 0.51
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "F7": 72.0
+     },
+     "sigma": {
+      "C80": 0.4745681485418277,
+      "P65": 0.350360233790889
+     },
+     "value": {
+      "C80": 1.2000000000000015,
+      "P65": 0.5000000000000312
+     },
+     "ledgerEconomicPnl": 2000.0,
+     "reference": "F7",
+     "handLedgerEconomicPnl": 2000
+    },
+    "points": [
+     {
+      "shift": -12,
+      "horizonDays": 30,
+      "available": true,
+      "futures": {
+       "F7": 60.0
+      },
+      "positions": {},
+      "settlements": [
+       {
+        "option": "C80",
+        "action": "expire",
+        "contracts": 1,
+        "closing": 1,
+        "at": "2026-12-14T19:30:00Z"
+       },
+       {
+        "option": "P65",
+        "action": "exercise",
+        "contracts": 1,
+        "closing": -1,
+        "future": "F7",
+        "futureContracts": -1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": -6300.000000000029,
+      "economicPnlModelAnchored": -4300.0,
+      "handEconomicPnl": -4300
+     },
+     {
+      "shift": -7,
+      "horizonDays": 30,
+      "available": true,
+      "futures": {
+       "F7": 65.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [
+       {
+        "option": "C80",
+        "action": "expire",
+        "contracts": 1,
+        "closing": 1,
+        "at": "2026-12-14T19:30:00Z"
+       },
+       {
+        "option": "P65",
+        "action": "expire",
+        "contracts": 1,
+        "closing": -1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": -6300.000000000029,
+      "economicPnlModelAnchored": -4300.0,
+      "handEconomicPnl": -4300
+     },
+     {
+      "shift": 8,
+      "horizonDays": 30,
+      "available": true,
+      "futures": {
+       "F7": 80.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [
+       {
+        "option": "C80",
+        "action": "expire",
+        "contracts": 1,
+        "closing": 1,
+        "at": "2026-12-14T19:30:00Z"
+       },
+       {
+        "option": "P65",
+        "action": "expire",
+        "contracts": 1,
+        "closing": -1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": 8699.99999999997,
+      "economicPnlModelAnchored": 10700.0,
+      "handEconomicPnl": 10700
+     },
+     {
+      "shift": 18,
+      "horizonDays": 30,
+      "available": true,
+      "futures": {
+       "F7": 90.0
+      },
+      "positions": {},
+      "settlements": [
+       {
+        "option": "C80",
+        "action": "assign",
+        "contracts": 1,
+        "closing": 1,
+        "future": "F7",
+        "futureContracts": -1,
+        "at": "2026-12-14T19:30:00Z"
+       },
+       {
+        "option": "P65",
+        "action": "expire",
+        "contracts": 1,
+        "closing": -1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": 8699.99999999997,
+      "economicPnlModelAnchored": 10700.0,
+      "handEconomicPnl": 10700
+     },
+     {
+      "shift": -75,
+      "horizonDays": 30,
+      "available": true,
+      "futures": {
+       "F7": -3.0
+      },
+      "positions": {},
+      "settlements": [
+       {
+        "option": "C80",
+        "action": "expire",
+        "contracts": 1,
+        "closing": 1,
+        "at": "2026-12-14T19:30:00Z"
+       },
+       {
+        "option": "P65",
+        "action": "exercise",
+        "contracts": 1,
+        "closing": -1,
+        "future": "F7",
+        "futureContracts": -1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": -6300.000000000031,
+      "economicPnlModelAnchored": -4300.0,
+      "handEconomicPnl": -4300
+     }
+    ]
+   }
+  },
+  {
+   "name": "an early delivery differs from holding by the option's time value",
+   "contract": "§6.3",
+   "requirements": [
+    "P7 design: early delivery conserves"
+   ],
+   "note": "At CLF7 82, 10 days on, the short C80 is 2 in the money. Assigned at the horizon it delivers FUT -1 at 80, closing the long (Rf=10000). Holding it instead keeps -1000*V. early - hold = n*mult*(intrinsic - V) = -1000*(2 - V): the short gains the time value. At CLF7 60 the long P65 exercised early gives its time value up: 1000*(5 - V) <= 0. At CLF7 72 the C80 is out of the money, so it is not delivered (it stays open, notDelivered says why); 30 days on it has already settled at its expiry; A70 is no option of this ledger.",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "C80",
+     "q": -1,
+     "price": 1.5
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-02T15:10:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.8
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "C80": {
+     "bid": 1.19,
+     "ask": 1.21
+    },
+    "P65": {
+     "bid": 0.49,
+     "ask": 0.51
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "F7": 72.0
+     },
+     "sigma": {
+      "C80": 0.4745681485418277,
+      "P65": 0.350360233790889
+     },
+     "value": {
+      "C80": 1.2000000000000015,
+      "P65": 0.5000000000000312
+     },
+     "ledgerEconomicPnl": 2000.0,
+     "reference": "F7"
+    },
+    "points": [
+     {
+      "shift": 10,
+      "horizonDays": 10,
+      "available": true,
+      "futures": {
+       "F7": 82.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "C80": 4.50654458640085,
+       "P65": 0.002346301738343742
+      },
+      "notDelivered": [],
+      "change": 6195.801715337464,
+      "economicPnlModelAnchored": 8195.801715337493
+     },
+     {
+      "shift": 10,
+      "horizonDays": 10,
+      "early": [
+       "C80"
+      ],
+      "available": true,
+      "futures": {
+       "F7": 82.0
+      },
+      "positions": {},
+      "settlements": [
+       {
+        "option": "C80",
+        "action": "assign",
+        "contracts": 1,
+        "closing": 1,
+        "future": "F7",
+        "futureContracts": -1,
+        "at": "2026-11-26T15:00:00Z"
+       }
+      ],
+      "values": {
+       "P65": 0.002346301738343742
+      },
+      "notDelivered": [],
+      "change": 8702.346301738315,
+      "economicPnlModelAnchored": 10702.346301738344
+     },
+     {
+      "shift": -12,
+      "horizonDays": 10,
+      "available": true,
+      "futures": {
+       "F7": 60.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "C80": 0.007198757501954955,
+       "P65": 5.381329818088529
+      },
+      "notDelivered": [],
+      "change": -5925.868939413455,
+      "economicPnlModelAnchored": -3925.868939413426
+     },
+     {
+      "shift": -12,
+      "horizonDays": 10,
+      "early": [
+       "P65"
+      ],
+      "available": true,
+      "futures": {
+       "F7": 60.0
+      },
+      "positions": {},
+      "settlements": [
+       {
+        "option": "P65",
+        "action": "exercise",
+        "contracts": 1,
+        "closing": -1,
+        "future": "F7",
+        "futureContracts": -1,
+        "at": "2026-11-26T15:00:00Z"
+       }
+      ],
+      "values": {
+       "C80": 0.007198757501954955
+      },
+      "notDelivered": [],
+      "change": -6307.198757501985,
+      "economicPnlModelAnchored": -4307.198757501955
+     },
+     {
+      "horizonDays": 10,
+      "early": [
+       "C80"
+      ],
+      "available": true,
+      "futures": {
+       "F7": 72.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "C80": 0.676542018061112,
+       "P65": 0.23889718309388355
+      },
+      "notDelivered": [
+       {
+        "option": "C80",
+        "why": "out_of_the_money"
+       }
+      ],
+      "change": 262.3551650327418,
+      "economicPnlModelAnchored": 2262.3551650327718
+     },
+     {
+      "shift": 10,
+      "horizonDays": 30,
+      "early": [
+       "C80"
+      ],
+      "available": true,
+      "futures": {
+       "F7": 82.0
+      },
+      "positions": {},
+      "settlements": [
+       {
+        "option": "C80",
+        "action": "assign",
+        "contracts": 1,
+        "closing": 1,
+        "future": "F7",
+        "futureContracts": -1,
+        "at": "2026-12-14T19:30:00Z"
+       },
+       {
+        "option": "P65",
+        "action": "expire",
+        "contracts": 1,
+        "closing": -1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [
+       {
+        "option": "C80",
+        "why": "settled_at_expiry"
+       }
+      ],
+      "change": 8699.99999999997,
+      "economicPnlModelAnchored": 10700.0
+     },
+     {
+      "early": [
+       "A70"
+      ],
+      "available": false,
+      "reason": "early_delivery_unknown:A70"
+     }
+    ]
+   }
+  },
+  {
+   "name": "each option is priced off its own future: a curve slope moves CLG7 alone",
+   "contract": "§5.1",
+   "requirements": [
+    "P7 design: per-month curve"
+   ],
+   "note": "CLG7 is not held, but LOG7 C8500 is bound to it, so its quote is an anchor. With slope 2 and no shift CLF7 stays at 72 and CLG7 moves to 74.5; only the option changes.",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "G85",
+     "q": -1,
+     "price": 1.0
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "G7": {
+     "bid": 72.49,
+     "ask": 72.51
+    },
+    "G85": {
+     "bid": 0.89,
+     "ask": 0.91
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "F7": 72.0,
+      "G7": 72.5
+     },
+     "sigma": {
+      "G85": 0.3775100667108826
+     },
+     "value": {
+      "G85": 0.9000000000000036
+     },
+     "ledgerEconomicPnl": 2100.0,
+     "reference": "F7"
+    },
+    "points": [
+     {
+      "slope": 2,
+      "available": true,
+      "futures": {
+       "F7": 72.0,
+       "G7": 74.5
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "G85": 1.2819963188154635
+      },
+      "notDelivered": [],
+      "change": -381.9963188154599,
+      "economicPnlModelAnchored": 1718.0036811845364
+     },
+     {
+      "shift": 3,
+      "available": true,
+      "futures": {
+       "F7": 75.0,
+       "G7": 75.5
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "G85": 1.5013374558085166
+      },
+      "notDelivered": [],
+      "change": 2398.662544191487,
+      "economicPnlModelAnchored": 4498.662544191483
+     },
+     {
+      "shift": 3,
+      "slope": 2,
+      "available": true,
+      "futures": {
+       "F7": 75.0,
+       "G7": 77.5
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "G85": 2.041069961952789
+      },
+      "notDelivered": [],
+      "change": 1858.9300380472148,
+      "economicPnlModelAnchored": 3958.930038047211
+     }
+    ]
+   }
+  },
+  {
+   "name": "a one-sided option quote cannot give an implied volatility",
+   "contract": "§4.2",
+   "requirements": [
+    "P7 design: stops"
+   ],
+   "note": "",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "C80",
+     "q": -1,
+     "price": 1.5
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-02T15:10:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.8
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "C80": {
+     "mark": 1.21,
+     "level": "one_sided_conservative"
+    },
+    "P65": {
+     "bid": 0.49,
+     "ask": 0.51
+    }
+   },
+   "points": [],
+   "expect": {
+    "stop": "iv_needs_mid:C80"
+   }
+  },
+  {
+   "name": "an option whose future is not proven cannot be priced",
+   "contract": "§4.2",
+   "requirements": [
+    "P7 design: stops"
+   ],
+   "note": "",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "U80",
+     "q": -1,
+     "price": 1.5
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "U80": {
+     "bid": 1.19,
+     "ask": 1.21
+    }
+   },
+   "points": [],
+   "expect": {
+    "stop": "binding_unresolved:U80"
+   }
+  },
+  {
+   "name": "the future an option is bound to needs its own quote",
+   "contract": "§4.2",
+   "requirements": [
+    "P7 design: stops"
+   ],
+   "note": "",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "C80",
+     "q": -1,
+     "price": 1.5
+    }
+   ],
+   "quotes": {
+    "C80": {
+     "bid": 1.19,
+     "ask": 1.21
+    }
+   },
+   "points": [],
+   "expect": {
+    "stop": "future_anchor_missing:F7"
+   }
+  },
+  {
+   "name": "a one-sided future quote cannot anchor an implied volatility",
+   "contract": "§4.2",
+   "requirements": [
+    "P7 design: stops"
+   ],
+   "note": "",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "C80",
+     "q": -1,
+     "price": 1.5
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-02T15:10:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.8
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "mark": 71.99,
+     "level": "one_sided_conservative"
+    },
+    "C80": {
+     "bid": 1.19,
+     "ask": 1.21
+    },
+    "P65": {
+     "bid": 0.49,
+     "ask": 0.51
+    }
+   },
+   "points": [],
+   "expect": {
+    "stop": "iv_needs_live_future:F7"
+   }
+  },
+  {
+   "name": "without a discount rate nothing is computed",
+   "contract": "§4.3",
+   "requirements": [
+    "P7 design: stops"
+   ],
+   "note": "",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": null,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "C80",
+     "q": -1,
+     "price": 1.5
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-02T15:10:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.8
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "C80": {
+     "bid": 1.19,
+     "ask": 1.21
+    },
+    "P65": {
+     "bid": 0.49,
+     "ask": 0.51
+    }
+   },
+   "points": [],
+   "expect": {
+    "stop": "rate_unavailable"
+   }
+  },
+  {
+   "name": "an option past its expiry that the ledger still holds must be settled first",
+   "contract": "§4.2",
+   "requirements": [
+    "P7 design: stops"
+   ],
+   "note": "",
+   "asOf": "2026-12-15T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "C80",
+     "q": -1,
+     "price": 1.5
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-02T15:10:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.8
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "C80": {
+     "bid": 1.19,
+     "ask": 1.21
+    },
+    "P65": {
+     "bid": 0.49,
+     "ask": 0.51
+    }
+   },
+   "points": [],
+   "expect": {
+    "stop": "option_expired_open:C80"
+   }
+  },
+  {
+   "name": "a futures price at or below zero stops the model while an option is open",
+   "contract": "§5.3",
+   "requirements": [
+    "P7 design: unsupported model stops",
+    "F15"
+   ],
+   "note": "CLF7 at 0 or -3 with both options open: the lognormal models do not apply, so the point is unavailable (no epsilon). CLF7 at 1 is still priced.",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "C80",
+     "q": -1,
+     "price": 1.5
+    },
+    {
+     "id": "e3",
+     "at": "2026-11-02T15:10:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": 1,
+     "price": 0.8
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "C80": {
+     "bid": 1.19,
+     "ask": 1.21
+    },
+    "P65": {
+     "bid": 0.49,
+     "ask": 0.51
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "F7": 72.0
+     },
+     "sigma": {
+      "C80": 0.4745681485418277,
+      "P65": 0.350360233790889
+     },
+     "value": {
+      "C80": 1.2000000000000015,
+      "P65": 0.5000000000000312
+     },
+     "ledgerEconomicPnl": 2000.0,
+     "reference": "F7"
+    },
+    "points": [
+     {
+      "shift": -72,
+      "available": false,
+      "reason": "model_domain:C80"
+     },
+     {
+      "shift": -75,
+      "available": false,
+      "reason": "model_domain:C80"
+     },
+     {
+      "shift": -71,
+      "available": true,
+      "futures": {
+       "F7": 1.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [],
+      "values": {
+       "C80": 0.0,
+       "P65": 64.0
+      },
+      "notDelivered": [],
+      "change": -6300.000000000029,
+      "economicPnlModelAnchored": -4300.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "the other two deliveries: a short put is assigned long, a long call is exercised long",
+   "contract": "§6.1",
+   "requirements": [
+    "P7 design: expiry path conserves",
+    "F06"
+   ],
+   "note": "No future is held. Ledger at mids: Co = +800 - 2500 = -1700, Vo = -1000*0.5 + 1000*3.6 = 3100, economicPnl = 1400. CLF7 60 at expiry: the short put is assigned (+1 at 65, Uf = 1000*(60-65) = -5000), the call expires: -6700. CLF7 80: the long call is exercised (+1 at 70, Uf = 10000), the put expires: 8300. CLF7 67.5: both expire: -1700.",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:05:00Z",
+     "kind": "option_trade",
+     "contract": "P65",
+     "q": -1,
+     "price": 0.8
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-02T15:10:00Z",
+     "kind": "option_trade",
+     "contract": "A70",
+     "q": 1,
+     "price": 2.5
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "P65": {
+     "bid": 0.49,
+     "ask": 0.51
+    },
+    "A70": {
+     "bid": 3.59,
+     "ask": 3.61
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "F7": 72.0
+     },
+     "sigma": {
+      "A70": 0.31530172442259097,
+      "P65": 0.350360233790889
+     },
+     "value": {
+      "A70": 3.5999999999999686,
+      "P65": 0.5000000000000312
+     },
+     "ledgerEconomicPnl": 1399.9999999999995,
+     "reference": "F7",
+     "handLedgerEconomicPnl": 1400
+    },
+    "points": [
+     {
+      "shift": -12,
+      "horizonDays": 30,
+      "available": true,
+      "futures": {
+       "F7": 60.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [
+       {
+        "option": "A70",
+        "action": "expire",
+        "contracts": 1,
+        "closing": -1,
+        "at": "2026-12-14T19:30:00Z"
+       },
+       {
+        "option": "P65",
+        "action": "assign",
+        "contracts": 1,
+        "closing": 1,
+        "future": "F7",
+        "futureContracts": 1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": -8099.999999999938,
+      "economicPnlModelAnchored": -6700.0,
+      "handEconomicPnl": -6700
+     },
+     {
+      "shift": 8,
+      "horizonDays": 30,
+      "available": true,
+      "futures": {
+       "F7": 80.0
+      },
+      "positions": {
+       "F7": 1
+      },
+      "settlements": [
+       {
+        "option": "A70",
+        "action": "exercise",
+        "contracts": 1,
+        "closing": -1,
+        "future": "F7",
+        "futureContracts": 1,
+        "at": "2026-12-14T19:30:00Z"
+       },
+       {
+        "option": "P65",
+        "action": "expire",
+        "contracts": 1,
+        "closing": 1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": 6900.000000000062,
+      "economicPnlModelAnchored": 8300.0,
+      "handEconomicPnl": 8300
+     },
+     {
+      "shift": -4.5,
+      "horizonDays": 30,
+      "available": true,
+      "futures": {
+       "F7": 67.5
+      },
+      "positions": {},
+      "settlements": [
+       {
+        "option": "A70",
+        "action": "expire",
+        "contracts": 1,
+        "closing": -1,
+        "at": "2026-12-14T19:30:00Z"
+       },
+       {
+        "option": "P65",
+        "action": "expire",
+        "contracts": 1,
+        "closing": 1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": -3099.9999999999372,
+      "economicPnlModelAnchored": -1700.0,
+      "handEconomicPnl": -1700
+     }
+    ]
+   }
+  },
+  {
+   "name": "a date-only last trade is read on the exchange date",
+   "contract": "§6.2",
+   "requirements": [
+    "P7 design review: date fallbacks"
+   ],
+   "note": "This CLF7 has only its last trade date, 2026-12-17, and the put only its expiry date. asOf is 03:00Z, 21:00 the evening before in Chicago. The put expires at 13:30 Chicago = 19:30Z (CST) and is assigned onto CLF7 at 60: +1 at 65, two contracts averaging 67.5, 2*1000*(60-67.5)+800 = -14200. 31 days on is 2026-12-18 by UTC but 12-17 at the exchange, so CLF7 still trades: 1000*(77-70)+800 = 7800. 32 days on is 12-18 at the exchange: stop.",
+   "asOf": "2026-11-17T03:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-16T02:00:00Z",
+     "kind": "futures_trade",
+     "contract": "D7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-16T02:10:00Z",
+     "kind": "option_trade",
+     "contract": "DP65",
+     "q": -1,
+     "price": 0.8
+    }
+   ],
+   "quotes": {
+    "D7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "DP65": {
+     "bid": 0.49,
+     "ask": 0.51
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "D7": 72.0
+     },
+     "sigma": {
+      "DP65": 0.3535041571241567
+     },
+     "value": {
+      "DP65": 0.499999999999917
+     },
+     "ledgerEconomicPnl": 2300.0,
+     "reference": "D7",
+     "handLedgerEconomicPnl": 2300
+    },
+    "points": [
+     {
+      "shift": -12,
+      "horizonDays": 29,
+      "available": true,
+      "futures": {
+       "D7": 60.0
+      },
+      "positions": {
+       "D7": 2
+      },
+      "settlements": [
+       {
+        "option": "DP65",
+        "action": "assign",
+        "contracts": 1,
+        "closing": 1,
+        "future": "D7",
+        "futureContracts": 1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": -16500.000000000084,
+      "economicPnlModelAnchored": -14200.0,
+      "handEconomicPnl": -14200
+     },
+     {
+      "shift": 5,
+      "horizonDays": 31,
+      "available": true,
+      "futures": {
+       "D7": 77.0
+      },
+      "positions": {
+       "D7": 1
+      },
+      "settlements": [
+       {
+        "option": "DP65",
+        "action": "expire",
+        "contracts": 1,
+        "closing": 1,
+        "at": "2026-12-14T19:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": 5499.999999999917,
+      "economicPnlModelAnchored": 7800.0,
+      "handEconomicPnl": 7800
+     },
+     {
+      "shift": 5,
+      "horizonDays": 32,
+      "available": false,
+      "reason": "future_past_last_trade:D7"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a date-only expiry is 13:30 Chicago: 18:30Z in October (CDT)",
+   "contract": "§3.4",
+   "requirements": [
+    "P7 design review: date fallbacks"
+   ],
+   "note": "Daylight saving time: the call expired at 18:30Z, before 19:00Z, and was exercised at 72: 1000*(72-70) - 2000 = 0. CLZ6 (date only, 2026-11-19) still trades.",
+   "asOf": "2026-10-29T19:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-10-28T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "ZC70",
+     "q": 1,
+     "price": 2.0
+    }
+   ],
+   "quotes": {
+    "Z6": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "ZC70": {
+     "bid": 2.04,
+     "ask": 2.06
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "Z6": 72.0
+     },
+     "sigma": {
+      "ZC70": 0.3842739588744982
+     },
+     "value": {
+      "ZC70": 2.049999999999966
+     },
+     "ledgerEconomicPnl": 50.0,
+     "reference": "Z6",
+     "handLedgerEconomicPnl": 50
+    },
+    "points": [
+     {
+      "horizonDays": 1,
+      "available": true,
+      "futures": {
+       "Z6": 72.0
+      },
+      "positions": {
+       "Z6": 1
+      },
+      "settlements": [
+       {
+        "option": "ZC70",
+        "action": "exercise",
+        "contracts": 1,
+        "closing": -1,
+        "future": "Z6",
+        "futureContracts": 1,
+        "at": "2026-10-30T18:30:00Z"
+       }
+      ],
+      "values": {},
+      "notDelivered": [],
+      "change": -49.999999999965894,
+      "economicPnlModelAnchored": 0.0,
+      "handEconomicPnl": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "a date-only expiry is 13:30 Chicago: 19:30Z in December (CST)",
+   "contract": "§3.4",
+   "requirements": [
+    "P7 design review: date fallbacks"
+   ],
+   "note": "Standard time: at 19:00Z the call still has 30 minutes to its 19:30Z expiry, so it is valued, not settled.",
+   "asOf": "2026-12-13T19:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-12-12T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "W80",
+     "q": -1,
+     "price": 0.5
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "W80": {
+     "bid": 0.01,
+     "ask": 0.03
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "F7": 72.0
+     },
+     "sigma": {
+      "W80": 0.9221807052079141
+     },
+     "value": {
+      "W80": 0.02000000000000389
+     },
+     "ledgerEconomicPnl": 480.0,
+     "reference": "F7",
+     "handLedgerEconomicPnl": 480
+    },
+    "points": [
+     {
+      "horizonDays": 1,
+      "available": true,
+      "futures": {
+       "F7": 72.0
+      },
+      "positions": {},
+      "settlements": [],
+      "values": {
+       "W80": 0.0
+      },
+      "notDelivered": [],
+      "change": 20.00000000000389,
+      "economicPnlModelAnchored": 500.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "a European option is exercised only at its expiry",
+   "contract": "§6.3",
+   "requirements": [
+    "P7 design review: early delivery"
+   ],
+   "note": "",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": 0.04,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "option_trade",
+     "contract": "E70",
+     "q": 1,
+     "price": 3.0
+    }
+   ],
+   "quotes": {
+    "F7": {
+     "bid": 71.99,
+     "ask": 72.01
+    },
+    "E70": {
+     "bid": 3.8,
+     "ask": 3.9
+    }
+   },
+   "expect": {
+    "anchor": {
+     "futures": {
+      "F7": 72.0
+     },
+     "sigma": {
+      "E70": 0.3491255439169809
+     },
+     "value": {
+      "E70": 3.8500000000000014
+     },
+     "ledgerEconomicPnl": 849.9999999999995,
+     "reference": "F7"
+    },
+    "points": [
+     {
+      "shift": 10,
+      "horizonDays": 10,
+      "available": true,
+      "futures": {
+       "F7": 82.0
+      },
+      "positions": {},
+      "settlements": [],
+      "values": {
+       "E70": 12.022197977497678
+      },
+      "notDelivered": [],
+      "change": 8172.197977497676,
+      "economicPnlModelAnchored": 9022.197977497677
+     },
+     {
+      "shift": 10,
+      "horizonDays": 10,
+      "early": [
+       "E70"
+      ],
+      "available": false,
+      "reason": "early_delivery_european:E70"
+     }
+    ]
+   }
+  },
+  {
+   "name": "a flat ledger has nothing to move",
+   "contract": "§7.5",
+   "requirements": [
+    "P7 design review: no open position"
+   ],
+   "note": "Bought at 70, sold at 72: Rf = 2000 and nothing is open. No quote, rate or axis is needed; every point is the ledger as it is.",
+   "asOf": "2026-11-16T15:00:00Z",
+   "rate": null,
+   "events": [
+    {
+     "id": "e1",
+     "at": "2026-11-02T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": 1,
+     "price": 70
+    },
+    {
+     "id": "e2",
+     "at": "2026-11-03T15:00:00Z",
+     "kind": "futures_trade",
+     "contract": "F7",
+     "q": -1,
+     "price": 72
+    }
+   ],
+   "quotes": {},
+   "expect": {
+    "empty": true,
+    "points": [
+     {
+      "available": true,
+      "futures": {},
+      "positions": {},
+      "settlements": [],
+      "values": {},
+      "notDelivered": [],
+      "change": 0.0,
+      "economicPnlModelAnchored": 2000.0,
+      "handChange": 0,
+      "handEconomicPnl": 2000
+     },
+     {
+      "shift": -80,
+      "horizonDays": 60,
+      "available": true,
+      "futures": {},
+      "positions": {},
+      "settlements": [],
+      "values": {},
+      "notDelivered": [],
+      "change": 0.0,
+      "economicPnlModelAnchored": 2000.0
+     }
+    ]
+   }
+  }
+ ]
+}

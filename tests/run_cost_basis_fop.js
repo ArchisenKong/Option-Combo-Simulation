@@ -116,7 +116,7 @@ function selectSuites(manifest, stage) {
 async function main() {
     const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, MANIFEST), 'utf8'));
     const stage = stageArgument(process.argv.slice(2));
-    if (!stage) fail('usage: node tests/run_cost_basis_fop.js --stage <P0..P6>', 2);
+    if (!stage) fail('usage: node tests/run_cost_basis_fop.js --stage <P0..P7>', 2);
     const selection = selectSuites(manifest, stage);
     if (selection.errors.length) {
         selection.errors.forEach((problem) => console.log(`error: ${problem}`));

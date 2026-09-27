@@ -10,7 +10,7 @@ const path = require('node:path');
 const { selectSuites } = require('./run_cost_basis_fop');
 
 const ROOT = path.resolve(__dirname, '..');
-const STAGES = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
+const STAGES = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'];
 
 function suite(stage, cases = 1, runtime = 'node') {
     return {
@@ -67,24 +67,25 @@ module.exports = {
                 const result = selectSuites(manifest([suite('P0')]), 'P9');
                 assert.equal(result.usage, true);
                 assert.match(result.errors[0], /unknown stage P9/);
-                const stray = selectSuites(manifest([suite('P0'), suite('P7')]), 'P0');
-                assert.match(stray.errors[0], /unknown stage P7/);
+                const stray = selectSuites(manifest([suite('P0'), suite('P8')]), 'P0');
+                assert.match(stray.errors[0], /unknown stage P8/);
             },
         },
         {
-            name: 'every stage through P6 is registered, and the real runner refuses P7, which has no command',
+            name: 'every stage through P7 is registered, and the real runner refuses P8, which the plan does not have',
             run() {
-                // P6 registered its suites (plan §13.3 P6), so no stage up to it is empty. P7
-                // has no frozen contract and no command (plan §14.4): the runner does not know it.
-                // (Running --stage P6 here would run this case again, so the refusal is P7's.)
+                // P7 registered its design acceptance (the stress contract's vectors, plan §13.3
+                // P7), so no stage up to it is empty. The plan has no stage after P7: the runner
+                // does not know P8. (Running --stage P7 here would run this case again, so the
+                // refusal is P8's.)
                 const registered = require('./fixtures/cost_basis_fop/manifest.json');
+                assert.deepEqual(registered.stages, STAGES);
                 assert.deepEqual(STAGES.filter((stage) => registered.suites.some(
                     (entry) => entry.stage === stage && entry.cases.length > 0)), STAGES);
-                assert.equal(STAGES[STAGES.length - 1], 'P6');
-                const p7 = runStage('P7');
-                assert.equal(p7.status, 2, p7.stdout);
-                assert.match(p7.stdout, /unknown stage P7/);
-                assert.doesNotMatch(p7.stdout, /passed/);
+                const p8 = runStage('P8');
+                assert.equal(p8.status, 2, p8.stdout);
+                assert.match(p8.stdout, /unknown stage P8/);
+                assert.doesNotMatch(p8.stdout, /passed/);
                 const unknown = runStage('P9');
                 assert.equal(unknown.status, 2, unknown.stdout);
             },
