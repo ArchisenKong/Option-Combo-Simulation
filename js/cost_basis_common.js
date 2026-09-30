@@ -48,8 +48,8 @@
         { action: 'request_cost_basis_market_price', writes: false, pages: ['equity'] },
         { action: 'request_cost_basis_option_scenario_inputs', writes: false, pages: ['equity'] },
         // Standalone FOP ledger actions (plan §10.2). The FOP page sends its
-        // writes only as FOP packages; the backend's fop_writes_enabled gate
-        // still refuses every FOP write until the release stage (P6).
+        // writes only as FOP packages; writes are open since the release stage
+        // (P6) unless the backend's fop_writes_enabled switch closes them.
         { action: 'commit_cost_basis_fop_metadata', writes: true, pages: ['fop'] },
         { action: 'request_cost_basis_fop_contract_details', writes: false, pages: ['fop'] },
         { action: 'request_cost_basis_fop_statement_bindings', writes: false, pages: ['fop'] },
@@ -57,6 +57,8 @@
         { action: 'request_cost_basis_fop_market_snapshot', writes: false, pages: ['fop'] },
         // The TWS positions of the ledger's own account and root (plan §19 P5-C3).
         { action: 'request_cost_basis_fop_positions', writes: false, pages: ['fop'] },
+        // The cached dated discount curve for the stress view (stress contract §2.3).
+        { action: 'request_cost_basis_fop_discount_curve', writes: false, pages: ['fop'] },
     ].map((entry) => Object.freeze(Object.assign({}, entry, {
         pages: Object.freeze(entry.pages.slice()),
     }))));

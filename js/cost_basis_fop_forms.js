@@ -601,6 +601,54 @@
     // Delivery preview (plan §12.1): in memory only
     // ------------------------------------------------------------------
 
+    /**
+     * One in-memory settlement of an open option (plan §6.1), shared by the
+     * delivery preview and the stress scenarios: an expiry, or a delivery
+     * onto the FUT its binding names at the strike. quantity is the open
+     * signed count, count how many settle; cash and fees are 0.
+     */
+    function settlementEvent(option, action, count, quantity, binding, future) {
+        const side = quantity < 0 ? -1 : 1;
+        if (action === 'expire') {
+            return { kind: 'option_expiry', contractRef: ref(option), contracts: -side * count, cashAmount: 0, fees: 0,
+                option };
+        }
+        const assignment = action === 'assign';
+        const direction = option.optionRight === 'C' ? (assignment ? -1 : 1) : (assignment ? 1 : -1);
+        return { kind: assignment ? 'option_assignment' : 'option_exercise', contractRef: ref(option),
+            deliveredContractRef: ref(future), bindingRef: { bindingId: binding.bindingId, revision: binding.revision },
+            contracts: assignment ? count : -count,
+            futureContracts: direction * count * (option.deliverableFuturesPerOption || 1),
+            price: option.optionStrike, cashAmount: 0, fees: 0, option };
+    }
+
+    /**
+     * A copy of the graph with settlements appended as in-memory rows:
+     * items [{event (settlementEvent), at (UtcInstant), orderEvidence?}].
+     * Nothing is stored; the rows exist only in the returned copy.
+     */
+    function withSettlements(graph, account, items, { idPrefix = 'preview-delivery', note = '假设交割（仅预览）' } = {}) {
+        const copy = JSON.parse(JSON.stringify(graph));
+        items.forEach(({ event, at, orderEvidence }, position) => {
+            const eventId = `${idPrefix}-${String(position + 1).padStart(3, '0')}`;
+            copy.events.push({
+                row: {
+                    eventId, seq: copy.events.length + 1, kind: event.kind, account,
+                    contracts: event.contracts, futureContracts: event.futureContracts === undefined ? null : event.futureContracts,
+                    price: event.price === undefined ? null : event.price, cashAmount: 0, fees: 0, includeInCost: true,
+                    source: 'manual', externalRef: null, note, voidedAtUtc: null,
+                    fop: { contractRef: event.contractRef, deliveredContractRef: event.deliveredContractRef || null,
+                        bindingRef: event.bindingRef || null, openClose: null, feeCategory: null, feeIsRefund: false,
+                        feeSourceEventId: null, adjustmentScope: null, baselineKind: null, baselineAsOfUtc: null,
+                        time: { exchangeTradeDate: null, executedAtUtc: at, timeRange: null,
+                            sourceTimeText: null, sourceTimezone: null, orderEvidence: orderEvidence || null } },
+                },
+                primarySourceId: null,
+            });
+        });
+        return copy;
+    }
+
     /** The exchange date of an instant: last trade dates and expiries are exchange dates. */
     function exchangeDay(book, at) {
         const rules = Import.PRODUCT_RULES[book.fop.productRules];
@@ -651,10 +699,8 @@
             if (!Number.isInteger(count) || count < 1 || count > open) {
                 return stop(`${name}：交割张数必须是 1 到 ${open} 之间的整数`);
             }
-            const side = quantity < 0 ? -1 : 1;
             if (choice.action === 'expire') {
-                events.push({ kind: 'option_expiry', contractRef: ref(option), contracts: -side * count,
-                    cashAmount: 0, fees: 0, option });
+                events.push(settlementEvent(option, 'expire', count, quantity, null, null));
                 continue;
             }
             const assignment = choice.action === 'assign';
@@ -668,12 +714,7 @@
             }
             const future = index.records.get(binding.futureContractId);
             delivered.add(future.contractId);
-            const direction = option.optionRight === 'C' ? (assignment ? -1 : 1) : (assignment ? 1 : -1);
-            events.push({ kind: assignment ? 'option_assignment' : 'option_exercise', contractRef: ref(option),
-                deliveredContractRef: ref(future), bindingRef: { bindingId: binding.bindingId, revision: binding.revision },
-                contracts: assignment ? count : -count,
-                futureContracts: direction * count * (option.deliverableFuturesPerOption || 1),
-                price: option.optionStrike, cashAmount: 0, fees: 0, option });
+            events.push(settlementEvent(option, choice.action, count, quantity, binding, future));
         }
         if (!events.length) return stop('请至少选择一张期权');
         // Every FUT on the path: the ones held until then and the ones the
@@ -685,24 +726,7 @@
                     + ' 已最后交易：跨过期货最后交易日的路径首版停止，不自动滚仓或实物结算（§12.1）');
             }
         }
-        const copy = JSON.parse(JSON.stringify(graph));
-        events.forEach((event, position) => {
-            const eventId = `preview-delivery-${String(position + 1).padStart(3, '0')}`;
-            copy.events.push({
-                row: {
-                    eventId, seq: copy.events.length + 1, kind: event.kind, account: book.account,
-                    contracts: event.contracts, futureContracts: event.futureContracts === undefined ? null : event.futureContracts,
-                    price: event.price === undefined ? null : event.price, cashAmount: 0, fees: 0, includeInCost: true,
-                    source: 'manual', externalRef: null, note: '假设交割（仅预览）', voidedAtUtc: null,
-                    fop: { contractRef: event.contractRef, deliveredContractRef: event.deliveredContractRef || null,
-                        bindingRef: event.bindingRef || null, openClose: null, feeCategory: null, feeIsRefund: false,
-                        feeSourceEventId: null, adjustmentScope: null, baselineKind: null, baselineAsOfUtc: null,
-                        time: { exchangeTradeDate: null, executedAtUtc: at, timeRange: null,
-                            sourceTimeText: null, sourceTimezone: null, orderEvidence: null } },
-                },
-                primarySourceId: null,
-            });
-        });
+        const copy = withSettlements(graph, book.account, events.map((event) => ({ event, at })));
         const after = Core.computeLedger(copy, { marks: prices, rolls: false });
         // An option still open past its expiry would already have expired or
         // been delivered: the path needs a choice for it.
@@ -761,6 +785,8 @@
         previewPackage,
         manualPreview,
         bindingAdoption,
+        settlementEvent,
+        withSettlements,
         deliveryPreview,
         atExpiry,
     });

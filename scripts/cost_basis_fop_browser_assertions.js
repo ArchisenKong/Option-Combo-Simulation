@@ -15,6 +15,13 @@
  *                                        valid zero bid, crossed book, a missing leg, stale quotes
  *   delivery                             in-memory delivery preview writes nothing; a path past a
  *                                        FUT's last trade date stops
+ *   stress                               the stress curve in its worker: the anchor is the ledger,
+ *                                        each point's month prices and option values, expiry
+ *                                        deliveries, a stop past a last trade date, an early
+ *                                        assignment only in the money, a dollar range, the rate's
+ *                                        label, an out-of-date curve refused and the curve read for
+ *                                        every run, an anchor that leaves the ledger's quotes alone
+ *                                        but is not in sync for the stress view; no writes
  *   after-reload  (after location.reload) the same figures
  *   backup                               export, restore from it, the same figures
  *   actions                              every action the backend received was allowed; no writes
@@ -165,6 +172,13 @@
         if (!table) return [];
         return Array.from(table.querySelectorAll('tr')).slice(1)
             .map((row) => Array.from(row.children).map((cell) => cell.textContent.trim()));
+    }
+
+    /** A table's header cells as trimmed text. */
+    function header(id) {
+        const table = $(id) && $(id).querySelector('table');
+        const first = table && table.querySelector('tr');
+        return first ? Array.from(first.children).map((cell) => cell.textContent.trim()) : [];
     }
 
     function row(id, first) {
@@ -498,6 +512,141 @@
             return check.done({ sent: record.sent });
         },
 
+        async stress() {
+            const check = checker('stress');
+            const record = recorder();
+            // A run's status is set on the click ("正在准备…") and again by its answer, so a run whose answer
+            // reads like the last one's is still waited for.
+            const run = async (fields) => {
+                for (const [id, value] of Object.entries(fields)) setValue(id, value);
+                $('stress-status').textContent = '';
+                click('stress-run');
+                await waitFor('a stress result', () => /情景点|不能计算|没有未平持仓/.test(text('stress-status')), 20000);
+                return rows('stress-table');
+            };
+            // Columns by their header: the per-contract columns come before the totals (contract §8, §11).
+            const column = (name) => header('stress-table').indexOf(name);
+            const cell = (cells, name) => (cells ? cells[column(name)] : undefined);
+            const curveReads = () => record.sent.filter((action) => action === 'request_cost_basis_fop_discount_curve').length;
+            const ledgerQuotes = {
+                CLF7: quote({ bid: 72.4, bidSize: 3, ask: 72.5, askSize: 2 }),
+                'LOZ6 C7500': quote({ bid: 0.3, bidSize: 5, ask: 0.35, askSize: 5 }),
+                'LOZ6 P6500': quote({ bid: 0, bidSize: 4, ask: 0.05, askSize: 6 }),
+            };
+            try {
+                await loaded();
+                page().setClock(() => CLOCK);
+                await synthetic('curve', { available: true });
+                await takeQuotes(Object.assign({ CLZ6: quote({ bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2 }) },
+                    ledgerQuotes));
+                const state = page().inspect().model.quoteState;
+                check.expect('CLZ6, bound but not held, is quoted as an anchor only',
+                    Object.values(state.anchors).map((anchor) => [anchor.level, anchor.mark]), [['mid', 72]]);
+                check.expect('the ledger view is unchanged by the anchor', text('overview-tag'), '实时');
+                const version = page().inspect().version.digest;
+                let table = await run({ 'stress-rate': '', 'stress-range-usd': '', 'stress-points': '21',
+                    'stress-range': '20', 'stress-horizon': '0', 'stress-slope': '0', 'stress-iv': '1', 'stress-band': '20' });
+                check.ok('the curve is computed on CLZ6, the earliest month',
+                    /^21 个情景点（参考月 CLZ6，经过 0 天/.test(text('stress-status')), text('stress-status'));
+                check.expect('21 points', table.length, 21);
+                check.expect('the anchor point changes nothing', cell(table[10], '经济盈亏变化'), '0.00');
+                check.expect('the anchor total is the ledger total on screen', cell(table[10], '情景经济盈亏'),
+                    text('overview-value'));
+                check.expect('each point lists every month\'s price and every option\'s model value',
+                    header('stress-table').slice(0, 5), ['参考月价格', 'CLZ6 情景价', 'CLF7 情景价', 'LOZ6 C7500 模型值',
+                        'LOZ6 P6500 模型值']);
+                check.expect('at the anchor each month is at its own quote', [cell(table[10], 'CLZ6 情景价'),
+                    cell(table[10], 'CLF7 情景价')], ['72', '72.45']);
+                const call = row('stress-anchor-options', 'LOZ6 C7500');
+                check.ok('the anchors table gives the short call\'s mid, model value and implied volatility',
+                    Boolean(call) && call[1] === '-1' && call[2] === 'CLZ6' && call[4] === '0.325'
+                    && /^[0-9.]+%$/.test(call[6]) && call[6] === call[7], call);
+                check.expect('and the anchor futures with their level',
+                    rows('stress-anchor-futures').map((cells) => cells.slice(0, 4)),
+                    [['CLZ6', '202612', '72', '实时中间价'], ['CLF7', '202701', '72.45', '实时中间价']]);
+                check.ok('the chart is drawn', !$('stress-chart').hidden
+                    && /^M [0-9.]+ [0-9.]+ L /.test($('stress-line').getAttribute('d')), $('stress-line').getAttribute('d'));
+                check.ok('the assumptions name the cached curve and the expiry time inferred from the date',
+                    /贴现曲线（2026-11-11）/.test(text('stress-assumptions'))
+                    && /到期时刻按品种规则推定（LOZ6 C7500）/.test(text('stress-assumptions')), text('stress-assumptions'));
+                table = await run({ 'stress-horizon': '6' });
+                check.ok('six days on, below 65 the long put was exercised onto CLZ6 at its expiry',
+                    table.some((cells) => /LOZ6 P6500 行权 → CLZ6 -1（按行权价）/.test(cell(cells, '情景交割'))),
+                    table.map((cells) => cell(cells, '情景交割')));
+                check.ok('and above 75 the short call was assigned onto CLZ6',
+                    table.some((cells) => /LOZ6 C7500 被指派 → CLZ6 -1（按行权价）/.test(cell(cells, '情景交割'))),
+                    table.map((cells) => cell(cells, '情景交割')));
+                check.ok('where an option has settled its column says how',
+                    table.some((cells) => cell(cells, 'LOZ6 C7500 模型值') === '到期被指派')
+                    && table.some((cells) => cell(cells, 'LOZ6 P6500 模型值') === '到期行权'),
+                    table.map((cells) => [cell(cells, 'LOZ6 C7500 模型值'), cell(cells, 'LOZ6 P6500 模型值')]));
+                table = await run({ 'stress-horizon': '8' });
+                check.ok('eight days on, a point that holds a delivered CLZ6 past its last trade date stops',
+                    table.some((cells) => /\[future_past_last_trade\]/.test(cell(cells, '说明'))),
+                    table.map((cells) => cell(cells, '说明')));
+                check.ok('while the points where both options expire stay', cell(table[10], '经济盈亏变化') !== '—', table[10]);
+                const early = $('stress-early').querySelector(`input[data-contract-id="${shortCall()}"]`);
+                check.ok('the short call can be chosen for an early delivery', Boolean(early));
+                if (early) {
+                    early.checked = true;
+                    early.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                table = await run({ 'stress-horizon': '2' });
+                check.ok('two days on it is assigned where it is in the money',
+                    table.some((cells) => /LOZ6 C7500 被指派/.test(cell(cells, '情景交割'))
+                        && cell(cells, 'LOZ6 C7500 模型值') === '提前被指派'), table.map((cells) => cell(cells, '情景交割')));
+                check.ok('and not delivered where it is out of the money',
+                    table.some((cells) => /LOZ6 C7500：价外，未提前交割/.test(cell(cells, '说明'))),
+                    table.map((cells) => cell(cells, '说明')));
+                if (early) {
+                    early.checked = false;
+                    early.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                table = await run({ 'stress-horizon': '0', 'stress-range-usd': '5' });
+                check.ok('a dollar range replaces the percentage', cell(table[0], '参考月价格') === '67'
+                    && cell(table[20], '参考月价格') === '77'
+                    && /扫描范围 ±5 美元\/桶（按美元输入）/.test(text('stress-assumptions')),
+                [cell(table[0], '参考月价格'), text('stress-assumptions')]);
+                setValue('stress-range-usd', '');
+                await run({ 'stress-rate': '4' });
+                check.ok('a typed rate is labelled an assumption', /假设利率 4%/.test(text('stress-assumptions'))
+                    && /利率为手工假设/.test(text('stress-assumptions')), text('stress-assumptions'));
+                setValue('stress-rate', '');
+                // An out-of-date curve, answered as the yield-curve backend answers it, is refused; every
+                // run reads the curve again, so the refusal ends when the backend has a current one.
+                const reads = curveReads();
+                await synthetic('curve', { available: true, status: 'cache_fallback',
+                    curve: { schemaVersion: 2, curveAsOf: '2020-01-02', currency: 'USD', source: 'synthetic_old',
+                        points: [7, 30, 90, 365].map((tenorDays) => ({ tenorDays, zeroRate: 0.04,
+                            discountFactor: Math.exp(-0.04 * tenorDays / 365) })) },
+                    error: 'Yield-curve snapshot 2020-01-02 is older than market date 2026-11-12.' });
+                await run({});
+                check.ok('an out-of-date curve is refused with its date and the next step',
+                    /^不能计算：后端缓存的贴现曲线已过期.*（2020-01-02）.*填写“假设利率”.*\[rate_curve_stale\]/
+                        .test(text('stress-status')) && $('stress-chart').hidden, text('stress-status'));
+                await synthetic('curve', { available: true });
+                table = await run({});
+                check.ok('with a current curve again the next run computes', /^21 个情景点/.test(text('stress-status'))
+                    && table.length === 21, text('stress-status'));
+                check.expect('the curve was read for each of those runs', curveReads() - reads, 2);
+                // An anchor observed a minute after the ledger's quotes: the ledger view keeps its mids, the
+                // stress view is not synchronised and says so for every option.
+                await takeQuotes(Object.assign({ CLZ6: quote({ bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2,
+                    observedAtUtc: iso(-5) }) }, Object.fromEntries(Object.entries(ledgerQuotes)
+                    .map(([symbol, fields]) => [symbol, Object.assign({}, fields, { observedAtUtc: iso(-75) })]))));
+                check.expect('a newer anchor leaves the ledger\'s quotes current', text('overview-tag'), '实时');
+                await run({});
+                check.ok('but the stress view needs the options in sync with their future',
+                    /\[iv_needs_mid\].*\[iv_needs_mid\]/.test(text('stress-status')), text('stress-status'));
+                check.expect('the ledger version is unchanged by the scenarios', page().inspect().version.digest, version);
+            } finally {
+                record.stop();
+            }
+            check.expect('the stress view sent no write', record.sent.filter((action) => WRITES.has(action)), []);
+            check.ok('it read the curve through its own action',
+                record.sent.includes('request_cost_basis_fop_discount_curve'), record.sent);
+            return check.done({ sent: record.sent });
+        },
         async 'after-reload'() {
             const check = checker('after-reload');
             await loaded();

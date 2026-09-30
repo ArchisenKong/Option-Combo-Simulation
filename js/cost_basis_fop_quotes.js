@@ -22,6 +22,14 @@
  * ledger version it was taken against, and a quote counts as current only
  * for FRESH_SECONDS after the broker observed it and within SYNC_SECONDS of
  * the batch's other quotes: the page's clock never re-dates a quote.
+ *
+ * A future that an open option is bound to but the ledger does not hold is
+ * quoted too, as an anchor for the stress view (stress contract §2.2): its
+ * level and mark stand apart in `anchors` and never enter the ledger's marks,
+ * the lowest level the ledger view reports, or the sync window its quotes are
+ * held to. The stress view reads `stress` instead: every quoted contract,
+ * anchors included, held to one sync window over the whole batch, since an
+ * implied volatility needs its option and its future observed together.
  */
 (function attachCostBasisFopQuotes(globalScope) {
     'use strict';
@@ -67,6 +75,16 @@
         }
         for (const row of output.options || []) {
             targets.push({ contractId: row.contractId, secType: 'FOP', contracts: row.contracts.value });
+        }
+        // Anchors: the bound futures the ledger does not hold. No quantity, so
+        // only a mid or a dated reference can value one.
+        const quoted = new Set(targets.map((target) => target.contractId));
+        for (const row of output.options || []) {
+            const future = row.boundFutureContractId;
+            if (!future || quoted.has(future) || row.bindingStatus === 'unresolved' || row.bindingStatus === 'conflict'
+                || row.contracts.value === 0) continue;
+            quoted.add(future);
+            targets.push({ contractId: future, secType: 'FUT', contracts: null, role: 'anchor' });
         }
         return targets;
     }
@@ -129,17 +147,48 @@
     }
 
     /**
+     * The newest real-time observation among some targets' evidence (epoch
+     * ms and its text), the instant their sync window is measured from. An
+     * observation more than SYNC_SECONDS ahead of the page's clock is not
+     * counted.
+     */
+    function newestOf(targets, byId, now) {
+        let newest = null;
+        let text = null;
+        for (const target of targets) {
+            const evidence = byId.get(target.contractId);
+            const observed = evidence && evidence.status === 'ok' && evidence.marketDataType === REALTIME
+                ? instantMillis(evidence.observedAtUtc) : null;
+            if (observed !== null && observed <= now + SYNC_SECONDS * 1000 && (newest === null || observed > newest)) {
+                newest = observed;
+                text = evidence.observedAtUtc;
+            }
+        }
+        return { newest, text };
+    }
+
+    /**
      * One batch valued against what the page shows.
      * batch: the MarketSnapshotResponse; context: {targets (quoteTargets),
      * ledgerVersion (the ledger the page shows), now (epoch ms, the page's
      * clock, only to age quotes)}. Returns {usable, reason, quoteBatchId,
      * quotes: [Quote + level, label, reason], marks: {contractId: mark},
-     * lowest, marketData: complete|reference|incomplete|not_checked}.
+     * lowest, marketData: complete|reference|incomplete|not_checked,
+     * anchors: {contractId: {level, label, mark, reason, referenceDate,
+     * observedAtUtc}}, stress: {asOf, quotes: {contractId: the same}}}.
+     * The ledger's quotes are synced among themselves only, exactly as
+     * without anchors; anchors are the targets with role 'anchor'. `stress`
+     * values every target, anchors included, against the newest observation
+     * of the whole batch (stress contract §2.2), and asOf is that
+     * observation's text (null without one).
      */
     function evaluateBatch(batch, context) {
-        const targets = context.targets || [];
+        const all = context.targets || [];
+        const targets = all.filter((target) => target.role !== 'anchor');
+        const anchorTargets = all.filter((target) => target.role === 'anchor');
         const empty = { usable: false, reason: null, quoteBatchId: batch ? batch.quoteBatchId : null, quotes: [],
-            marks: {}, lowest: null, marketData: targets.length ? 'not_checked' : 'complete' };
+            marks: {}, lowest: null, marketData: targets.length ? 'not_checked' : 'complete', anchors: {},
+            stress: { asOf: null, quotes: {} } };
         if (!batch) return Object.assign(empty, { reason: 'no_batch' });
         const version = context.ledgerVersion;
         if (!version || !batch.ledgerVersion || batch.ledgerVersion.digest !== version.digest) {
@@ -147,13 +196,8 @@
             return Object.assign(empty, { reason: 'ledger_changed' });
         }
         const byId = new Map((batch.quotes || []).map((evidence) => [evidence.contractId, evidence]));
-        let newest = null;
-        for (const evidence of batch.quotes || []) {
-            const observed = evidence.status === 'ok' && evidence.marketDataType === REALTIME
-                ? instantMillis(evidence.observedAtUtc) : null;
-            if (observed !== null && observed <= context.now + SYNC_SECONDS * 1000
-                && (newest === null || observed > newest)) newest = observed;
-        }
+        const { newest } = newestOf(targets, byId, context.now);
+        const joint = newestOf(all, byId, context.now);
         const quotes = [];
         const marks = {};
         let lowest = 0;
@@ -177,12 +221,23 @@
                 reason: valued.reason,
             });
         }
+        // The stress view's quotes: one sync window over the whole batch.
+        const stressQuotes = {};
+        for (const target of all) {
+            const evidence = byId.get(target.contractId) || null;
+            const valued = valueOne(evidence, target, { now: context.now, newest: joint.newest });
+            stressQuotes[target.contractId] = { level: valued.level, label: LEVEL_LABELS[valued.level],
+                mark: valued.mark, reason: valued.reason, referenceDate: valued.referenceDate,
+                observedAtUtc: evidence ? evidence.observedAtUtc || null : null };
+        }
+        const anchors = {};
+        for (const target of anchorTargets) anchors[target.contractId] = stressQuotes[target.contractId];
         const level = targets.length ? LEVELS[lowest] : null;
         let marketData = 'complete';
         if (level === 'unavailable') marketData = 'incomplete';
         else if (level === 'settlement_reference' || level === 'close_reference') marketData = 'reference';
         return { usable: true, reason: null, quoteBatchId: batch.quoteBatchId, quotes, marks, lowest: level,
-            marketData };
+            marketData, anchors, stress: { asOf: joint.text, quotes: stressQuotes } };
     }
 
     /**
@@ -192,7 +247,8 @@
      */
     function currentUntil(quoteState) {
         let until = null;
-        for (const quote of (quoteState && quoteState.usable && quoteState.quotes) || []) {
+        const anchors = Object.values((quoteState && quoteState.usable && quoteState.anchors) || {});
+        for (const quote of ((quoteState && quoteState.usable && quoteState.quotes) || []).concat(anchors)) {
             if (quote.level !== 'mid' && quote.level !== 'one_sided_conservative') continue;
             const observed = instantMillis(quote.observedAtUtc);
             if (observed === null) continue;

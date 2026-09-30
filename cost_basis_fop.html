@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>FOP 成本账本 — Option Combo Simulator</title>
-    <link rel="stylesheet" href="cost_basis_fop.css?v=e911c3da4838">
+    <link rel="stylesheet" href="cost_basis_fop.css?v=79b8059ba8c8">
 </head>
 <body>
     <header class="fop-header">
@@ -20,7 +20,7 @@
 
     <main class="fop-main">
         <section class="fop-card fop-notice" aria-labelledby="stage-title">
-            <h2 id="stage-title">开发中</h2>
+            <h2 id="stage-title">说明</h2>
             <p id="stage-text"></p>
         </section>
 
@@ -306,6 +306,48 @@
                     <div class="fop-table-wrap" id="delivery-result"></div>
                 </section>
 
+                <section class="fop-card" aria-labelledby="stress-title">
+                    <h2 id="stress-title">压力情景</h2>
+                    <p class="fop-state">假设各期货月份的价格变动、经过的天数和隐含波动率倍数，看当前持仓的经济盈亏怎样变化。
+                        只在内存中演算，不写入账本、不下单；结果是假设情景，不是概率。需要一次报价（期权须有实时双边报价）。</p>
+                    <div class="fop-form">
+                        <label for="stress-range">价格范围（参考月 ±%）</label>
+                        <input type="number" id="stress-range" min="1" max="90" step="1" value="30">
+                        <label for="stress-range-usd">美元范围（±美元/桶，可选；填写后取代百分比，参考月价格为 0 时必填）</label>
+                        <input type="number" id="stress-range-usd" min="0" step="0.5" placeholder="按百分比">
+                        <label for="stress-points">点数（奇数）</label>
+                        <input type="number" id="stress-points" min="11" max="121" step="2" value="61">
+                        <label for="stress-reference">参考月</label>
+                        <select id="stress-reference"></select>
+                        <label for="stress-slope">月间斜率（美元/桶/月）</label>
+                        <input type="number" id="stress-slope" step="0.05" value="0">
+                        <label for="stress-horizon">经过天数</label>
+                        <input type="number" id="stress-horizon" min="0" max="365" step="1" value="0">
+                        <label for="stress-iv">IV 倍数</label>
+                        <input type="number" id="stress-iv" min="0" step="0.05" value="1">
+                        <label for="stress-band">IV 区间（±%）</label>
+                        <input type="number" id="stress-band" min="0" max="50" step="1" value="20">
+                        <label for="stress-rate">假设利率（年化 %，留空用贴现曲线）</label>
+                        <input type="number" id="stress-rate" step="0.01" placeholder="贴现曲线">
+                        <span></span>
+                        <span class="fop-inline"><button type="button" id="stress-run">计算</button>
+                            <label class="fop-inline" for="stress-total"><input type="checkbox" id="stress-total"> 显示总额</label></span>
+                    </div>
+                    <div class="fop-table-wrap" id="stress-early"></div>
+                    <p class="fop-state" id="stress-status" role="status"></p>
+                    <p class="fop-state" id="stress-assumptions"></p>
+                    <svg class="fop-stress-chart" id="stress-chart" viewBox="0 0 640 240" role="img" aria-label="压力情景曲线" hidden>
+                        <path class="fop-stress-band" id="stress-band-area" d=""></path>
+                        <path class="fop-stress-zero" id="stress-zero" d=""></path>
+                        <line class="fop-stress-anchor" id="stress-anchor" x1="0" y1="0" x2="0" y2="0"></line>
+                        <path class="fop-stress-line" id="stress-line" d=""></path>
+                    </svg>
+                    <p class="fop-state" id="stress-axes"></p>
+                    <div class="fop-table-wrap" id="stress-anchor-futures"></div>
+                    <div class="fop-table-wrap" id="stress-anchor-options"></div>
+                    <div class="fop-table-wrap" id="stress-table"></div>
+                </section>
+
                 <section class="fop-card" aria-labelledby="backup-title">
                     <h2 id="backup-title">备份、恢复与删除</h2>
                     <div class="fop-form">
@@ -399,15 +441,19 @@
         <a href="cost_basis.html">股票 / ETF 成本账本</a>
     </footer>
 
-    <script src="js/cost_basis_common.js?v=b750cfdf979f"></script>
+    <script src="js/cost_basis_common.js?v=7c9ea6cc8739"></script>
     <script src="js/cost_basis_import_common.js?v=68181c7c6bc1"></script>
     <script src="js/cost_basis_fop_core.js?v=b31e61dbd423"></script>
-    <script src="js/cost_basis_fop_import.js?v=889fd8c95514"></script>
-    <script src="js/cost_basis_fop_quotes.js?v=4cc345ef481e"></script>
-    <script src="js/cost_basis_fop_messages.js?v=10e0481f13c2"></script>
-    <script src="js/cost_basis_fop_view.js?v=bc561af9cbd9"></script>
-    <script src="js/cost_basis_fop_forms.js?v=969fd0fcddc6"></script>
+    <script src="js/cost_basis_fop_import.js?v=777e39ceb011"></script>
+    <script src="js/cost_basis_fop_quotes.js?v=867fc923421d"></script>
+    <script src="js/cost_basis_fop_messages.js?v=025e2d3ada98"></script>
+    <script src="js/cost_basis_fop_view.js?v=13d97385aa6f"></script>
+    <script src="js/cost_basis_fop_forms.js?v=e1cb716d6b73"></script>
     <script src="js/cost_basis_fop_reconcile.js?v=87a6049b4b0f"></script>
-    <script src="js/cost_basis_fop.js?v=758b60330820"></script>
+    <script src="js/american_binomial.js?v=a49313f2567b"></script>
+    <script src="js/market_curves.js?v=f15898beaf0c"></script>
+    <script src="js/cost_basis_fop_stress.js?v=4383bcf26004"></script>
+    <script src="js/cost_basis_fop.js?v=d7e711a39d94"></script>
+    <script src="js/cost_basis_fop_stress_worker.js?v=841c73d4618f"></script>
 </body>
 </html>

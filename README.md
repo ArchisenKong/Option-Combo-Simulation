@@ -201,7 +201,19 @@ compares quantity, AvgCost, binding and cash separately (cash is never
 reconciled yet), and can save that comparison as a snapshot of the ledger
 version. It shows the buyer's options apart and puts a statement's own realized
 P&L beside the ledger's (evidence only). Problems are explained in Chinese with
-the next step. Both backends accept FOP writes; `[cost_basis]
+the next step. Its stress view (`CODE PLAN/COST_BASIS_FOP_STRESS_CONTRACT.md`)
+shows how the economic P&L of the positions held now changes if the futures
+months move (a shift, plus an optional labelled slope between months), days
+pass and implied volatility scales: each option is priced off its own future
+from the quote batch on screen (options need live two-sided quotes), options
+expiring inside the horizon settle at the scenario price, and an IV band shows
+the range. Each point lists every month's price and every option's model
+value, and a table shows each option's implied volatility. The price range is
+a percentage of the reference month or, if you fill in the dollar range, that
+many dollars either side (the only choice when the reference price is 0). It
+runs in the browser, in memory only; the rate is the backend's cached discount
+curve (refused when the backend says it is out of date) or a rate you type
+(labelled an assumption). The results are scenarios, not probabilities or margin. Both backends accept FOP writes; `[cost_basis]
 fop_writes_enabled = false` in `config.ini` makes every FOP ledger read-only
 again, and the page then keeps its write controls disabled. Statement rows write only
 after a real statement accepts each row type (`cost_basis_fop_capabilities.json`)

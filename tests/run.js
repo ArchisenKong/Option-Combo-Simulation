@@ -53,6 +53,8 @@ const suites = [
     require('./cost_basis_fop_reconcile.test'),
     require('./cost_basis_fop_messages.test'),
     require('./cost_basis_fop_page.test'),
+    require('./cost_basis_fop_stress.test'),
+    require('./cost_basis_fop_stress_worker.test'),
     require('./workspace_db_admin_core.test'),
     require('./workspace_db_admin_page.test'),
     require('./session_ui.test'),

@@ -40,8 +40,8 @@
     const QUOTE_RECHECK_MS = 15000;
     const IMPORT_BATCH_EVENTS = 5000;
 
-    const STAGE_NOTICE = '独立 FOP 账本正在分阶段实施：已提供账本、报表导入、手工记账、一次性报价与交割预览。'
-        + '旧版 FUT 账本已冻结（旧引擎可能把不同期货月份合并计算）。正式写入在发布阶段开放；'
+    const STAGE_NOTICE = '独立 FOP 账本：账本、报表导入、手工记账、一次性报价、交割预览与压力情景。'
+        + '旧版 FUT 账本已冻结（旧引擎可能把不同期货月份合并计算）。'
         + '报表的经济行在真实样本验收前只能预览或逐行人工认领。';
     const LEGACY_STATE = '这是旧版 FUT 账本，已冻结为只读。这里只显示账本身份；'
         + '需要查看流水、导出或删除时，请在旧页面打开。';
@@ -68,6 +68,8 @@
         quoteGeneration: 0,
         bindingGeneration: 0,
         positionsGeneration: 0,
+        // Retires stress runs: a newer run, ledger version, batch or a disconnect.
+        stressGeneration: 0,
         quoteTimer: null,
         clock: () => Date.now(),
     };
@@ -88,6 +90,7 @@
             Forms: globalScope.OptionComboCostBasisFopForms,
             Reconcile: globalScope.OptionComboCostBasisFopReconcile,
             Messages: globalScope.OptionComboCostBasisFopMessages,
+            Stress: globalScope.OptionComboCostBasisFopStress,
         };
     }
 
@@ -756,18 +759,20 @@
         const ledger = state.ledger;
         if (!ledger || !ledger.quoteBatch) return;
         ledger.quoteBatch = null;
+        if (ledger.stress) _clearStress('报价已作废，压力情景一并作废；重新取报价后再计算。');
         _renderLedger({ forms: false });
         _status('ledger-status', text);
     }
 
     async function _openLedger(book) {
         _stopQuoteTimer();
+        _clearStress();
         const zone = _readStorage(`${ZONE_STORAGE_PREFIX}${book.bookId}`, '');
         state.ledger = { bookId: book.bookId, book, graph: null, version: null, batches: [], quoteBatch: null,
             zone, importPlan: null, importFile: null, importDecisions: new Map(), duplicateControls: new Map(),
             adoptingUpgrades: false,
             delivery: null, deliveryControls: null, binding: null, manual: null, positions: null, trace: null,
-            snapshots: [], savingSnapshot: false };
+            snapshots: [], savingSnapshot: false, stress: null, stressEarly: new Set() };
         const zoneInput = $('ledger-zone');
         if (zoneInput) zoneInput.value = zone;
         await _loadLedger();
@@ -839,6 +844,7 @@
                 _clear($('delivery-result'));
                 _status('delivery-status', '账本已变化，旧的交割预览已作废；请重新演算。');
             }
+            if (moved && ledger.stress) _clearStress('账本已变化，压力情景已作废；请重新计算。');
             _renderLedger();
             _status('ledger-status', `已读取：${graph.events.length} 条流水，版本 ${version.digest.slice(0, 12)}。`);
             void _loadSnapshots(ledger);
@@ -902,6 +908,7 @@
             decisionLog(ledger.graph), '还没有人工核实过疑似重复。');
         _renderReconcile();
         if (options.forms !== false) _renderLedgerForms(model);
+        _renderStress();
         _applyWriteGate();
     }
 
@@ -940,6 +947,7 @@
             + `${View.BINDING_LABELS[row.bindingStatus] || row.bindingStatus}`]),
         bindable.length ? '选择期权' : '没有待补全或人工核实的期权绑定');
         _renderDeliveryInputs(model);
+        _renderStressInputs(model);
     }
 
     function _setZone() {
@@ -987,6 +995,8 @@
             _renderLedger({ forms: false });
             _scheduleQuoteRecheck(now, batch);
             _status('ledger-status', `报价批次 ${batch.quoteBatchId.slice(0, 18)}：${now.model.overview.quality.label}。`);
+            // A new batch: the stress view is computed again from it (contract §9).
+            if (now.stress) void _runStress();
         } catch (error) {
             if (state.ledger === ledger && request.generation === state.quoteGeneration) {
                 _status('ledger-status', `取报价失败：${_refusal(error)}`);
@@ -1952,6 +1962,301 @@
     }
 
     // ------------------------------------------------------------------
+    // Stress scenarios (CODE PLAN/COST_BASIS_FOP_STRESS_CONTRACT.md §9, §11)
+    // ------------------------------------------------------------------
+
+    const STRESS_TIMEOUT_MS = 20000;
+    // The worker loads exactly the versioned scripts this page loaded, in page order.
+    const STRESS_DEPENDENCY = new RegExp('/(cost_basis_common|cost_basis_import_common|cost_basis_fop_core|'
+        + 'cost_basis_fop_import|cost_basis_fop_forms|american_binomial|market_curves|cost_basis_fop_stress)\\.js(?:\\?|$)');
+    const STRESS_WORKER = /\/cost_basis_fop_stress_worker\.js(?:\?|$)/;
+    const STRESS_INPUTS = Object.freeze(['stress-range', 'stress-range-usd', 'stress-points', 'stress-reference',
+        'stress-slope', 'stress-horizon', 'stress-iv', 'stress-band', 'stress-rate']);
+
+    /** The stress controls that follow the ledger: the reference month and the early deliveries. */
+    function _renderStressInputs(model) {
+        const ledger = state.ledger;
+        const { View } = modules();
+        const records = View.currentRecords(ledger.graph);
+        const symbol = (id) => (records.has(id) ? records.get(id).localSymbol || id : id);
+        const futures = model.targets.filter((target) => target.secType === 'FUT').map((target) => target.contractId);
+        _fillSelect($('stress-reference'), futures.map((id) => [id,
+            `${symbol(id)}（${(records.get(id) || {}).futureContractMonth || ''}）`]), '最早的月份');
+        const node = $('stress-early');
+        _clear(node);
+        // Only an American option may be delivered early (contract §6.3).
+        const americans = model.output.options.filter((row) => row.contracts.value
+            && (records.get(row.contractId) || {}).exerciseStyle !== 'european');
+        const kept = ledger.stressEarly || new Set();
+        ledger.stressEarly = new Set([...kept].filter((id) => americans.some((row) => row.contractId === id)));
+        if (!americans.length) return;
+        const table = globalScope.document.createElement('table');
+        table.className = 'fop-table';
+        const head = globalScope.document.createElement('tr');
+        ['情景时刻提前交割（仅在该点价内时）', '期权', '持仓张数'].forEach((label) => head.appendChild(_cell('th', label)));
+        table.appendChild(head);
+        for (const row of americans) {
+            const line = globalScope.document.createElement('tr');
+            const box = globalScope.document.createElement('input');
+            box.type = 'checkbox';
+            box.id = `stress-early-${row.contractId}`;
+            box.dataset.contractId = row.contractId;
+            box.checked = ledger.stressEarly.has(row.contractId);
+            box.addEventListener('change', () => {
+                if (box.checked) ledger.stressEarly.add(row.contractId);
+                else ledger.stressEarly.delete(row.contractId);
+                _stressInputsChanged();
+            });
+            const cell = globalScope.document.createElement('td');
+            cell.appendChild(box);
+            line.appendChild(cell);
+            line.appendChild(_cell('td', symbol(row.contractId)));
+            line.appendChild(_cell('td', row.contracts.value));
+            table.appendChild(line);
+        }
+        node.appendChild(table);
+    }
+
+    function _stressParams(ledger) {
+        const band = _value('stress-band');
+        return {
+            rangePct: _value('stress-range'), range: _value('stress-range-usd'), points: _value('stress-points'),
+            reference: _value('stress-reference') || null, slope: _value('stress-slope'),
+            horizonDays: _value('stress-horizon'), ivScale: _value('stress-iv'),
+            band: band === '' ? 0 : Number(band) / 100, early: [...(ledger.stressEarly || [])].sort(),
+        };
+    }
+
+    /**
+     * The rate of a run (contract §2.3): a typed rate (read when the run
+     * starts) is a labelled assumption; otherwise the backend's cached dated
+     * discount curve with the status the backend answered, read afresh for
+     * every run so a page left open never keeps an old curve. The stress
+     * module refuses a curve the backend calls out of date; no curve at all
+     * stops the run with rate_unavailable.
+     */
+    async function _stressRate(ledger, typed) {
+        if (typed !== '') {
+            const value = Number(typed);
+            if (!Number.isFinite(value)) throw new Error('假设利率必须是数字（年化 %）');
+            return { source: 'assumed', value: value / 100 };
+        }
+        try {
+            const answer = await client.request('request_cost_basis_fop_discount_curve', { bookId: ledger.bookId });
+            return { source: 'curve', curve: answer.curve, status: answer.status };
+        } catch (_) {
+            // No cached curve: the run stops with rate_unavailable and says to type a rate.
+            return null;
+        }
+    }
+
+    /**
+     * What one run freezes (contract §2): the graph, the quote batch on screen
+     * valued for the stress view (one sync window over the whole batch,
+     * anchors included), the rate. asOf is when the prices were observed: the
+     * batch's newest real-time observation, else the batch's request time.
+     */
+    function _stressInput(ledger) {
+        const quoteState = ledger.model.quoteState;
+        const quotes = {};
+        const stress = quoteState && quoteState.usable ? quoteState.stress : null;
+        for (const [id, quote] of Object.entries((stress && stress.quotes) || {})) {
+            quotes[id] = { level: quote.level, mark: quote.mark };
+        }
+        const batch = ledger.quoteBatch;
+        return {
+            graph: ledger.graph, quotes, rate: null, ledgerDigest: ledger.version.digest,
+            asOf: (stress && stress.asOf) || (batch ? batch.requestedAtUtc : utcInstant(new Date(state.clock()))),
+            quoteBatchId: batch ? batch.quoteBatchId : null,
+        };
+    }
+
+    function _finishStress(job) {
+        if (!job) return;
+        if (job.timer) globalScope.clearTimeout(job.timer);
+        job.timer = null;
+        if (job.worker) job.worker.terminate();
+        job.worker = null;
+    }
+
+    /** Retire the run on screen: a newer generation, and no worker left running. */
+    function _clearStress(text) {
+        const ledger = state.ledger;
+        state.stressGeneration += 1;
+        if (!ledger) return;
+        _finishStress(ledger.stress);
+        ledger.stress = null;
+        _renderStress();
+        if (text !== undefined) _status('stress-status', text);
+    }
+
+    /**
+     * A changed parameter cancels a job that has no answer yet, whether it is
+     * still waiting for its rate or already in the worker; a shown result is
+     * kept but marked as the previous one.
+     */
+    function _stressInputsChanged() {
+        const ledger = state.ledger;
+        if (!ledger || !ledger.stress) return;
+        if (!ledger.stress.result) {
+            _clearStress('参数已改变，计算已取消；请重新计算。');
+            return;
+        }
+        ledger.stress.stale = true;
+        _renderStress();
+    }
+
+    function _stressStop(job, reason) {
+        job.result = { version: modules().Stress.VERSION, available: false, empty: false, reasons: [reason] };
+        _renderStress();
+    }
+
+    /**
+     * One stress run in the worker (contract §9). Everything it uses is read
+     * when it starts: the parameters, the typed rate, the graph and the quote
+     * batch; a parameter changed while it waits for the curve cancels it.
+     * Its answer is shown only while it is the ledger's latest run, for the
+     * same key, ledger version and quote batch; a new run, a new version or
+     * batch, or a disconnect retires it. 20 seconds without an answer ends
+     * it with stress_timeout.
+     */
+    async function _runStress() {
+        const ledger = state.ledger;
+        if (!ledger || !ledger.graph || !ledger.model) return;
+        _finishStress(ledger.stress);
+        state.stressGeneration += 1;
+        const generation = state.stressGeneration;
+        const job = { generation, key: null, worker: null, timer: null, result: null, stale: false, input: null };
+        ledger.stress = job;
+        // A number input such as "1e" reads as an empty string, but is not an omitted dollar range.
+        const rangeInput = $('stress-range-usd');
+        if (rangeInput && rangeInput.validity && rangeInput.validity.badInput) {
+            _stressStop(job, 'range_invalid');
+            return;
+        }
+        const model = ledger.model;
+        if (model.targets.length && !(model.quoteState && model.quoteState.usable)) {
+            _stressStop(job, 'quote_batch_unusable');
+            return;
+        }
+        const input = _stressInput(ledger);
+        const params = _stressParams(ledger);
+        const typed = _value('stress-rate');
+        job.input = { asOf: input.asOf, quoteBatchId: input.quoteBatchId, ledgerDigest: input.ledgerDigest };
+        _status('stress-status', '正在准备压力情景…');
+        let rate;
+        try {
+            rate = await _stressRate(ledger, typed);
+        } catch (error) {
+            if (ledger.stress !== job) return;
+            ledger.stress = null;
+            _status('stress-status', `不能计算：${error.message}`);
+            return;
+        }
+        if (state.ledger !== ledger || ledger.stress !== job) return;
+        // The ledger or the batch moved while the curve was read: the event that moved it decides.
+        if (!ledger.version || ledger.version.digest !== input.ledgerDigest
+            || (ledger.quoteBatch ? ledger.quoteBatch.quoteBatchId : null) !== input.quoteBatchId) {
+            _stressStop(job, 'ledger_changed');
+            return;
+        }
+        input.rate = rate;
+        job.key = JSON.stringify([input.ledgerDigest, input.quoteBatchId,
+            rate ? (rate.source === 'assumed' ? rate.value : [(rate.curve && rate.curve.curveAsOf) || 'curve', rate.status])
+                : null, params]);
+        const scripts = globalScope.document.querySelectorAll
+            ? Array.from(globalScope.document.querySelectorAll('script[src]')) : [];
+        const source = scripts.find((script) => STRESS_WORKER.test(script.src));
+        const dependencies = scripts.filter((script) => STRESS_DEPENDENCY.test(script.src)).map((script) => script.src);
+        let worker = null;
+        try {
+            if (globalScope.Worker && source) worker = new globalScope.Worker(source.src);
+        } catch (_) {
+            worker = null;
+        }
+        if (!worker) {
+            _stressStop(job, 'stress_worker_unavailable');
+            return;
+        }
+        job.worker = worker;
+        _status('stress-status', '正在计算压力情景…');
+        job.timer = globalScope.setTimeout(() => {
+            if (ledger.stress !== job) return;
+            _finishStress(job);
+            _stressStop(job, 'stress_timeout');
+        }, STRESS_TIMEOUT_MS);
+        worker.onmessage = (event) => {
+            const data = (event && event.data) || {};
+            if (state.ledger !== ledger || ledger.stress !== job || data.generation !== generation
+                || data.key !== job.key) return;
+            // Only for the version and the quote batch it was computed from.
+            if (!ledger.version || ledger.version.digest !== input.ledgerDigest) return;
+            if ((ledger.quoteBatch ? ledger.quoteBatch.quoteBatchId : null) !== input.quoteBatchId) return;
+            _finishStress(job);
+            job.result = data.result;
+            _renderStress();
+        };
+        worker.onerror = () => {
+            if (ledger.stress !== job) return;
+            _finishStress(job);
+            _stressStop(job, 'stress_failed');
+        };
+        worker.postMessage({ generation, key: job.key, dependencies, input, params });
+    }
+
+    function _renderStress() {
+        const chart = $('stress-chart');
+        const ledger = state.ledger;
+        const job = ledger && ledger.stress;
+        if (!job || !job.result) {
+            if (chart) chart.hidden = true;
+            _text($('stress-assumptions'), '');
+            _text($('stress-axes'), '');
+            _clear($('stress-anchor-futures'));
+            _clear($('stress-anchor-options'));
+            _clear($('stress-table'));
+            return;
+        }
+        const { View, Quotes, Stress } = modules();
+        const records = View.currentRecords(ledger.graph);
+        const showTotal = Boolean($('stress-total') && $('stress-total').checked);
+        const view = View.stressView(job.result, records, { showTotal });
+        let status = view.status;
+        if (view.available && !view.empty && job.input && job.input.asOf) {
+            // A curve outlives the freshness of its quotes only as a labelled reference.
+            const asOf = Stress._internal.millis(job.input.asOf);
+            if (asOf !== null && state.clock() - asOf > Quotes.FRESH_SECONDS * 1000) {
+                status += ` 基于 ${job.input.asOf.slice(11, 19)} UTC 的行情（已过期）。`;
+            }
+        }
+        if (job.stale) status += ' 参数已改变：这是上次的结果，请重新计算。';
+        _status('stress-status', status);
+        _text($('stress-assumptions'), view.assumptions);
+        // Every number traces to its inputs (contract §8, §11): each option's anchor and sigma, then per
+        // point each month's scenario price and each option's model value.
+        _table($('stress-anchor-futures'), view.anchorFutureColumns, view.anchorFutureRows, '');
+        _table($('stress-anchor-options'), view.anchorOptionColumns, view.anchorOptionRows, '');
+        _table($('stress-table'), view.columns, view.rows, '');
+        if (view.chart.available && chart) {
+            chart.hidden = false;
+            $('stress-line').setAttribute('d', view.chart.line);
+            $('stress-band-area').setAttribute('d', view.chart.band);
+            $('stress-zero').setAttribute('d', view.chart.zero);
+            const anchor = $('stress-anchor');
+            anchor.setAttribute('x1', String(view.chart.anchorX));
+            anchor.setAttribute('x2', String(view.chart.anchorX));
+            anchor.setAttribute('y1', String(view.chart.top));
+            anchor.setAttribute('y2', String(view.chart.bottom));
+            const axes = view.chart.axes;
+            _text($('stress-axes'), `横轴：参考月价格 ${axes.xMin} – ${axes.xMax}；纵轴：`
+                + `${showTotal ? '情景经济盈亏' : '经济盈亏变化'} ${axes.yMin} – ${axes.yMax} 美元；虚线为当前价格。`);
+        } else {
+            if (chart) chart.hidden = true;
+            _text($('stress-axes'), '');
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Backup, restore, delete, create
     // ------------------------------------------------------------------
 
@@ -2163,6 +2468,12 @@
         _on('binding-adopt', 'click', () => { void _adoptBinding(); });
         _on('delivery-suggest', 'click', _suggestDeliveries);
         _on('delivery-run', 'click', _runDelivery);
+        _on('stress-run', 'click', () => { void _runStress(); });
+        _on('stress-total', 'change', _renderStress);
+        for (const id of STRESS_INPUTS) {
+            _on(id, 'input', _stressInputsChanged);
+            _on(id, 'change', _stressInputsChanged);
+        }
         _on('backup-export', 'click', () => { void _exportBackup(); });
         _on('restore-submit', 'click', () => { void _restoreBackup(); });
         _on('delete-submit', 'click', () => { void _deleteBook(); });

@@ -1112,6 +1112,45 @@ puts every stable problem code into Chinese with its next step. New contract
 record ids are readable and scoped to their ledger: two accounts' ledgers in
 one database hold the same real contract.
 
+The stress view (plan §13.3 P7, `CODE PLAN/COST_BASIS_FOP_STRESS_CONTRACT.md`)
+answers what the economic P&L of the positions held now becomes if every
+futures month moves (a shift plus a labelled slope per contract month), time
+passes and implied volatility scales. `js/cost_basis_fop_stress.js` (DOM-free)
+prices each open option off its own bound future: an American option with the
+CRR tree of `js/american_binomial.js` on a future (dividendYield = rate, 201
+steps), a European one with its own Black-76 and a double-precision normal
+function (never `pricing_core`'s Black-76, which moves F <= 0 to 1e-4). At
+expiry an option is worth its intrinsic value whatever the sign of F; before
+it, F <= 0 stops the model at that point. Implied volatility is solved only
+from synced mids, the bound future's too; the quote batch carries a bound
+future the ledger does not hold as an anchor (`quoteState.anchors`), apart
+from the ledger's marks, its lowest level and its sync window. The stress view
+reads `quoteState.stress` instead: the whole batch, anchors included, held to
+one sync window. An option expiring inside the horizon settles at the
+scenario price, strictly in the money onto its future at the strike; an
+American option may be chosen for delivery at the horizon where it is strictly
+in the money there. The change is position-based and exactly 0 at the anchor;
+the total is the core's replay of the graph plus the scenario's settlements,
+built by the same `Forms.settlementEvent` / `withSettlements` as the delivery
+preview (with order evidence for simultaneous ones), and the two agree. A run
+freezes, when it starts, its parameters, the graph, the batch (asOf is the
+batch's newest real-time observation) and the rate: a typed rate is a labelled
+assumption, otherwise the cached dated curve read afresh for every run through
+`request_cost_basis_fop_discount_curve` (both servers answer it from their
+yield-curve cache with `refresh: False`) together with the backend's status; a
+curve the backend answers as `cache_fallback` (older than the last market
+business date) or that marks itself stale stops the run (`rate_curve_stale`).
+Every stop that stands on its own is listed at once, before any implied
+volatility is solved. A dollar range replaces the percentage range (the only
+range at a zero reference price). Each point shows every month's scenario
+price and every option's model value, beside an anchors table with each
+option's mid, anchored value and implied volatility. It runs in
+`js/cost_basis_fop_stress_worker.js`, loaded with the page's own versioned
+scripts; an answer counts only for the latest run, key, ledger version and
+batch, a changed parameter cancels a job without an answer (one still reading
+its curve too), 20 s ends one, and a moved ledger, a new batch or a disconnect
+retires the curve. Nothing is written or sent but the two reads.
+
 Schema v9 ties statement coverage to reset archives, checks both archive digests
 on restoration, and invalidates prior coverage after historical changes.
 Import/reset/rebuild/restore require identity and version credentials. Event

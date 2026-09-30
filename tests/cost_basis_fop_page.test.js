@@ -26,7 +26,11 @@ const PROTOCOL = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/fixtures/cost
 const SCRIPTS = ['js/cost_basis_common.js', 'js/cost_basis_import_common.js', 'js/cost_basis_fop_core.js',
     'js/cost_basis_fop_import.js', 'js/cost_basis_fop_quotes.js', 'js/cost_basis_fop_messages.js',
     'js/cost_basis_fop_view.js',
-    'js/cost_basis_fop_forms.js', 'js/cost_basis_fop_reconcile.js'];
+    'js/cost_basis_fop_forms.js', 'js/cost_basis_fop_reconcile.js', 'js/american_binomial.js', 'js/market_curves.js',
+    'js/cost_basis_fop_stress.js'];
+// The page's script tags as a browser lists them (versioned URLs, page order), for the stress worker.
+const PAGE_SCRIPTS = SCRIPTS.concat(['js/cost_basis_fop.js', 'js/cost_basis_fop_stress_worker.js'])
+    .map((file) => ({ src: `http://127.0.0.1:8124/${file}?v=0123456789ab` }));
 const pure = loadBrowserScripts(SCRIPTS.concat(['scripts/cost_basis_fop_browser_assertions.js']), { document: {} });
 const Import = pure.OptionComboCostBasisFopImport;
 const Core = pure.OptionComboCostBasisFopCore;
@@ -71,7 +75,8 @@ function fill(symbol, local, qty, price, codes = 'O') {
 function fakeNode(tag) {
     return {
         tag, textContent: '', hidden: false, href: '', className: '', dataset: {}, children: [], value: '',
-        disabled: false, checked: false, listeners: {}, files: null,
+        disabled: false, checked: false, listeners: {}, files: null, attributes: {},
+        setAttribute(name, value) { this.attributes[name] = String(value); },
         appendChild(child) { this.children.push(child); return child; },
         removeChild(child) { this.children.splice(this.children.indexOf(child), 1); },
         addEventListener(type, handler) { (this.listeners[type] = this.listeners[type] || []).push(handler); },
@@ -112,6 +117,20 @@ function loadLedgerPage(options) {
 
         send(message) { this.sent.push(JSON.parse(message)); }
     }
+    // A worker the test answers by hand: it records what the page posts and whether it was ended.
+    const workers = [];
+    class FakeWorker {
+        constructor(url) {
+            this.url = url;
+            this.messages = [];
+            this.terminated = false;
+            workers.push(this);
+        }
+
+        postMessage(message) { this.messages.push(JSON.parse(JSON.stringify(message))); }
+
+        terminate() { this.terminated = true; }
+    }
     const context = loadBrowserScripts(SCRIPTS.concat(['js/cost_basis_fop.js']), {
         document: {
             readyState: 'complete',
@@ -120,7 +139,9 @@ function loadLedgerPage(options) {
                 return nodes.get(id);
             },
             createElement: fakeNode,
+            querySelectorAll: (selector) => (selector === 'script[src]' ? PAGE_SCRIPTS : []),
         },
+        Worker: options.noWorker ? undefined : FakeWorker,
         localStorage: { getItem: (key) => (key === 'optionComboWsPort' ? '8799'
             : (key === `optionComboFopZone:${BOOK.bookId}` ? 'America/New_York' : null)), setItem() {} },
         WebSocket: FakeWebSocket,
@@ -186,7 +207,7 @@ function loadLedgerPage(options) {
         return timers.filter((timer) => !timer.cleared && timer.delay !== 45000).pop() || null;
     }
     return { context, get socket() { return current(); }, sockets, server, answer, answerLatest, drain, pending,
-        open, settle, timers, quoteTimer,
+        open, settle, timers, quoteTimer, workers,
         node: (id) => { if (!nodes.has(id)) nodes.set(id, fakeNode(id)); return nodes.get(id); },
         page: () => context.OptionComboCostBasisFopPage };
 }
@@ -1259,6 +1280,293 @@ module.exports = {
                     message: 'the ledger changed since it was reviewed' });
                 assert.match(page.node('import-status').textContent,
                     /^未导入：版本冲突：账本已在预览后变化。下一步：重新读取账本、重新预览后再确认。\[ledger_changed\] 原文：the ledger changed/);
+            },
+        },
+        {
+            name: 'the stress view runs in a worker on the batch on screen, and only its latest answer counts (P7)',
+            async run() {
+                // ROLLED holds CLF7; its options are bound to CLZ6, which is quoted as an anchor.
+                const withAnchor = MIDS.concat([evidence(CLZ6, { bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2 })]);
+                const page = await pageWithQuotes(withAnchor);
+                const asked = page.socket.sent.find((item) => item.action === 'request_cost_basis_fop_market_snapshot');
+                assert.ok(asked.contractIds.includes(CLZ6), 'the bound future is quoted as an anchor');
+                const early = findNode(page.node('stress-early'), (node) => node.tag === 'input'
+                    && node.dataset.contractId === C75);
+                assert.ok(early, 'an American option can be chosen for an early delivery');
+                page.node('stress-run').fire('click');
+                await page.settle();
+                // No typed rate: the cached discount curve, read once.
+                const curve = { schemaVersion: 2, curveAsOf: '2026-11-11', currency: 'USD', source: 'test',
+                    points: [7, 30, 90, 365].map((tenorDays) => ({ tenorDays, zeroRate: 0.04,
+                        discountFactor: Math.exp(-0.04 * tenorDays / 365) })) };
+                await page.answer('request_cost_basis_fop_discount_curve', { bookId: BOOK.bookId, status: 'cached', curve,
+                    note: '' });
+                await page.settle();
+                assert.equal(page.workers.length, 1);
+                const [worker] = page.workers;
+                assert.match(worker.url, /\/js\/cost_basis_fop_stress_worker\.js\?v=/);
+                const [message] = worker.messages;
+                assert.deepEqual(message.dependencies.map((src) => src.replace(/^http:\/\/127\.0\.0\.1:8124\//, '')
+                    .replace(/\?v=.*$/, '')), ['js/cost_basis_common.js', 'js/cost_basis_import_common.js',
+                    'js/cost_basis_fop_core.js', 'js/cost_basis_fop_import.js', 'js/cost_basis_fop_forms.js',
+                    'js/american_binomial.js', 'js/market_curves.js', 'js/cost_basis_fop_stress.js'],
+                'the worker loads the page\'s own versioned scripts, in page order');
+                // asOf is when the prices were observed (the broker's time, 10 s before the request), never the page's.
+                assert.equal(message.input.asOf, '2026-11-12T14:59:50.000000Z');
+                assert.equal(message.input.quoteBatchId, 'quotes-1');
+                assert.deepEqual(message.input.quotes[CLZ6], { level: 'mid', mark: 72 });
+                assert.equal(message.input.rate.source, 'curve');
+                assert.equal(message.input.ledgerDigest, V1.digest);
+                assert.match(page.node('stress-status').textContent, /正在计算/);
+                // Nothing the stress view does is a write.
+                assert.deepEqual(page.socket.sent.filter((item) => pure.OptionComboCostBasisCommon
+                    .isWriteAction(item.action)), []);
+                // An answer for another run is dropped.
+                const Stress = page.context.OptionComboCostBasisFopStress;
+                const result = Stress.run(message.input, message.params);
+                assert.equal(result.available, true, String(result.reasons));
+                worker.onmessage({ data: { generation: message.generation + 1, key: message.key, result } });
+                worker.onmessage({ data: { generation: message.generation, key: 'another', result } });
+                assert.match(page.node('stress-status').textContent, /正在计算/);
+                assert.equal(worker.terminated, false);
+                worker.onmessage({ data: { generation: message.generation, key: message.key, result } });
+                assert.equal(worker.terminated, true);
+                assert.match(page.node('stress-status').textContent, /^61 个情景点（参考月 CLZ6，经过 0 天，IV × 1）/);
+                assert.match(page.node('stress-assumptions').textContent, /价格立即到位并保持.*贴现曲线（2026-11-11）/);
+                assert.equal(page.node('stress-chart').hidden, false);
+                assert.match(page.node('stress-line').attributes.d, /^M [0-9.]+ [0-9.]+ L /);
+                const table = findNode(page.node('stress-table'), (node) => node.tag === 'table');
+                const header = table.children[0].children.map((cell) => cell.textContent);
+                const rows = table.children.slice(1);
+                assert.equal(rows.length, 61);
+                assert.equal(rows[30].children[header.indexOf('经济盈亏变化')].textContent, '0.00',
+                    'the anchor point changes nothing');
+                page.node('stress-total').checked = true;
+                page.node('stress-total').fire('change');
+                assert.match(page.node('stress-axes').textContent, /纵轴：情景经济盈亏/);
+                // Past the quotes' freshness the curve stays, labelled as resting on an expired batch.
+                page.advance(121 * 1000);
+                page.node('stress-total').fire('change');
+                assert.match(page.node('stress-status').textContent, /基于 14:59:50 UTC 的行情（已过期）/);
+                // A typed rate is an assumption: no curve request; a changed parameter cancels a running job.
+                page.node('stress-rate').value = '3';
+                page.node('stress-run').fire('click');
+                await page.settle();
+                assert.equal(page.pending('request_cost_basis_fop_discount_curve').length, 0);
+                const second = page.workers[1];
+                assert.deepEqual(second.messages[0].input.rate, { source: 'assumed', value: 0.03 });
+                page.node('stress-horizon').value = '5';
+                page.node('stress-horizon').fire('input');
+                assert.equal(second.terminated, true);
+                assert.match(page.node('stress-status').textContent, /参数已改变，计算已取消/);
+                second.onmessage({ data: { generation: second.messages[0].generation, key: second.messages[0].key, result } });
+                assert.match(page.node('stress-status').textContent, /参数已改变，计算已取消/, 'a retired job\'s answer is dropped');
+                // Twenty seconds without an answer ends the run.
+                page.node('stress-run').fire('click');
+                await page.settle();
+                const third = page.workers[2];
+                page.timers.filter((timer) => timer.delay === 20000 && !timer.cleared).pop().fn();
+                assert.equal(third.terminated, true);
+                assert.match(page.node('stress-status').textContent, /计算超时.*\[stress_timeout\]/);
+            },
+        },
+        {
+            name: 'the stress view needs a quote batch and a worker, and a changed ledger or retired quotes retire it (P7)',
+            async run() {
+                // No quotes yet: nothing to anchor on, no worker started.
+                const bare = loadLedgerPage({ writesReleased: true, version: V1, graph: ROLLED });
+                await bare.open();
+                await bare.drain();
+                bare.node('stress-run').fire('click');
+                await bare.settle();
+                assert.equal(bare.workers.length, 0);
+                assert.match(bare.node('stress-status').textContent, /不能计算：没有可用的报价批次.*\[quote_batch_unusable\]/);
+                // No worker in this environment: said so, never computed on the page.
+                const noWorker = loadLedgerPage({ writesReleased: true, version: V1, graph: ROLLED, noWorker: true });
+                await noWorker.open();
+                await noWorker.drain();
+                noWorker.page().setClock(() => CLOCK);
+                noWorker.node('quote-refresh').fire('click');
+                await noWorker.settle();
+                await noWorker.answer('request_cost_basis_fop_market_snapshot', snapshot(V1, MIDS));
+                noWorker.node('stress-rate').value = '4';
+                noWorker.node('stress-run').fire('click');
+                await noWorker.settle();
+                assert.match(noWorker.node('stress-status').textContent, /\[stress_worker_unavailable\]/);
+                // A result on screen goes when the ledger moves to another version.
+                const withAnchor = MIDS.concat([evidence(CLZ6, { bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2 })]);
+                const page = await pageWithQuotes(withAnchor);
+                page.node('stress-rate').value = '4';
+                page.node('stress-run').fire('click');
+                await page.settle();
+                const [message] = page.workers[0].messages;
+                const result = page.context.OptionComboCostBasisFopStress.run(message.input, message.params);
+                page.workers[0].onmessage({ data: { generation: message.generation, key: message.key, result } });
+                assert.equal(page.node('stress-chart').hidden, false);
+                // A new quote batch computes the view again from it (contract §9).
+                page.node('quote-refresh').fire('click');
+                await page.settle();
+                await page.answer('request_cost_basis_fop_market_snapshot', snapshot(V1, withAnchor, 'quotes-2'));
+                assert.equal(page.workers.length, 2, 'a new batch starts a new run');
+                assert.equal(page.workers[1].messages[0].input.quoteBatchId, 'quotes-2');
+                page.server.version = V2;
+                page.node('ledger-reload').fire('click');
+                await page.drain();
+                await page.settle();
+                assert.equal(page.node('stress-chart').hidden, true);
+                assert.match(page.node('stress-status').textContent, /账本已变化，压力情景已作废/);
+                // A disconnect retires the quotes and the stress view with them.
+                const again = await pageWithQuotes(withAnchor);
+                again.node('stress-rate').value = '4';
+                again.node('stress-run').fire('click');
+                await again.settle();
+                const [pending] = again.workers[0].messages;
+                again.socket.onclose();
+                assert.equal(again.workers[0].terminated, true);
+                assert.match(again.node('stress-status').textContent, /报价已作废，压力情景一并作废/);
+                const late = again.context.OptionComboCostBasisFopStress.run(pending.input, pending.params);
+                again.workers[0].onmessage({ data: { generation: pending.generation, key: pending.key, result: late } });
+                assert.equal(again.node('stress-chart').hidden, true, 'the late answer is dropped');
+            },
+        },
+        {
+            name: 'an old curve is refused, a run freezes its inputs while the curve is read, and each point names its sources (P7 review)',
+            async run() {
+                const withAnchor = MIDS.concat([evidence(CLZ6, { bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2 })]);
+                const page = await pageWithQuotes(withAnchor);
+                const Stress = page.context.OptionComboCostBasisFopStress;
+                const curve = (curveAsOf) => ({ schemaVersion: 2, curveAsOf, currency: 'USD', source: 'test',
+                    points: [7, 30, 90, 365].map((tenorDays) => ({ tenorDays, zeroRate: 0.04,
+                        discountFactor: Math.exp(-0.04 * tenorDays / 365) })) });
+                // The backend's answer for an out-of-date curve: cache_fallback with its reason. Not used.
+                page.node('stress-run').fire('click');
+                await page.settle();
+                await page.answer('request_cost_basis_fop_discount_curve', { bookId: BOOK.bookId, status: 'cache_fallback',
+                    curve: curve('2020-01-02'), note: 'Yield-curve snapshot 2020-01-02 is older than market date 2026-11-12.' });
+                await page.settle();
+                let [message] = page.workers[0].messages;
+                assert.equal(message.input.rate.status, 'cache_fallback', 'the status goes with the curve');
+                let result = Stress.run(message.input, message.params);
+                assert.deepEqual(plain(result.reasons), ['rate_curve_stale:2020-01-02']);
+                page.workers[0].onmessage({ data: { generation: message.generation, key: message.key, result } });
+                assert.match(page.node('stress-status').textContent,
+                    /^不能计算：后端缓存的贴现曲线已过期.*（2020-01-02）.*填写“假设利率”.*\[rate_curve_stale\]/);
+                assert.equal(page.node('stress-chart').hidden, true);
+                // Every run reads the curve again: a page left open never keeps an old one.
+                page.node('stress-run').fire('click');
+                await page.settle();
+                assert.equal(page.pending('request_cost_basis_fop_discount_curve').length, 1, 'read again');
+                // A parameter changed while the curve is being read cancels the run before any worker starts.
+                page.node('stress-rate').value = '9';
+                page.node('stress-rate').fire('input');
+                assert.match(page.node('stress-status').textContent, /参数已改变，计算已取消/);
+                await page.answer('request_cost_basis_fop_discount_curve', { bookId: BOOK.bookId, status: 'cached',
+                    curve: curve('2026-11-11'), note: '' });
+                await page.settle();
+                assert.equal(page.workers.length, 1, 'the cancelled run never reaches a worker');
+                assert.match(page.node('stress-status').textContent, /参数已改变，计算已取消/);
+                // What a run uses is read when it starts: a later edit does not reach it.
+                page.node('stress-rate').value = '';
+                page.node('stress-range-usd').value = '10';
+                page.node('stress-points').value = '11';
+                page.node('stress-run').fire('click');
+                await page.settle();
+                page.node('stress-range-usd').value = '20';
+                await page.answer('request_cost_basis_fop_discount_curve', { bookId: BOOK.bookId, status: 'cached',
+                    curve: curve('2026-11-11'), note: '' });
+                await page.settle();
+                assert.equal(page.workers.length, 2);
+                [message] = page.workers[1].messages;
+                assert.equal(message.params.range, '10', 'the dollar range as it was when the run started');
+                assert.deepEqual([message.input.rate.source, message.input.rate.status], ['curve', 'cached']);
+                result = Stress.run(message.input, message.params);
+                assert.equal(result.available, true, String(result.reasons));
+                assert.deepEqual([result.points[0].shift, result.points[10].shift], [-10, 10]);
+                page.workers[1].onmessage({ data: { generation: message.generation, key: message.key, result } });
+                assert.match(page.node('stress-assumptions').textContent, /扫描范围 ±10 美元\/桶（按美元输入）/);
+                // Each point lists every month's scenario price and every option's model value; the anchors
+                // table gives each option's mid, anchored value and implied volatility (contract §8, §11).
+                const tableOf = (id) => findNode(page.node(id), (node) => node.tag === 'table');
+                const header = tableOf('stress-table').children[0].children.map((cell) => cell.textContent);
+                assert.deepEqual(header, ['参考月价格', 'CLZ6 情景价', 'CLF7 情景价', 'LOZ6 C7500 模型值',
+                    'LOZ6 P6500 模型值', '经济盈亏变化', '情景经济盈亏', 'IV 区间（变化）', '情景交割', '说明']);
+                const middle = tableOf('stress-table').children[6].children.map((cell) => cell.textContent);
+                assert.deepEqual(middle.slice(0, 3), ['72', '72', '72.45']);
+                const anchorOption = result.anchor.options[C75];
+                assert.equal(middle[3], String(Math.round(anchorOption.value * 1e6) / 1e6));
+                assert.equal(middle[5], '0.00');
+                const options = tableOf('stress-anchor-options');
+                assert.deepEqual(options.children[0].children.map((cell) => cell.textContent).slice(0, 8), ['期权', '持仓（张）',
+                    '绑定期货', '期货锚点价', '期权中间价', '锚定模型值', '隐含波动率 σ', '情景 σ（× IV 倍数）']);
+                const call = options.children.slice(1).find((row) => row.children[0].textContent === 'LOZ6 C7500');
+                assert.deepEqual(call.children.slice(0, 5).map((cell) => cell.textContent), ['LOZ6 C7500', '-1', 'CLZ6', '72',
+                    '0.325']);
+                assert.equal(call.children[6].textContent, `${Math.round(anchorOption.sigma * 1e6) / 1e4}%`);
+                const futures = tableOf('stress-anchor-futures');
+                assert.deepEqual(futures.children.slice(1).map((row) => row.children.map((cell) => cell.textContent)),
+                    [['CLZ6', '202612', '72', '实时中间价', '0'], ['CLF7', '202701', '72.45', '实时中间价', '1']]);
+                // A batch whose anchor was observed 70 s after the ledger's quotes: the ledger keeps its mids, and
+                // the run is given the batch-wide view, in which the options are not in sync with their future.
+                const apart = MIDS.map((item) => Object.assign({}, item, {
+                    observedAtUtc: new Date(CLOCK - 80000).toISOString().replace('Z', '000Z') }))
+                    .concat([evidence(CLZ6, { bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2 }, CLOCK - 10000)]);
+                page.node('quote-refresh').fire('click');
+                await page.settle();
+                await page.answer('request_cost_basis_fop_market_snapshot', snapshot(V1, apart, 'quotes-2'));
+                assert.deepEqual(plain(page.page().inspect().model.quoteState.quotes.map((quote) => quote.level)),
+                    ['mid', 'mid', 'mid'], 'the anchor leaves the ledger\'s quotes alone');
+                await page.answer('request_cost_basis_fop_discount_curve', { bookId: BOOK.bookId, status: 'cached',
+                    curve: curve('2026-11-11'), note: '' });
+                await page.settle();
+                [message] = page.workers[page.workers.length - 1].messages;
+                assert.equal(message.input.quoteBatchId, 'quotes-2', 'a new batch computes the view again');
+                assert.equal(message.input.asOf, '2026-11-12T14:59:50.000000Z', 'asOf is the batch\'s newest observation');
+                assert.deepEqual(plain(message.input.quotes[C75]), { level: 'unavailable', mark: null });
+                assert.deepEqual(plain(message.input.quotes[CLZ6]), { level: 'mid', mark: 72 });
+                assert.deepEqual(plain(Stress.run(message.input, message.params).reasons).sort(),
+                    [`future_anchor_missing:${CLF7}`, `iv_needs_mid:${C75}`, `iv_needs_mid:${P65}`].sort());
+            },
+        },
+        {
+            name: 'a browser-invalid dollar range stops instead of falling back to percent, and clearing it recovers (P7 review)',
+            async run() {
+                const page = await pageWithQuotes(MIDS.concat([
+                    evidence(CLZ6, { bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2 }),
+                ]));
+                page.node('stress-rate').value = '4';
+                page.node('stress-points').value = '11';
+                page.node('stress-range').value = '20';
+                const range = page.node('stress-range-usd');
+                range.value = '';
+                range.validity = { badInput: false };
+                const finish = () => {
+                    const worker = page.workers[page.workers.length - 1];
+                    const [message] = worker.messages;
+                    const result = page.context.OptionComboCostBasisFopStress.run(message.input, message.params);
+                    worker.onmessage({ data: { generation: message.generation, key: message.key, result } });
+                    return result;
+                };
+                page.node('stress-run').fire('click');
+                await page.settle();
+                assert.equal(finish().available, true);
+                assert.equal(page.node('stress-chart').hidden, false);
+                // A real number input containing e.g. 1e exposes value='' and badInput=true.
+                range.validity.badInput = true;
+                range.fire('input');
+                page.node('stress-run').fire('click');
+                await page.settle();
+                assert.match(page.node('stress-status').textContent, /不能计算.*\[range_invalid\]/);
+                assert.equal(page.node('stress-chart').hidden, true, 'the old curve is removed');
+                assert.equal(page.workers.length, 1, 'an invalid input never starts another calculation');
+                // Truly clearing the field restores the percentage range; it is different from badInput.
+                range.validity.badInput = false;
+                range.fire('input');
+                page.node('stress-run').fire('click');
+                await page.settle();
+                assert.equal(finish().available, true);
+                assert.equal(page.node('stress-chart').hidden, false);
+                assert.match(page.node('stress-assumptions').textContent, /参考月价格的 20%/);
+                assert.equal(page.pending('request_cost_basis_fop_discount_curve').length, 0);
             },
         },
     ],

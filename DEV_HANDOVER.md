@@ -236,7 +236,16 @@ Persistence and ledger modules, mounted by BOTH backends:
   hold the same real contract). The seeded release campaign is
   `scripts/verify_cost_basis_fop_randomized.py --seed 0 --cases 2000 --steps 80
   --store-cases 300`; the stock one (`scripts/verify_cost_basis_randomized.py`)
-  no longer generates FUT histories
+  no longer generates FUT histories. The FOP stress view (P7) follows
+  `CODE PLAN/COST_BASIS_FOP_STRESS_CONTRACT.md`: `js/cost_basis_fop_stress.js`
+  must keep reproducing `tests/fixtures/cost_basis_fop/stress_vectors.json`
+  (numbers from hand working and the independent model
+  `tests/helpers/cost_basis_fop_stress_model.py`); it runs in
+  `js/cost_basis_fop_stress_worker.js` and reads the cached curve through
+  `request_cost_basis_fop_discount_curve` (both servers, `refresh: False`) for
+  every run, with the backend's status: `cache_fallback` means out of date and
+  stops the run (`rate_curve_stale`). The synthetic backend's
+  `POST /__synthetic/curve` takes a `status` to exercise that
 - CSV/ledger-inferred holdings remain visible while TWS is offline; current
   broker quantities and AvgCost are corroboration, never automatic writes
 - reviewed recent TWS fills import by `execId`; same-batch duplicates block in

@@ -77,6 +77,7 @@ SERVER_ACTIONS = {
     'request_cost_basis_fop_statement_bindings': 'cost_basis_fop_statement_bindings',
     'request_cost_basis_fop_market_snapshot': 'cost_basis_fop_market_snapshot',
     'request_cost_basis_fop_positions': 'cost_basis_fop_positions',
+    'request_cost_basis_fop_discount_curve': 'cost_basis_fop_discount_curve',
 }
 
 COST_BASIS_CLIENT_ACTIONS = frozenset(SERVER_ACTIONS)
@@ -389,6 +390,9 @@ async def build_cost_basis_response(store_env, websocket, data, *,
                     'marketSnapshot': callable(store_env.get('fetch_fop_market_snapshot')),
                     # TWS positions of the ledger's account (plan §19 P5-C3).
                     'positions': callable(store_env.get('fetch_fop_positions')),
+                    # The cached dated discount curve for the stress view
+                    # (stress contract §2.3); both servers have one.
+                    'discountCurve': callable(store_env.get('fetch_discount_curve')),
                     # The statement row types and their mapping (plan §9.7):
                     # the page hands this document to the FOP importer.
                     'importCapabilities': store._fop_capability_list().document,
@@ -494,6 +498,41 @@ async def build_cost_basis_response(store_env, websocket, data, *,
                     'ledgerVersion': version, 'accountConnected': connected, 'positionsReady': ready,
                     'positions': positions, 'evidenceCredential': credential}
         _log_result(action, request_id, data, started, result={'positions': len(positions)})
+        return response
+
+    if action == 'request_cost_basis_fop_discount_curve':
+        # Read-only: the curve the server already has cached. It never asks the
+        # yield-curve updater to fetch (refresh=False), and it answers with the
+        # requestId like every FOP read (stress contract §2.3).
+        fetcher = store_env.get('fetch_discount_curve')
+        if not callable(fetcher):
+            return _error_response(
+                server_action, request_id, 'fop_discount_curve_unavailable',
+                'this backend has no discount curve')
+        try:
+            _fop_message(data, 'DiscountCurveRequest')
+            book = await asyncio.to_thread(store.get_book, data['bookId'])
+            if book.get('fop') is None:
+                raise InvalidRequestError('the discount curve is read for FOP ledgers only')
+            payload = await fetcher()
+        except CostBasisStoreError as exc:
+            _log_result(action, request_id, data, started, error=exc.code)
+            return _error_response(server_action, request_id, exc.code, str(exc))
+        except Exception:
+            logger.exception('discount curve read failed')
+            return _error_response(server_action, request_id, 'fop_discount_curve_failed',
+                                   'failed to read the discount curve')
+        payload = payload if isinstance(payload, dict) else {}
+        status = payload.get('status')
+        curve = payload.get('curve')
+        if not isinstance(curve, dict) or status not in ('cached', 'cache_fallback', 'updated'):
+            return _error_response(
+                server_action, request_id, 'fop_discount_curve_unavailable',
+                str(payload.get('error') or 'no discount curve is cached'))
+        response = {'action': server_action, 'requestId': request_id, 'success': True,
+                    'bookId': book['bookId'], 'status': status, 'curve': curve,
+                    'note': str(payload.get('error') or '')}
+        _log_result(action, request_id, data, started, result={'status': status})
         return response
 
     if action == 'request_cost_basis_executions':

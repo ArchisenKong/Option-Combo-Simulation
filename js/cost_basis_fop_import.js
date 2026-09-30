@@ -70,6 +70,9 @@
             root: 'CL', exchange: 'NYMEX', currency: 'USD', exchangeTimeZone: 'America/Chicago',
             futurePointValue: 1000, premiumMultiplier: 1000, deliverableFuturesPerOption: 1,
             settlementType: 'physical_future', exerciseStyle: 'american', futureClass: 'CL',
+            // An option known only by its expiry date expires at this exchange-local
+            // time (stress contract §3.4); an exact optionExpiryAsOf always wins.
+            optionExpiryLocalTime: '13:30:00',
         }),
     });
     // Timezone abbreviations a statement's WhenGenerated line may carry. Only

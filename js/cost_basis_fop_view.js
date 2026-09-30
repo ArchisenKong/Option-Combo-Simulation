@@ -472,7 +472,224 @@
         });
     }
 
+    // ------------------------------------------------------------------
+    // Stress scenarios (CODE PLAN/COST_BASIS_FOP_STRESS_CONTRACT.md §8, §11)
+    // ------------------------------------------------------------------
+
+    const STRESS_LABELS = Object.freeze({
+        immediate_path: '价格立即到位并保持', sticky_strike: '每张期权保留自己的隐含波动率（sticky-strike）',
+        no_delivery_fees: '情景交割未计费用', assumed_rate: '利率为手工假设',
+        reference_quotes: '部分期货锚点是结算/收盘参考价',
+    });
+    const SETTLEMENT_LABELS = Object.freeze({ assign: '被指派', exercise: '行权', expire: '到期作废' });
+    const STRESS_ANCHOR_FUTURE_COLUMNS = Object.freeze(['期货', '合约月', '锚点价', '报价级别', '持仓（张）']);
+    const STRESS_ANCHOR_OPTION_COLUMNS = Object.freeze(['期权', '持仓（张）', '绑定期货', '期货锚点价', '期权中间价',
+        '锚定模型值', '隐含波动率 σ', '情景 σ（× IV 倍数）', '贴现利率', '剩余天数', '到期时刻']);
+    const NOT_DELIVERED_LABELS = Object.freeze({ out_of_the_money: '价外，未提前交割', settled_at_expiry: '已在到期时结算' });
+
+    function moneyText(value) {
+        if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+        const rounded = round(value, 2);
+        return (Object.is(rounded, -0) ? 0 : rounded).toFixed(2);
+    }
+
+    /** What a stress run assumes, in one line (contract §11): always shown beside the curve. */
+    function stressAssumptions(result, records) {
+        const parts = (result.labels || []).map((label) => {
+            const [code, id] = String(label).split(/:(.*)/s);
+            if (code === 'expiry_time_by_rule') return `到期时刻按品种规则推定（${symbolOf(records, id)}）`;
+            return STRESS_LABELS[code] || code;
+        });
+        const inputs = result.inputs || {};
+        const rate = !inputs.rate ? '无利率' : (inputs.rate.source === 'assumed'
+            ? `假设利率 ${round(inputs.rate.value * 100, 4)}%` : `贴现曲线（${inputs.rate.asOfDate || '日期未知'}）`);
+        const edge = (result.points || []).length ? Math.abs(result.points[0].shift) : null;
+        const range = edge === null ? null : (inputs.range !== null && inputs.range !== undefined
+            ? `扫描范围 ±${priceText(edge)} 美元/桶（按美元输入）`
+            : `扫描范围 ±${priceText(edge)} 美元/桶（参考月价格的 ${inputs.rangePct}%）`);
+        parts.push(`模型：美式 CRR ${inputs.steps || 201} 步，欧式 Black-76`, rate,
+            `行情批 ${inputs.quoteBatchId || '—'}，时刻 ${inputs.asOf || '—'}`);
+        if (range) parts.push(range);
+        parts.push('情景范围不是概率、置信区间或保证金结论');
+        return parts.join('；');
+    }
+
+    function percentText(value) {
+        return Number.isFinite(value) ? `${round(value * 100, 4)}%` : '—';
+    }
+
+    /** How an option ended at a point that settled it: at its expiry, or delivered early at the horizon. */
+    function optionOutcome(settlement, anchorOption) {
+        if (settlement.action === 'expire') return '到期作废';
+        const early = anchorOption && settlement.at !== anchorOption.expiryAt;
+        return `${early ? '提前' : '到期'}${SETTLEMENT_LABELS[settlement.action] || settlement.action}`;
+    }
+
+    /**
+     * The anchors of a run (contract §8, §11): each future's price and level,
+     * each option's mid, anchored model value and implied volatility, the
+     * scenario sigma, its rate, time left and expiry. {futureColumns,
+     * futureRows, optionColumns, optionRows, futures, options} where futures
+     * and options are the contract ids in the order the tables list them.
+     */
+    function stressAnchors(result, records) {
+        const anchor = result.anchor;
+        const month = (id) => (records.get(id) || {}).futureContractMonth || '';
+        const futures = Object.keys(anchor.futures).sort((a, b) => month(a).localeCompare(month(b)) || a.localeCompare(b));
+        const options = Object.keys(anchor.options).sort((a, b) => String(anchor.options[a].expiryAt)
+            .localeCompare(String(anchor.options[b].expiryAt)) || symbolOf(records, a).localeCompare(symbolOf(records, b)));
+        const scale = result.inputs.ivScale;
+        const held = anchor.held || {};
+        const futureRows = futures.map((id) => [symbolOf(records, id), month(id), priceText(anchor.futures[id]),
+            Quotes.LEVEL_LABELS[anchor.levels[id]] || anchor.levels[id] || '—', held[id] || 0]);
+        const optionRows = options.map((id) => {
+            const item = anchor.options[id];
+            return [symbolOf(records, id), item.contracts, symbolOf(records, item.future),
+                priceText(anchor.futures[item.future]), priceText(item.mid), priceText(item.value), percentText(item.sigma),
+                percentText(item.sigma * scale), percentText(item.rate), priceText(round(item.tau * 365, 4)),
+                `${item.expiryAt}${item.expiryByRule ? '（按品种规则推定）' : ''}`];
+        });
+        return { futureColumns: STRESS_ANCHOR_FUTURE_COLUMNS.slice(), futureRows,
+            optionColumns: STRESS_ANCHOR_OPTION_COLUMNS.slice(), optionRows, futures, options };
+    }
+
+    function settlementText(settlement, records) {
+        const head = `${symbolOf(records, settlement.option)} ${SETTLEMENT_LABELS[settlement.action] || settlement.action}`;
+        if (!settlement.future) return head;
+        const count = settlement.futureContracts > 0 ? `+${settlement.futureContracts}` : String(settlement.futureContracts);
+        return `${head} → ${symbolOf(records, settlement.future)} ${count}（按行权价）`;
+    }
+
+    /**
+     * The stress panel as data: {available, empty, status, reasons, assumptions,
+     * columns, rows, anchorFutureColumns, anchorFutureRows,
+     * anchorOptionColumns, anchorOptionRows, chart}. options: {showTotal}.
+     * Each point lists every month's scenario price and every option's model
+     * value, or how the option settled there (contract §8, §11). Unavailable
+     * points stay in the table with their reason; the curve breaks there
+     * (contract §5.3).
+     */
+    function stressView(result, records, options = {}) {
+        const Messages = globalScope.OptionComboCostBasisFopMessages;
+        const nameOf = (id) => symbolOf(records, id);
+        const none = { columns: [], rows: [], anchorFutureColumns: [], anchorFutureRows: [], anchorOptionColumns: [],
+            anchorOptionRows: [], chart: { available: false } };
+        if (!result || !result.available) {
+            const reasons = ((result && result.reasons) || ['stress_failed']).map((reason) => Messages.stressReason(reason, nameOf));
+            return Object.assign(none, { available: false, empty: false, status: `不能计算：${reasons.join(' ')}`, reasons,
+                assumptions: '' });
+        }
+        if (result.empty) {
+            return Object.assign(none, { available: true, empty: true, reasons: [], assumptions: '',
+                status: `当前没有未平持仓：情景不改变经济盈亏（变化恒为 0，账本经济盈亏 `
+                    + `${metricText(result.anchor.ledgerEconomicPnl)}）。` });
+        }
+        const anchor = result.anchor.futures[result.inputs.reference];
+        const anchors = stressAnchors(result, records);
+        const band = new Map(((result.band && result.band.available && result.band.points) || [])
+            .map((point) => [point.shift, point]));
+        const columns = ['参考月价格'].concat(anchors.futures.map((id) => `${nameOf(id)} 情景价`),
+            anchors.options.map((id) => `${nameOf(id)} 模型值`),
+            ['经济盈亏变化', '情景经济盈亏', 'IV 区间（变化）', '情景交割', '说明']);
+        const contracts = anchors.futures.length + anchors.options.length;
+        const rows = result.points.map((point) => {
+            const x = priceText(anchor + point.shift);
+            if (!point.available) {
+                return [x].concat(Array(contracts).fill('—'), ['—', '—', '—', '—', Messages.stressReason(point.reason, nameOf)]);
+            }
+            const prices = anchors.futures.map((id) => priceText(point.futures[id]));
+            const values = anchors.options.map((id) => {
+                if (point.values[id] !== undefined) return priceText(point.values[id]);
+                const settled = point.settlements.find((item) => item.option === id);
+                return settled ? optionOutcome(settled, result.anchor.options[id]) : '—';
+            });
+            const range = band.get(point.shift);
+            const settled = point.settlements.map((item) => settlementText(item, records)).join('；');
+            const skipped = point.notDelivered.map((item) => `${nameOf(item.option)}：${NOT_DELIVERED_LABELS[item.why]}`);
+            return [x].concat(prices, values, [moneyText(point.change), metricText(point.economicPnl),
+                range && range.available ? `${moneyText(range.lower)} ～ ${moneyText(range.upper)}` : '—',
+                settled || '—', skipped.join('；')]);
+        });
+        const unavailable = result.points.filter((point) => !point.available).length;
+        const status = `${result.points.length} 个情景点（参考月 ${nameOf(result.inputs.reference)}，经过 `
+            + `${result.inputs.horizonDays} 天，IV × ${result.inputs.ivScale}）`
+            + (unavailable ? `，其中 ${unavailable} 个不可用` : '') + `；当前账本经济盈亏 `
+            + `${metricText(result.anchor.ledgerEconomicPnl)}。`;
+        return { available: true, empty: false, status, reasons: [], assumptions: stressAssumptions(result, records),
+            columns, rows, anchorFutureColumns: anchors.futureColumns, anchorFutureRows: anchors.futureRows,
+            anchorOptionColumns: anchors.optionColumns, anchorOptionRows: anchors.optionRows,
+            chart: stressChart(result, options) };
+    }
+
+    /**
+     * The curve as SVG paths in a width x height box: the line (broken at
+     * unavailable points), the IV band over each unbroken run, the zero line
+     * and the anchor. y is the change, or the total with showTotal.
+     */
+    function stressChart(result, options = {}) {
+        const width = options.width || 640;
+        const height = options.height || 240;
+        const pad = 32;
+        const anchor = result.anchor.futures[result.inputs.reference];
+        const band = new Map(((result.band && result.band.available && result.band.points) || [])
+            .map((point) => [point.shift, point]));
+        const series = result.points.map((point) => {
+            const total = point.available && point.economicPnl && point.economicPnl.value !== null
+                ? point.economicPnl.value : null;
+            const y = !point.available ? null : (options.showTotal ? total : point.change);
+            const offset = options.showTotal ? (total === null ? null : total - point.change) : 0;
+            const range = band.get(point.shift);
+            return { x: anchor + point.shift, y, lower: range && range.available && offset !== null ? range.lower + offset : null,
+                upper: range && range.available && offset !== null ? range.upper + offset : null };
+        });
+        const ys = series.flatMap((item) => [item.y, item.lower, item.upper]).filter((value) => value !== null);
+        if (!ys.length) return { available: false };
+        const xMin = Math.min(...series.map((item) => item.x));
+        const xMax = Math.max(...series.map((item) => item.x));
+        let yMin = Math.min(0, ...ys);
+        let yMax = Math.max(0, ...ys);
+        const margin = (yMax - yMin) * 0.05 || 1;
+        yMin -= margin;
+        yMax += margin;
+        const sx = (x) => (xMax === xMin ? width / 2 : pad + (x - xMin) / (xMax - xMin) * (width - 2 * pad));
+        const sy = (y) => height - pad - (y - yMin) / (yMax - yMin) * (height - 2 * pad);
+        const at = (x, y) => `${round(sx(x), 1)} ${round(sy(y), 1)}`;
+        let line = '';
+        let drawing = false;
+        for (const item of series) {
+            if (item.y === null) {
+                drawing = false;
+                continue;
+            }
+            line += `${drawing ? ' L' : `${line ? ' ' : ''}M`} ${at(item.x, item.y)}`;
+            drawing = true;
+        }
+        const runs = [];
+        let current = [];
+        for (const item of series) {
+            if (item.lower === null) {
+                if (current.length) runs.push(current);
+                current = [];
+            } else {
+                current.push(item);
+            }
+        }
+        if (current.length) runs.push(current);
+        const bandPath = runs.filter((run) => run.length > 1).map((run) => `M ${run.map((item) => at(item.x, item.upper))
+            .join(' L ')} L ${run.slice().reverse().map((item) => at(item.x, item.lower)).join(' L ')} Z`).join(' ');
+        return {
+            available: true, width, height, line, band: bandPath,
+            zero: `M ${pad} ${round(sy(0), 1)} L ${width - pad} ${round(sy(0), 1)}`,
+            anchorX: round(sx(anchor), 1), top: pad, bottom: height - pad,
+            axes: { xMin: round(xMin, 4), xMax: round(xMax, 4), yMin: round(yMin, 2), yMax: round(yMax, 2) },
+        };
+    }
+
     globalScope.OptionComboCostBasisFopView = Object.freeze({
+        stressView,
+        stressChart,
+        stressAssumptions,
+        stressAnchors,
         KIND_LABELS,
         SOURCE_LABELS,
         BINDING_LABELS,

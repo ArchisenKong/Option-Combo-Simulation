@@ -2433,6 +2433,16 @@ async def _request_cost_basis_fop_positions():
 cost_basis_store_env['fetch_fop_positions'] = _request_cost_basis_fop_positions
 
 
+async def _request_cost_basis_fop_discount_curve():
+    """The cached dated discount curve for the FOP stress view (stress
+    contract §2.3). refresh=False: this read never runs the yield-curve
+    updater."""
+    return await _get_discount_curve_snapshot({'refresh': False})
+
+
+cost_basis_store_env['fetch_discount_curve'] = _request_cost_basis_fop_discount_curve
+
+
 # Identity and matching live in ib_server_market_data so they are unit
 # tested without importing this module; the aliases keep call sites stable.
 _cost_basis_option_identity = cost_basis_option_identity

@@ -91,7 +91,7 @@ class FopProtocolTests(unittest.IsolatedAsyncioTestCase):
         capabilities = fop.pop('importCapabilities')
         self.assertEqual(fop, {
             'engineVersion': 1, 'productRules': ['NYMEX-CL-v1'], 'writesReleased': True,
-            'contractDetails': False, 'marketSnapshot': False, 'positions': False})
+            'contractDetails': False, 'marketSnapshot': False, 'positions': False, 'discountCurve': False})
         # The page hands the statement row types to the importer (plan §9.7, P4).
         self.assertEqual(capabilities, json.loads(
             (REPO_ROOT / 'cost_basis_fop_capabilities.json').read_text(encoding='utf-8')))
@@ -442,6 +442,58 @@ class FopProtocolTests(unittest.IsolatedAsyncioTestCase):
         answer = await self.call('request_cost_basis_fop_positions', env=waiting, bookId=book_id)
         self.assertEqual((answer['accountConnected'], answer['positionsReady'], answer['evidenceCredential']),
                          (True, False, None))
+
+    async def test_the_discount_curve_is_the_cached_one_answered_with_its_request(self):
+        # P7 (stress contract §2.3, as implemented): the stress view's rate
+        # comes from the curve the server has cached, read through a FOP read
+        # action that answers its requestId, for a FOP ledger only.
+        book_id = (await self.create())['book']['bookId']
+        missing = await self.call('request_cost_basis_fop_discount_curve', bookId=book_id)
+        self.assertEqual(missing['code'], 'fop_discount_curve_unavailable')
+        curve = {'schemaVersion': 2, 'curveAsOf': '2026-11-13', 'currency': 'USD',
+                 'points': [{'tenorDays': 30, 'zeroRate': 0.04, 'discountFactor': 0.996717}]}
+        calls = []
+
+        async def cached():
+            calls.append(True)
+            return {'action': 'discount_curve_snapshot', 'status': 'cache_fallback', 'fallbackUsed': True,
+                    'refreshAttempted': False, 'error': 'Yield-curve snapshot 2026-11-13 is older than 2026-11-16.',
+                    'curve': curve}
+
+        env = self.make_env(fop_writes_enabled=True)
+        env['fetch_discount_curve'] = cached
+        answer = await self.call('request_cost_basis_fop_discount_curve', env=env, bookId=book_id)
+        self.assertTrue(answer['success'], answer)
+        self.assertEqual(schema.check('DiscountCurveResponse', answer), [])
+        self.assertEqual((answer['requestId'], answer['status'], answer['curve'], answer['note']),
+                         ('req-1', 'cache_fallback', curve, 'Yield-curve snapshot 2026-11-13 is older than 2026-11-16.'))
+        self.assertEqual(len(calls), 1)
+        status = await self.call('request_cost_basis_status', env=env)
+        self.assertTrue(status['features']['fopLedger']['discountCurve'])
+
+        async def nothing():
+            return {'action': 'discount_curve_snapshot', 'status': 'unavailable', 'error': 'No curve is cached.',
+                    'curve': None}
+
+        env['fetch_discount_curve'] = nothing
+        answer = await self.call('request_cost_basis_fop_discount_curve', env=env, bookId=book_id)
+        self.assertEqual((answer['success'], answer['code'], answer['message']),
+                         (False, 'fop_discount_curve_unavailable', 'No curve is cached.'))
+        # A stock ledger has no stress view; a request without its ledger is refused before any read.
+        stock = await self.call('create_cost_basis_book', env=env, account=IDENTITY['account'], symbol='TQQQ',
+                                startDate='2026-01-01', secType='STK', currency='USD', defaultSharesPerContract=100)
+        env['fetch_discount_curve'] = cached
+        refused = await self.call('request_cost_basis_fop_discount_curve', env=env, bookId=stock['book']['bookId'])
+        self.assertFalse(refused['success'])
+        unnamed = await self.call('request_cost_basis_fop_discount_curve', env=env)
+        self.assertFalse(unnamed['success'])
+        self.assertEqual(len(calls), 1, 'refused requests read nothing')
+
+    def test_both_servers_serve_the_cached_curve_without_a_refresh(self):
+        for name in ('ib_server.py', 'historical_server.py'):
+            source = (REPO_ROOT / name).read_text(encoding='utf-8')
+            self.assertIn("cost_basis_store_env['fetch_discount_curve'] = ", source, name)
+            self.assertIn("({'refresh': False})", source, name)
 
     @staticmethod
     def rows_for(positions, status='matched', avg_cost='not_comparable'):

@@ -20,6 +20,10 @@ assertion script sets:
                                  answers as the historical backend does
     POST /__synthetic/positions  {"available": bool, "connected": bool, "ready": bool, "accounts": [...],
                                  "items": [...]} the TWS position set (plan §19 P5-C3)
+    POST /__synthetic/curve      {"available": bool, "curve": {...}, "status": "cached"|"cache_fallback",
+                                 "error": "..."} the cached discount curve the stress view reads (stress
+                                 contract §2.3) and how the yield-curve backend would answer it; by default
+                                 a flat 4% canonical snapshot answered as current ("cached")
     GET  /__synthetic/actions    every WebSocket action received, in order
 
 A quote entry omits nothing: bid, bidSize, ask, askSize, last, lastSize,
@@ -51,6 +55,11 @@ localStorage.setItem('optionComboWsPort', '{port}');</script>
 QUOTES = {}
 CONTRACTS = {'available': True, 'details': []}
 POSITIONS = {'available': True, 'connected': True, 'ready': True, 'accounts': [], 'items': []}
+# A flat 4% continuous zero curve in the backend's canonical (schema 2) form.
+FLAT_CURVE = {'schemaVersion': 2, 'curveAsOf': '2026-11-11', 'currency': 'USD', 'source': 'synthetic_flat_4pct',
+              'points': [{'tenorDays': days, 'zeroRate': 0.04, 'discountFactor': 2.718281828459045 ** (-0.04 * days / 365)}
+                         for days in (1, 7, 30, 90, 180, 365)]}
+CURVE = {'available': True, 'curve': FLAT_CURVE, 'status': 'cached', 'error': ''}
 ACTIONS = []
 LOCK = threading.Lock()
 # The WebSocket handler's own environment, once main() made it.
@@ -91,6 +100,14 @@ async def synthetic_positions():
         return {key: POSITIONS[key] for key in ('connected', 'ready', 'accounts', 'items')}
 
 
+async def synthetic_discount_curve():
+    """The cached discount curve, answered as the yield-curve backend answers."""
+    with LOCK:
+        curve, status, error = CURVE['curve'], CURVE['status'], CURVE['error']
+    return {'action': 'discount_curve_snapshot', 'status': status, 'fallbackUsed': status == 'cache_fallback',
+            'refreshAttempted': False, 'error': error, 'curve': curve}
+
+
 def _expose():
     """Serve or withdraw a simulated broker capability, as the historical backend lacks it."""
     env = ENV.get('env')
@@ -98,6 +115,7 @@ def _expose():
         return
     env['fetch_fop_contract_details'] = synthetic_contract_details if CONTRACTS['available'] else None
     env['fetch_fop_positions'] = synthetic_positions if POSITIONS['available'] else None
+    env['fetch_discount_curve'] = synthetic_discount_curve if CURVE['available'] else None
 
 
 class SiteHandler(http.server.SimpleHTTPRequestHandler):
@@ -132,7 +150,8 @@ class SiteHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802 - http.server API
         path = self.path.split('?', 1)[0]
-        if path not in ('/__synthetic/quotes', '/__synthetic/contracts', '/__synthetic/positions'):
+        if path not in ('/__synthetic/quotes', '/__synthetic/contracts', '/__synthetic/positions',
+                        '/__synthetic/curve'):
             self._json(404, {'error': 'not found'})
             return
         length = int(self.headers.get('Content-Length') or 0)
@@ -151,6 +170,9 @@ class SiteHandler(http.server.SimpleHTTPRequestHandler):
                 QUOTES.update(body['quotes'])
             elif path == '/__synthetic/contracts':
                 CONTRACTS.update(available=bool(body.get('available', True)), details=list(body.get('details') or []))
+            elif path == '/__synthetic/curve':
+                CURVE.update(available=bool(body.get('available', True)), curve=body.get('curve') or FLAT_CURVE,
+                             status=str(body.get('status') or 'cached'), error=str(body.get('error') or ''))
             else:
                 POSITIONS.update(available=bool(body.get('available', True)),
                                  connected=bool(body.get('connected', True)), ready=bool(body.get('ready', True)),
@@ -181,7 +203,8 @@ def main(argv=None):
     env = cost_basis_ws.create_store_env(None, environ={})
     env.update(store=store, available=True, _initialized=True,
                fetch_fop_market_snapshot=synthetic_market_snapshot,
-               fetch_fop_contract_details=synthetic_contract_details, fetch_fop_positions=synthetic_positions)
+               fetch_fop_contract_details=synthetic_contract_details, fetch_fop_positions=synthetic_positions,
+               fetch_discount_curve=synthetic_discount_curve)
     ENV['env'] = env
 
     async def handler(socket):

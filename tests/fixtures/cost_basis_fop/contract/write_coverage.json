@@ -25,7 +25,8 @@
     "request_cost_basis_delete_plan", "request_cost_basis_reset_plan", "request_cost_basis_status",
     "request_cost_basis_executions", "request_cost_basis_market_price", "request_cost_basis_option_scenario_inputs",
     "request_cost_basis_fop_contract_details", "request_cost_basis_fop_statement_bindings",
-    "request_cost_basis_fop_market_snapshot", "request_cost_basis_fop_positions"
+    "request_cost_basis_fop_market_snapshot", "request_cost_basis_fop_positions",
+    "request_cost_basis_fop_discount_curve"
   ],
   "planned": []
 }

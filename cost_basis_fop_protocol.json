@@ -4577,6 +4577,69 @@
         "quantityStatus",
         "avgCostStatus"
       ]
+    },
+    "DiscountCurveRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "request_cost_basis_fop_discount_curve"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId"
+      ]
+    },
+    "DiscountCurveResponse": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "cost_basis_fop_discount_curve"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "const",
+          "value": true
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "cached",
+            "cache_fallback",
+            "updated"
+          ]
+        },
+        "curve": {
+          "type": "json"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "success",
+        "bookId",
+        "status",
+        "curve",
+        "note"
+      ]
     }
   }
 }

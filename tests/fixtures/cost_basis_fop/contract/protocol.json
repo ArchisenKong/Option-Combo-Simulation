@@ -8903,6 +8903,69 @@
         "quantityStatus",
         "avgCostStatus"
       ]
+    },
+    "DiscountCurveRequest": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "request_cost_basis_fop_discount_curve"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bookId": {
+          "ref": "Token"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "bookId"
+      ]
+    },
+    "DiscountCurveResponse": {
+      "type": "object",
+      "fields": {
+        "action": {
+          "type": "const",
+          "value": "cost_basis_fop_discount_curve"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "success": {
+          "type": "const",
+          "value": true
+        },
+        "bookId": {
+          "ref": "Token"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "cached",
+            "cache_fallback",
+            "updated"
+          ]
+        },
+        "curve": {
+          "type": "json"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "requestId",
+        "success",
+        "bookId",
+        "status",
+        "curve",
+        "note"
+      ]
     }
   },
   "examples": {
@@ -12297,6 +12360,40 @@
             "avgCostStatus": "matched"
           },
           "reconciled": true,
+          "note": ""
+        }
+      },
+      {
+        "type": "DiscountCurveRequest",
+        "name": "the dated discount curve for a FOP ledger's stress view",
+        "value": {
+          "action": "request_cost_basis_fop_discount_curve",
+          "requestId": "fop-7-1",
+          "bookId": "fopbook0001"
+        }
+      },
+      {
+        "type": "DiscountCurveResponse",
+        "name": "the cached curve, never refreshed from the network by this action",
+        "value": {
+          "action": "cost_basis_fop_discount_curve",
+          "requestId": "fop-7-1",
+          "success": true,
+          "bookId": "fopbook0001",
+          "status": "cached",
+          "curve": {
+            "schemaVersion": 2,
+            "curveAsOf": "2026-11-13",
+            "currency": "USD",
+            "source": "synthetic",
+            "points": [
+              {
+                "tenorDays": 30,
+                "zeroRate": 0.04,
+                "discountFactor": 0.996717
+              }
+            ]
+          },
           "note": ""
         }
       }
@@ -20211,6 +20308,35 @@
         "expect": {
           "path": "twsSnapshot.kind",
           "code": "missing"
+        }
+      },
+      {
+        "type": "DiscountCurveRequest",
+        "name": "a curve request names its ledger",
+        "value": {
+          "action": "request_cost_basis_fop_discount_curve",
+          "requestId": "fop-7-2"
+        },
+        "expect": {
+          "path": "bookId",
+          "code": "missing"
+        }
+      },
+      {
+        "type": "DiscountCurveResponse",
+        "name": "an unavailable curve is an error response, not a status",
+        "value": {
+          "action": "cost_basis_fop_discount_curve",
+          "requestId": "fop-7-3",
+          "success": true,
+          "bookId": "fopbook0001",
+          "status": "unavailable",
+          "curve": null,
+          "note": ""
+        },
+        "expect": {
+          "path": "status",
+          "code": "enum"
         }
       }
     ]

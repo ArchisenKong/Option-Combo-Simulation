@@ -67,7 +67,7 @@
         { "name": "a ledger routes by the type the backend reports, never by the URL", "requirements": ["F01 (routing)", "F02 (P1 part: same root, separate pages)"] },
         { "name": "a bookId is read from the URL only when it is a well-formed token", "requirements": ["F01 (bookmarks)"] },
         { "name": "the request client enforces its allowlist and settles every request once", "requirements": ["F27 (P1 part)", "F23 (P1 part: one settlement per request)"] },
-        { "name": "the FOP page loads the common layer, the FOP importer, core, quotes, messages, views, forms and reconciliation, and its controller", "requirements": ["F27 (P1 part)", "P4 step 6 (the read-only preview loads the importer and core)", "P5 step 1"] },
+        { "name": "the FOP page loads the common layer, the FOP importer, core, quotes, messages, views, forms, reconciliation and stress, its controller and the stress worker", "requirements": ["F27 (P1 part)", "P4 step 6 (the read-only preview loads the importer and core)", "P5 step 1", "P7 (stress contract §13 item 5: the page loads the stress modules)"] },
         { "name": "a stock ledger opened on the FOP page is sent back before anything renders", "requirements": ["F01 (wrong page)", "F02 (P1 part)"] },
         { "name": "a FUT ledger shows only its identity and the way to the legacy view", "requirements": ["F01 (P1 part)", "F38 (P1 part)"] },
         { "name": "a FOP ledger is not described as a legacy ledger", "requirements": ["F01 (P2 part)"] },
@@ -202,7 +202,9 @@
         { "name": "FopProtocolTests.test_one_quote_batch_for_the_ledgers_own_contracts", "requirements": ["F26 (P5 part: live and historical shapes)", "plan §10.2", "P5 step 2"] },
         { "name": "FopProtocolTests.test_positions_are_only_the_ledger_account_and_root", "requirements": ["P5-C3 (account and root isolation; offline and unread positions; historical backend unavailable)"] },
         { "name": "FopProtocolTests.test_a_reconciliation_snapshot_is_held_to_its_evidence", "requirements": ["P5-C3 (snapshot bound to its version and evidence; reconciled only on matching quantities; idempotent; writes closed)"] },
-        { "name": "FopProtocolTests.test_a_conid_conflict_or_a_partial_avg_cost_is_never_saved_as_agreeing", "requirements": ["P5-C3 (review: a conId conflict is never reconciled by the local symbol; summaries follow their rows, partial AvgCost)"] }
+        { "name": "FopProtocolTests.test_a_conid_conflict_or_a_partial_avg_cost_is_never_saved_as_agreeing", "requirements": ["P5-C3 (review: a conId conflict is never reconciled by the local symbol; summaries follow their rows, partial AvgCost)"] },
+        { "name": "FopProtocolTests.test_the_discount_curve_is_the_cached_one_answered_with_its_request", "requirements": ["P7 (stress contract §2.3 as implemented: the cached curve through a FOP read action)"] },
+        { "name": "FopProtocolTests.test_both_servers_serve_the_cached_curve_without_a_refresh", "requirements": ["P7 (stress contract §2.3: both servers, refresh=False)"] }
       ]
     },
     {
@@ -318,7 +320,9 @@
         { "name": "a zero bid counts only with a size, and a negative FUT price is a price (F16)", "requirements": ["F16", "F43", "plan §6.4"] },
         { "name": "a crossed book or a stale, delayed or unsynchronised quote falls to a dated reference", "requirements": ["F16", "F23 (P5 part: stale quotes)", "plan §10.3 (60 s sync, 120 s freshness)"] },
         { "name": "the lowest level governs the batch and failed contracts are unavailable", "requirements": ["F16", "F43 (closed contracts need no price)"] },
-        { "name": "a batch is shown only for the ledger, version and request it answers (F23)", "requirements": ["F23"] }
+        { "name": "a batch is shown only for the ledger, version and request it answers (F23)", "requirements": ["F23"] },
+        { "name": "a bound future the ledger does not hold is quoted as a stress anchor, apart from the ledger's marks (P7)", "requirements": ["P7 (stress contract §2.2, §13 item 3: anchors)"] },
+        { "name": "an anchor never moves the ledger's sync window; the stress view holds them all to one (P7 review)", "requirements": ["P7 review (stress contract §2.2: the ledger's sync window without anchors, one window for the stress view)"] }
       ]
     },
     {
@@ -348,7 +352,11 @@
         { "name": "the buyer's options stand apart, and a statement's realized P&L is compared, never written (P5-C4)", "requirements": ["P5-C4 (page: buyer rows; realized comparison in the import preview)"] },
         { "name": "a blocked import says why and what to do in Chinese, and following it clears the block (P5-C6)", "requirements": ["P5-C6 (page: blocked, follow the next step, preview again; server refusal in words)"] },
         { "name": "a statement that proves a stored unresolved binding offers its adoption, then previews again (P6)", "requirements": ["P6 campaign finding (statement-proven binding adopted explicitly on the page)", "plan §4.3", "F40"] },
-        { "name": "two adoptions that share a new future bring it once, and a refusal part way says what was kept (P6 review)", "requirements": ["P6 review (adoption batch: one new future, refusal part way re-reads the ledger and counts what was kept)", "plan §4.3", "F40"] }
+        { "name": "two adoptions that share a new future bring it once, and a refusal part way says what was kept (P6 review)", "requirements": ["P6 review (adoption batch: one new future, refusal part way re-reads the ledger and counts what was kept)", "plan §4.3", "F40"] },
+        { "name": "the stress view runs in a worker on the batch on screen, and only its latest answer counts (P7)", "requirements": ["P7 (stress contract §9, §11: worker, generation and key, curve rate, aging, cancel, timeout, no writes)"] },
+        { "name": "the stress view needs a quote batch and a worker, and a changed ledger or retired quotes retire it (P7)", "requirements": ["P7 (stress contract §9: stops and retirement)"] },
+        { "name": "an old curve is refused, a run freezes its inputs while the curve is read, and each point names its sources (P7 review)", "requirements": ["P7 review (stress contract §2.3, §8, §9, §11: curve status, a read per run, inputs frozen at the start, per-contract detail)"] },
+        { "name": "a browser-invalid dollar range stops instead of falling back to percent, and clearing it recovers (P7 review)", "requirements": ["P7 review (stress contract §5.3: browser badInput is not an empty dollar range)"] }
       ]
     },
     {
@@ -500,6 +508,34 @@
         { "name": "BoundaryTests.test_only_an_american_option_in_the_money_is_delivered_early", "requirements": ["P7 design review: which early deliveries are refused or not made (stress contract §6.3)"] },
         { "name": "BoundaryTests.test_at_expiry_a_non_positive_future_still_has_its_intrinsic_value", "requirements": ["P7 design review: tau = 0 before the F <= 0 stop (stress contract §3.1)", "F15"] },
         { "name": "BoundaryTests.test_a_flat_ledger_has_nothing_to_move", "requirements": ["P7 design review: no open position (stress contract §7.5)"] }
+      ]
+    },
+    {
+      "stage": "P7",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_stress.test.js",
+      "name": "cost_basis_fop_stress",
+      "cases": [
+        { "name": "the pricers reproduce every pricer case, stop at F <= 0 before expiry and are intrinsic at it (P7)", "requirements": ["P7 (stress contract §3, §13 item 1)", "F15"] },
+        { "name": "implied volatility round-trips a mid and stops outside the model bounds (P7)", "requirements": ["P7 (stress contract §4.1)"] },
+        { "name": "every stress vector reproduces: its stops, anchors, points, settlements and totals (P7)", "requirements": ["P7 (stress contract §12, §13 item 6)"] },
+        { "name": "t=0 is exactly the anchor, and without options every month moves linearly (P7)", "requirements": ["P7 (plan §13.3 P7: t=0 and linearity)"] },
+        { "name": "the whole run: the curve, the band, the labels, and early choices the contract refuses (P7)", "requirements": ["P7 (stress contract §5.3, §6.3, §7.4, §8)"] },
+        { "name": "every stop is listed, a date-only expiry is labelled, and a discount curve gives the rate (P7)", "requirements": ["P7 (stress contract §2.3, §3.4, §4.2)"] },
+        { "name": "a scenario changes none of its inputs and the module holds no client (P7)", "requirements": ["P7 (plan §13.3 P7: scenarios write nothing)"] },
+        { "name": "every stop the stress module or the page reports has a Chinese reason and a next step (P7)", "requirements": ["P7 (stress contract §10: every reason code in Chinese with its next step)"] },
+        { "name": "on random ledgers and scenario points the core replay keeps the change, and futures alone move linearly (P7)", "requirements": ["P7 (stress contract §13 item 6: seeded property test of §6.3, §7.1, §7.3)"] },
+        { "name": "an out-of-date curve is refused, and a stop never hides another one (P7 review)", "requirements": ["P7 review (stress contract §2.3, §4.2, §6.3: an out-of-date curve, every stop listed)"] },
+        { "name": "a dollar range replaces the percentage and is the only range at a zero reference price (P7 review)", "requirements": ["P7 review (stress contract §5.3: the dollar range)"] }
+      ]
+    },
+    {
+      "stage": "P7",
+      "runtime": "node",
+      "file": "tests/cost_basis_fop_stress_worker.test.js",
+      "name": "cost_basis_fop_stress_worker",
+      "cases": [
+        { "name": "the worker answers what the pure module answers, echoes its generation and key, and states a failure (P7)", "requirements": ["P7 (stress contract §9, §13 item 2)"] }
       ]
     }
   ],

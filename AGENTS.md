@@ -76,14 +76,33 @@ Do not assume a bare `python` command will work in every shell, especially on Wi
     confirmed, voids, cycle boundaries, binding adoptions from broker evidence,
     the in-memory delivery preview) and `js/cost_basis_fop_reconcile.js` (TWS
     positions against the ledger, reconciliation snapshots, a statement's
-    realized P&L beside the ledger's), then its controller `js/cost_basis_fop.js`:
-    never the stock ledger core or the trading shell
+    realized P&L beside the ledger's), `js/american_binomial.js`,
+    `js/market_curves.js` and the DOM-free stress module
+    `js/cost_basis_fop_stress.js`, then its controller `js/cost_basis_fop.js`
+    and `js/cost_basis_fop_stress_worker.js` (a plain tag; it runs only as a
+    worker): never the stock ledger core, the stock stress kernel or the
+    trading shell
+  - the stress view follows `CODE PLAN/COST_BASIS_FOP_STRESS_CONTRACT.md`: each
+    option priced off its own bound future (American CRR on a future, or
+    Black-76), implied volatility from synced mids only, F <= 0 before expiry
+    stops the model (no epsilon), change exactly 0 at the anchor and the total
+    equal to the core's replay with the scenario's settlements. It runs in the
+    worker, writes nothing and reads only the quote batch and the cached
+    discount curve (`request_cost_basis_fop_discount_curve`, both servers,
+    never a refresh, read for every run; a curve the backend answers as
+    `cache_fallback` is refused). Anchors (bound futures the ledger does not
+    hold) never move the ledger's marks, lowest level or sync window; the
+    stress view reads `quoteState.stress`, one sync window over the batch. `tests/fixtures/cost_basis_fop/stress_vectors.json` holds
+    its vectors, whose numbers come from hand working and the independent
+    model `tests/helpers/cost_basis_fop_stress_model.py`, never from the
+    module
   - routes ledgers (a stock ledger goes to `cost_basis.html`, a legacy FUT
     ledger shows its identity) and shows a FOP ledger in full from its exported
     graph; it sends only the catalogue's 'fop' actions (reads, one quote batch
-    at a time, the ledger account's own TWS positions, FOP packages, metadata
-    commits and reconciliation snapshots), never an order, exercise or
-    subscription. Its writes are disabled while the status says
+    at a time, the cached discount curve for the stress view, the ledger
+    account's own TWS positions, FOP packages, metadata commits and
+    reconciliation snapshots), never an order, exercise or subscription. Its
+    writes are disabled while the status says
     `writesReleased` is false (the backend's `[cost_basis] fop_writes_enabled
     = false`), every write is previewed and sent as the
     previewed request, and every answer is checked against the ledger, reload

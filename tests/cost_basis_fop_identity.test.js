@@ -225,7 +225,8 @@ module.exports = {
                     'request_cost_basis_reset_plan', 'rebuild_cost_basis_book', 'export_cost_basis_backup',
                     'restore_cost_basis_backup', 'list_cost_basis_import_batches', 'commit_cost_basis_fop_metadata',
                     'request_cost_basis_fop_contract_details', 'request_cost_basis_fop_statement_bindings',
-                    'request_cost_basis_fop_market_snapshot', 'request_cost_basis_fop_positions']);
+                    'request_cost_basis_fop_market_snapshot', 'request_cost_basis_fop_positions',
+                    'request_cost_basis_fop_discount_curve']);
                 // F27: no order, exercise, subscription, live position or stock-page action.
                 fopActions.forEach((action) => assert.doesNotMatch(action,
                     /order|exercise|subscri|execution|portfolio|managed_accounts|market_price|scenario|split/, action));
@@ -356,18 +357,22 @@ module.exports = {
             },
         },
         {
-            name: 'the FOP page loads the common layer, the FOP importer, core, quotes, messages, views, forms and reconciliation, and its controller',
+            name: 'the FOP page loads the common layer, the FOP importer, core, quotes, messages, views, forms, reconciliation and stress, its controller and the stress worker',
             run() {
                 const html = read('cost_basis_fop.html');
                 const scripts = Array.from(html.matchAll(/<script src="([^"?]+)/g)).map((match) => match[1]);
                 // P4: the read-only preview reads statements with the FOP
                 // importer and replays them with the FOP core; never the
-                // stock ledger core or the trading shell.
+                // stock ledger core or the trading shell. P7: the stress view
+                // prices with the pure CRR tree and the curve primitives, never
+                // the stock stress kernel or pricing_core's clamped Black-76.
                 assert.deepEqual(scripts, ['js/cost_basis_common.js', 'js/cost_basis_import_common.js',
                     'js/cost_basis_fop_core.js', 'js/cost_basis_fop_import.js', 'js/cost_basis_fop_quotes.js',
                     'js/cost_basis_fop_messages.js', 'js/cost_basis_fop_view.js', 'js/cost_basis_fop_forms.js',
-                    'js/cost_basis_fop_reconcile.js',
-                    'js/cost_basis_fop.js']);
+                    'js/cost_basis_fop_reconcile.js', 'js/american_binomial.js', 'js/market_curves.js',
+                    'js/cost_basis_fop_stress.js', 'js/cost_basis_fop.js', 'js/cost_basis_fop_stress_worker.js']);
+                // The worker script is loaded as a plain tag only so the page can find its versioned URL.
+                assert.match(read('js/cost_basis_fop_stress_worker.js'), /if \(typeof document === 'undefined'\) self\.onmessage/);
                 const styles = Array.from(html.matchAll(/<link rel="stylesheet" href="([^"?]+)/g))
                     .map((match) => match[1]);
                 assert.deepEqual(styles, ['cost_basis_fop.css']);

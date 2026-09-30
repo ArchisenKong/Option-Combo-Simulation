@@ -318,3 +318,19 @@ h3 {
 [hidden] {
     display: none !important;
 }
+
+/* Stress scenarios (stress contract §11) */
+.fop-stress-chart {
+    display: block;
+    width: 100%;
+    max-width: 760px;
+    height: auto;
+    margin: 12px 0 4px;
+    background: var(--fop-surface);
+    border: 1px solid var(--fop-border);
+    border-radius: 6px;
+}
+.fop-stress-line { fill: none; stroke: var(--fop-accent); stroke-width: 2; }
+.fop-stress-band { fill: var(--fop-accent); fill-opacity: 0.14; stroke: none; }
+.fop-stress-zero { fill: none; stroke: var(--fop-muted); stroke-width: 1; }
+.fop-stress-anchor { stroke: var(--fop-bad); stroke-width: 1; stroke-dasharray: 4 3; }

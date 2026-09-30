@@ -110,6 +110,15 @@ portfolio_store_env = portfolio_store_ws.create_store_env(config)
 cost_basis_store_env = cost_basis_ws.create_store_env(config)
 
 
+async def _cost_basis_fop_discount_curve():
+    # The cached dated discount curve for the FOP stress view (stress
+    # contract §2.3); refresh=False, so this read never runs the updater.
+    return await build_discount_curve_payload({'refresh': False})
+
+
+cost_basis_store_env['fetch_discount_curve'] = _cost_basis_fop_discount_curve
+
+
 async def handle_ws_client(websocket):
     client_ip = websocket.remote_address[0] if websocket.remote_address else 'Unknown'
     logging.info("Historical replay client connected: %s", client_ip)

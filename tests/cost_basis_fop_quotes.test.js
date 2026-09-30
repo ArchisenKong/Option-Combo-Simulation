@@ -158,5 +158,96 @@ module.exports = {
                     Object.assign({}, state, { ledgerVersion: { digest: 'c'.repeat(64) } })), false, 'a newer version');
             },
         },
+        {
+            name: 'a bound future the ledger does not hold is quoted as a stress anchor, apart from the ledger\'s marks (P7)',
+            run() {
+                const known = (count) => ({ value: count, reason: null });
+                const output = {
+                    futures: [{ contractId: LONG_FUT.contractId, contracts: known(1) }],
+                    options: [
+                        { contractId: SHORT_CALL.contractId, contracts: known(-1), boundFutureContractId: SHORT_FUT.contractId,
+                            bindingStatus: 'verified_statement' },
+                        { contractId: LONG_PUT.contractId, contracts: known(1), boundFutureContractId: LONG_FUT.contractId,
+                            bindingStatus: 'verified_broker' },
+                        { contractId: 'fop-unbound', contracts: known(-1), boundFutureContractId: null,
+                            bindingStatus: 'unresolved' },
+                    ],
+                };
+                const targets = Quotes.quoteTargets(output);
+                assert.deepEqual(plain(targets.filter((target) => target.role === 'anchor')),
+                    [{ contractId: SHORT_FUT.contractId, secType: 'FUT', contracts: null, role: 'anchor' }],
+                    'only the bound future that is not held; a held one is quoted once, an unresolved one not at all');
+                const quotes = [evidence(LONG_FUT.contractId, { bid: 72.4, bidSize: 3, ask: 72.5, askSize: 2 }),
+                    evidence(SHORT_CALL.contractId, { bid: 1.1, bidSize: 3, ask: 1.2, askSize: 2 }),
+                    evidence(LONG_PUT.contractId, { bid: 0.4, bidSize: 3, ask: 0.5, askSize: 2 }),
+                    evidence('fop-unbound', { bid: 0.4, bidSize: 3, ask: 0.5, askSize: 2 }),
+                    evidence(SHORT_FUT.contractId, { bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2 })];
+                const result = value(targets, quotes);
+                assert.equal(result.anchors[SHORT_FUT.contractId].level, 'mid');
+                assert.equal(result.anchors[SHORT_FUT.contractId].mark, 72);
+                assert.ok(!(SHORT_FUT.contractId in result.marks), 'an anchor never values the ledger');
+                assert.ok(!result.quotes.some((quote) => quote.contractId === SHORT_FUT.contractId));
+                // An anchor without a quote leaves the ledger's own level alone, and has no side to fall back to.
+                const missing = value(targets, quotes.slice(0, 4));
+                assert.equal(missing.lowest, 'mid');
+                assert.equal(missing.marketData, 'complete');
+                assert.equal(missing.anchors[SHORT_FUT.contractId].level, 'unavailable');
+                const oneSided = value(targets, quotes.slice(0, 4).concat([evidence(SHORT_FUT.contractId,
+                    { bid: 71.9, bidSize: 3 })]));
+                assert.equal(oneSided.anchors[SHORT_FUT.contractId].level, 'unavailable');
+                // An anchor is re-aged with the rest: as the oldest current quote (50 s old, still in sync
+                // with the others at 10 s), it is the first to stop being fresh.
+                const aged = value(targets, quotes.slice(0, 4).concat([evidence(SHORT_FUT.contractId,
+                    { bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2, observedAtUtc: at(-50) })]));
+                assert.equal(aged.anchors[SHORT_FUT.contractId].level, 'mid');
+                assert.equal(Quotes.currentUntil(aged), NOW - 50 * 1000 + Quotes.FRESH_SECONDS * 1000);
+                // The stress view reads every contract, anchor included, in one window with the batch's newest time.
+                assert.deepEqual(Object.keys(result.stress.quotes).sort(), plain(targets.map((target) => target.contractId)).sort());
+                assert.equal(result.stress.asOf, at(-10));
+                assert.deepEqual(result.stress.quotes[SHORT_CALL.contractId].level, 'mid');
+            },
+        },
+        {
+            name: 'an anchor never moves the ledger\'s sync window; the stress view holds them all to one (P7 review)',
+            run() {
+                // Three ledger quotes, all 70 s old and in sync with each other, are mids. A bound future the
+                // ledger does not hold, observed just now, must not push them out of sync on the ledger view.
+                const known = (count) => ({ value: count, reason: null });
+                const targets = Quotes.quoteTargets({
+                    futures: [{ contractId: LONG_FUT.contractId, contracts: known(1) }],
+                    options: [
+                        { contractId: SHORT_CALL.contractId, contracts: known(-1), boundFutureContractId: SHORT_FUT.contractId,
+                            bindingStatus: 'verified_statement' },
+                        { contractId: LONG_PUT.contractId, contracts: known(1), boundFutureContractId: LONG_FUT.contractId,
+                            bindingStatus: 'verified_broker' },
+                    ],
+                });
+                const old = [evidence(LONG_FUT.contractId, { bid: 72.4, bidSize: 3, ask: 72.5, askSize: 2, observedAtUtc: at(-70) }),
+                    evidence(SHORT_CALL.contractId, { bid: 1.1, bidSize: 3, ask: 1.2, askSize: 2, observedAtUtc: at(-70) }),
+                    evidence(LONG_PUT.contractId, { bid: 0.4, bidSize: 3, ask: 0.5, askSize: 2, observedAtUtc: at(-70) })];
+                const alone = value(targets.filter((target) => target.role !== 'anchor'), old);
+                const withAnchor = value(targets, old.concat([evidence(SHORT_FUT.contractId,
+                    { bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2, observedAtUtc: at(0) })]));
+                assert.deepEqual(levels(withAnchor), levels(alone), 'the ledger view is what it is without the anchor');
+                assert.deepEqual(levels(withAnchor).map((row) => row[1]), ['mid', 'mid', 'mid']);
+                assert.deepEqual(withAnchor.marks, alone.marks);
+                assert.equal(withAnchor.lowest, 'mid');
+                assert.equal(withAnchor.marketData, 'complete');
+                // For the stress view the batch is not synchronised: the option mids are 70 s older than the
+                // future the call is bound to, so none of them anchors an implied volatility.
+                assert.equal(withAnchor.stress.asOf, at(0));
+                assert.equal(withAnchor.stress.quotes[SHORT_FUT.contractId].level, 'mid');
+                for (const id of [LONG_FUT.contractId, SHORT_CALL.contractId, LONG_PUT.contractId]) {
+                    assert.deepEqual([withAnchor.stress.quotes[id].level, withAnchor.stress.quotes[id].reason],
+                        ['unavailable', 'out_of_sync'], id);
+                }
+                // In sync with the anchor, the stress view has the same mids as the ledger.
+                const together = value(targets, old.map((item) => Object.assign({}, item, { observedAtUtc: at(-20) }))
+                    .concat([evidence(SHORT_FUT.contractId, { bid: 71.9, bidSize: 3, ask: 72.1, askSize: 2,
+                        observedAtUtc: at(0) })]));
+                assert.deepEqual(Object.values(together.stress.quotes).map((quote) => quote.level),
+                    ['mid', 'mid', 'mid', 'mid']);
+            },
+        },
     ],
 };

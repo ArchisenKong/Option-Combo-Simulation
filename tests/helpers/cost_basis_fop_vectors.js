@@ -32,13 +32,16 @@ function contractRecord(spec) {
     };
     if (spec.secType === 'FUT') {
         return { ...common, secType: 'FUT', tradingClass: 'CL', futureContractMonth: spec.month,
-            futureLastTradeDate: spec.lastTrade ?? null, futureLastTradeAsOf: null,
+            futureLastTradeDate: spec.lastTrade ?? null,
+            futureLastTradeAsOf: spec.lastTradeAt ? instant(spec.lastTradeAt) : null,
             futurePointValue: spec.pointValue ?? 1000 };
     }
+    // The stress vectors name exact instants and the exercise style; the core vectors leave them out.
     return { ...common, secType: 'FOP', tradingClass: 'LO', optionRight: spec.right,
-        optionStrike: spec.strike, optionExpiry: spec.expiry, optionExpiryAsOf: null,
+        optionStrike: spec.strike, optionExpiry: spec.expiry,
+        optionExpiryAsOf: spec.expiryAt ? instant(spec.expiryAt) : null,
         premiumMultiplier: spec.multiplier ?? 1000, deliverableFuturesPerOption: spec.deliverable ?? 1,
-        settlementType: 'physical_future', exerciseStyle: 'american' };
+        settlementType: 'physical_future', exerciseStyle: spec.exerciseStyle ?? 'american' };
 }
 
 function deliveredQuantity(spec, event) {
@@ -67,17 +70,21 @@ function buildGraph(vector, catalogue) {
     for (const event of vector.events) {
         if (!event.contract) continue;
         used.add(event.contract);
-        if (specs[event.contract].secType === 'FOP') used.add(specs[event.contract].future);
+        // An option whose future is not proven (future: null) has an unresolved binding.
+        if (specs[event.contract].secType === 'FOP' && specs[event.contract].future) {
+            used.add(specs[event.contract].future);
+        }
     }
     const aliases = [...used].sort();
     const idOf = (alias) => specs[alias].contractId;
     const contracts = aliases.map((alias) => ({ record: contractRecord(specs[alias]),
         supersededByRevision: null, createdAtUtc: STAMP }));
     const bindings = aliases.filter((alias) => specs[alias].secType === 'FOP').map((alias) => {
-        const status = (vector.bindings || {})[alias] || 'manual_attested';
+        const future = specs[alias].future;
+        const status = future ? ((vector.bindings || {})[alias] || 'manual_attested') : 'unresolved';
         return {
             bindingId: `bind-${idOf(alias)}`.slice(0, 64), revision: 1, optionContractId: idOf(alias),
-            futureContractId: idOf(specs[alias].future), status, evidenceSummary: '',
+            futureContractId: future ? idOf(future) : null, status, evidenceSummary: '',
             evidenceDigest: status.startsWith('verified') ? '0'.repeat(64) : null,
             observedAtUtc: OBSERVED, supersededByRevision: null, createdAtUtc: STAMP,
         };

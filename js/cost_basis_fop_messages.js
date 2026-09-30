@@ -88,6 +88,8 @@
         fop_contract_details_unavailable: ['这个后端不能向券商查询合约', '在连接 TWS 的后端（ib_server）上查询'],
         fop_positions_unavailable: ['这个后端没有 TWS 持仓', '在连接 TWS 的后端上读取；不会声称已对账'],
         fop_market_snapshot_unavailable: ['这个后端不能取报价', '在连接 TWS 的后端上取报价'],
+        fop_discount_curve_unavailable: ['后端没有缓存的贴现曲线', '在压力情景里填写“假设利率”，或先让后端更新收益率曲线'],
+        fop_discount_curve_failed: ['读取贴现曲线失败', '检查后端日志；也可以填写“假设利率”'],
         database_busy: ['数据库正忙', '稍后重试'],
         store_unavailable: ['账本存储不可用', '检查后端日志'],
     });
@@ -120,6 +122,37 @@
         market_data_type_4: '延迟冻结行情，不算实时',
         short_uses_ask: '空头按卖价（单边保守估值）',
         long_uses_bid: '多头按买价（单边保守估值）',
+    });
+
+    // Why a stress run or one of its points stops (js/cost_basis_fop_stress.js,
+    // CODE PLAN/COST_BASIS_FOP_STRESS_CONTRACT.md §10). A code may name a contract.
+    const STRESS = Object.freeze({
+        ledger_changed: ['账本或行情批已不是所示版本', '重新读取账本并取报价后再计算'],
+        quote_batch_unusable: ['没有可用的报价批次', '先在上方取一次报价'],
+        product_rules_unsupported: ['账本的产品规则不受支持', '压力情景只支持 NYMEX-CL-v1'],
+        quantity_unknown: ['持仓数量不确定', '先处理账本的问题（缺历史、顺序未知或平仓超额）'],
+        option_expiry_unknown: ['期权到期时刻无法确定', '补全合约的到期日'],
+        option_expired_open: ['已到期的期权仍在账上', '先按事实记录到期、指派或行权'],
+        binding_unresolved: ['期权交割到哪张期货尚未证明', '在“期权绑定证据”补全绑定'],
+        multiplier_mismatch: ['权利金乘数与交割数量不一致', '核对合约条款'],
+        future_anchor_missing: ['持有或被绑定的期货在本批没有可用报价（没有报价，或与本批最新的报价不同步）', '重新取一次报价'],
+        iv_needs_live_future: ['期权对应的期货不是同步的实时中间价，不能反推 IV', '等待实时双边报价后重新取价'],
+        iv_needs_mid: ['期权不是同步的实时中间价，不能反推 IV', '等待双边报价后重新取价'],
+        model_domain: ['期货价格 ≤ 0 时期权对数模型不适用', '缩小价格范围，或等期权到期结算后再看'],
+        quote_below_model_floor: ['期权报价低于模型下限（例如低于内在价值）', '核对报价'],
+        quote_above_model_ceiling: ['期权报价高于模型上限', '核对报价'],
+        calibration_failed: ['隐含波动率没有收敛', '核对报价'],
+        rate_unavailable: ['没有可用的贴现利率', '填写“假设利率”，或让后端提供贴现曲线'],
+        rate_curve_stale: ['后端缓存的贴现曲线已过期（括号内为曲线日期），不用于计算', '填写“假设利率”，或等后端更新贴现曲线'],
+        future_last_trade_unknown: ['期货最后交易日未知，无法判断情景时刻它是否仍在交易', '缩短经过天数，或补全合约条款'],
+        future_past_last_trade: ['情景时刻或交割时期货已过最后交易日', '缩短经过天数；首版不自动换月'],
+        early_delivery_unknown: ['提前交割选了本账本没有的未平期权', '重新选择'],
+        early_delivery_european: ['欧式期权只能到期行权', '取消这张期权的提前交割'],
+        range_invalid: ['价格范围无效（美元范围不是正数，或参考月价格为 0 时按百分比没有范围）',
+            '在“美元范围”填写大于 0 的数'],
+        stress_timeout: ['计算超时', '减少点数后重试'],
+        stress_failed: ['压力计算失败', '刷新页面后重试；仍失败请检查浏览器控制台'],
+        stress_worker_unavailable: ['当前环境不能启动后台计算', '用受支持的浏览器，从本地站点打开本页'],
     });
 
     const LINE = /^line \d+: /;
@@ -166,13 +199,23 @@
         return value;
     }
 
+    /** A stress stop in words; nameOf(contractId) names the contract a code carries. */
+    function stressReason(reason, nameOf) {
+        const [code, detail] = String(reason || '').split(/:(.*)/s);
+        const known = STRESS[code];
+        const where = detail ? `（${(nameOf && nameOf(detail)) || detail}）` : '';
+        if (!known) return `未识别的原因（${reason || '—'}）`;
+        return `${known[0]}${where}。下一步：${known[1]}。[${code}]`;
+    }
+
     function quoteReason(code) {
         return QUOTE[code] ? `${QUOTE[code]}（${code}）` : (code ? `未识别的原因（${code}）` : '—');
     }
 
     globalScope.OptionComboCostBasisFopMessages = Object.freeze({
-        IMPORT, SERVER, BROKER, QUOTE,
+        IMPORT, SERVER, BROKER, QUOTE, STRESS,
         explain,
+        stressReason,
         serverError,
         brokerProblem,
         quoteReason,
