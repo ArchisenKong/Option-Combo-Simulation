@@ -35,6 +35,7 @@ function loadReconciliationHarness() {
         globalScope.pageHarness = {
             state, render: _renderReconciliationTable, fetch: _fetchTwsExecutions,
             renderSummary: _renderSummary,
+            renderFlow: _renderFlow, wireKindFilters: _wireFlowKindFilters,
             handleImportFile: _handleImportFile, commitImport: _commitImport,
             parseImport: _parseImportText, bindingProblem: _importBindingProblem,
             beginBook: _beginBookSelection,
@@ -1681,11 +1682,80 @@ module.exports = {
             },
         },
         {
+            name: 'the 类型 header filters the flow like a spreadsheet column, shared with the toolbar',
+            run() {
+                const h = loadReconciliationHarness();
+                const doc = h.context.document;
+                const core = h.context.OptionComboCostBasisCore;
+                const base = { account: 'U1', includeInCost: true, fees: 0, right: 'P',
+                    expiry: '20261016', sharesPerContract: 100 };
+                const events = [
+                    { ...base, seq: 1, eventId: 'a', kind: 'option_trade', tradeDate: '2026-09-01',
+                        strike: 80, contracts: -2, price: 1, cashAmount: 200 },
+                    { ...base, seq: 2, eventId: 'b', kind: 'option_trade', tag: 'ibkr_close',
+                        tradeDate: '2026-09-02', strike: 80, contracts: 1, price: 0.5, cashAmount: -50 },
+                    { ...base, seq: 3, eventId: 'c', kind: 'option_trade', tradeDate: '2026-09-03',
+                        strike: 70, contracts: -1, price: 1, cashAmount: 100 },
+                    { ...base, seq: 4, eventId: 'd', kind: 'option_assignment', tradeDate: '2026-10-16',
+                        strike: 80, contracts: 1, shares: 100, cashAmount: -8000 },
+                    { ...base, seq: 5, eventId: 'e', kind: 'option_assignment', tradeDate: '2026-10-16',
+                        strike: 70, contracts: 1, shares: 100, cashAmount: -7000 },
+                ];
+                h.state.ledger = core.computeLedger(events);
+                h.state.eventsTotal = events.length;
+                h.wireKindFilters();
+                h.renderFlow();
+                const header = doc.getElementById('flow-kind-header-filter');
+                const toolbar = doc.getElementById('filter-kind');
+                const body = doc.getElementById('flow-table').querySelector('tbody');
+                const labels = (select) => select.children.map((option) => option.textContent);
+                const shown = () => body.children.map((row) => row.children[2].textContent);
+                // Only the types in the ledger, as the column shows them, with counts.
+                assert.deepEqual(labels(header),
+                    ['全部（5）', '期权开平仓（2）', '期权 Close（平仓）（1）', '被指派（2）']);
+                assert.deepEqual(labels(toolbar), labels(header));
+                assert.equal(doc.getElementById('flow-kind-heading').className, 'th-filter');
+
+                header.value = 'option_assignment';
+                header.handlers.change();
+                assert.equal(toolbar.value, 'option_assignment');
+                assert.deepEqual(shown(), ['被指派', '被指派']);
+                assert.equal(doc.getElementById('flow-kind-heading').className, 'th-filter is-filtered');
+                assert.equal(doc.getElementById('flow-kind-heading-value').textContent, '被指派');
+
+                // The toolbar select is the same filter.
+                toolbar.value = 'option_trade:ibkr_close';
+                toolbar.handlers.change();
+                assert.equal(header.value, 'option_trade:ibkr_close');
+                assert.deepEqual(shown(), ['期权 Close（平仓）']);
+
+                // Another filter that empties the chosen type keeps it listed and says why.
+                doc.getElementById('filter-end').value = '2026-09-01';
+                h.renderFlow();
+                assert.ok(labels(header).includes('期权 Close（平仓）（0）'));
+                assert.equal(body.children[0].children[0].textContent, '没有符合当前筛选的事件');
+
+                doc.getElementById('filter-end').value = '';
+                header.value = '';
+                header.handlers.change();
+                assert.equal(toolbar.value, '');
+                assert.equal(doc.getElementById('flow-kind-heading').className, 'th-filter');
+                assert.equal(shown().length, 5);
+
+                // Like every flow filter it only re-renders; it never refetches.
+                const source = readScript();
+                const wiring = source.slice(source.indexOf('function _wireFlowKindFilters()'),
+                    source.indexOf('function start()'));
+                assert.match(wiring, /_renderFlow\(\)/);
+                assert.equal(/_loadEvents\(\)/.test(wiring), false);
+            },
+        },
+        {
             name: 'the flow shows newest events first in pages of twenty-five',
             run() {
                 const source = readScript();
                 const flowRows = source.slice(
-                    source.indexOf('function _flowRows()'),
+                    source.indexOf('function _flowRows('),
                     source.indexOf('function requestPositions()'));
                 assert.match(source, /const FLOW_PAGE_SIZE = 25;/);
                 assert.match(flowRows, /state\.ledger\.rows\.filter\([\s\S]*\)\.reverse\(\)/);

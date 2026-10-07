@@ -84,6 +84,28 @@
         return KIND_LABELS[(event || {}).kind] || (event || {}).kind || '';
     }
 
+    // The flow's type filter works on what the 类型 column shows, the way a
+    // spreadsheet filter does: a broker Close is its own entry, apart from
+    // the other option trades.
+    const FLOW_KIND_ORDER = [
+        'opening_balance', 'share_trade', 'option_trade', 'option_trade:ibkr_close',
+        'option_trade:ibkr_close_open', 'option_assignment', 'option_exercise',
+        'option_expiry', 'dividend', 'fee', 'split', 'option_split', 'manual_adjust',
+    ];
+    const FLOW_KIND_FILTER_IDS = ['filter-kind', 'flow-kind-header-filter'];
+
+    function _eventKindKey(event) {
+        const kind = (event || {}).kind || '';
+        const tag = (event || {}).tag;
+        return kind === 'option_trade' && (tag === 'ibkr_close' || tag === 'ibkr_close_open')
+            ? `${kind}:${tag}` : kind;
+    }
+
+    function _eventKindKeyLabel(key) {
+        const [kind, tag] = String(key || '').split(':');
+        return _eventKindLabel({ kind, tag });
+    }
+
     // Which entry-form fields each kind actually uses. A field that is not
     // listed is hidden and cleared, so a leftover strike from the previous
     // entry cannot ride along into a dividend row.
@@ -1537,11 +1559,12 @@
         return true;
     }
 
-    /** The rows the flow table should show, after local filtering. */
-    function _flowRows() {
+    /** The rows the flow table should show, after local filtering.
+     * `ignoreKind` leaves out the type filter, to count what it offers. */
+    function _flowRows(options) {
         if (!state.ledger) return [];
         const account = $('filter-account').value;
-        const kind = $('filter-kind').value;
+        const kind = options && options.ignoreKind ? '' : $('filter-kind').value;
         const start = $('filter-start').value;
         const end = $('filter-end').value;
         const showVoided = $('filter-voided').checked === true;
@@ -1549,7 +1572,7 @@
             const event = row.event;
             if (!showVoided && event.voidedAtUtc) return false;
             if (account && String(event.account || '') !== account) return false;
-            if (kind && event.kind !== kind) return false;
+            if (kind && _eventKindKey(event) !== kind) return false;
             if (start && String(event.tradeDate || '') < start) return false;
             if (end && String(event.tradeDate || '') > end) return false;
             return true;
@@ -4803,9 +4826,63 @@
         select.value = previous;
     }
 
+    let flowKindOptionsSignature = '';
+
+    /** Fill both type filters - the toolbar select and the 类型 column
+     * header - with the types the other filters leave, each with its count.
+     * The options are rebuilt only when they change, so a re-render does not
+     * close a list the operator has open. */
+    function _renderFlowKindFilters() {
+        const selected = $('filter-kind').value;
+        const counts = new Map();
+        _flowRows({ ignoreKind: true }).forEach((entry) => {
+            const key = _eventKindKey(entry.event);
+            counts.set(key, (counts.get(key) || 0) + 1);
+        });
+        let total = 0;
+        counts.forEach((count) => { total += count; });
+        // A type the other filters leave empty stays listed while selected,
+        // so the header still says why the table is empty.
+        if (selected && !counts.has(selected)) counts.set(selected, 0);
+        const rank = (key) => {
+            const index = FLOW_KIND_ORDER.indexOf(key);
+            return index < 0 ? FLOW_KIND_ORDER.length : index;
+        };
+        const keys = Array.from(counts.keys()).sort(
+            (left, right) => rank(left) - rank(right) || (left < right ? -1 : left > right ? 1 : 0));
+        const options = [['', `全部（${total}）`]].concat(keys.map(
+            (key) => [key, `${_eventKindKeyLabel(key)}（${counts.get(key)}）`]));
+        const signature = JSON.stringify(options);
+        FLOW_KIND_FILTER_IDS.forEach((id) => {
+            const select = $(id);
+            if (!select) return;
+            if (signature !== flowKindOptionsSignature) {
+                _clear(select);
+                options.forEach(([value, label]) => {
+                    const option = globalScope.document.createElement('option');
+                    option.value = value;
+                    option.textContent = label;
+                    select.appendChild(option);
+                });
+            }
+            select.value = selected;
+        });
+        flowKindOptionsSignature = signature;
+        const heading = $('flow-kind-heading');
+        if (heading) heading.className = selected ? 'th-filter is-filtered' : 'th-filter';
+        _text($('flow-kind-heading-value'), selected ? _eventKindKeyLabel(selected) : '');
+        const header = $('flow-kind-header-filter');
+        if (header) {
+            header.title = selected
+                ? `已筛选：${_eventKindKeyLabel(selected)}；点击更换或选「全部」`
+                : '按类型筛选';
+        }
+    }
+
     function _renderFlow() {
         const body = $('flow-table').querySelector('tbody');
         _clear(body);
+        _renderFlowKindFilters();
         const filtered = _flowRows();
         const pageCount = Math.max(1, Math.ceil(filtered.length / FLOW_PAGE_SIZE));
         if (state.flowPage > pageCount) state.flowPage = pageCount;
@@ -4816,7 +4893,8 @@
             const cell = globalScope.document.createElement('td');
             cell.colSpan = 11;
             cell.className = 'empty';
-            cell.textContent = state.bookId ? '无事件' : '未选择账本';
+            cell.textContent = !state.bookId ? '未选择账本'
+                : (state.ledger && state.ledger.rows.length ? '没有符合当前筛选的事件' : '无事件');
             row.appendChild(cell);
             body.appendChild(row);
         } else {
@@ -8593,13 +8671,14 @@
 
         // Filtering and paging are display-only and never refetch: the
         // ledger totals must not move when the operator narrows the view.
-        ['filter-account', 'filter-kind', 'filter-start', 'filter-end', 'filter-voided']
+        ['filter-account', 'filter-start', 'filter-end', 'filter-voided']
             .forEach((id) => {
                 $(id).addEventListener('change', () => {
                     state.flowPage = 1;
                     _renderFlow();
                 });
             });
+        _wireFlowKindFilters();
         $('flow-prev').addEventListener('click', () => {
             if (state.flowPage > 1) {
                 state.flowPage -= 1;
@@ -8649,17 +8728,25 @@
             }
         }
 
-        const kindFilter = $('filter-kind');
-        core.EVENT_KINDS.forEach((kind) => {
-            const option = globalScope.document.createElement('option');
-            option.value = kind;
-            option.textContent = KIND_LABELS[kind] || kind;
-            kindFilter.appendChild(option);
-        });
-
         $('field-date').value = _todayIso();
         $('new-book-start').value = _todayIso();
         _applyKindVisibility();
+    }
+
+    /** The toolbar select and the 类型 header are one filter: choosing in
+     * either sets both, and like every flow filter it only re-renders. */
+    function _wireFlowKindFilters() {
+        FLOW_KIND_FILTER_IDS.forEach((id) => {
+            const select = $(id);
+            if (!select) return;
+            select.addEventListener('change', () => {
+                FLOW_KIND_FILTER_IDS.forEach((other) => {
+                    if ($(other)) $(other).value = select.value;
+                });
+                state.flowPage = 1;
+                _renderFlow();
+            });
+        });
     }
 
     function start() {

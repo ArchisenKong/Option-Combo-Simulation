@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>综合成本账本 — Option Combo Simulator</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="cost_basis.css?v=ec0821bce37f">
+    <link rel="stylesheet" href="cost_basis.css?v=abc34bc3e14e">
 </head>
 <body data-option-combo-page="cost-basis">
     <div class="app-shell">
@@ -121,7 +121,7 @@
                         <details id="flow-details" class="inline-details">
                             <summary><span id="flow-summary-label">事件流水</span></summary>
                         <div class="controls flow-filters"><label for="filter-account">账户</label><select id="filter-account"><option value="">全部</option></select><label for="filter-kind">类型</label><select id="filter-kind"><option value="">全部</option></select><label for="filter-start">起</label><input id="filter-start" type="date"><label for="filter-end">止</label><input id="filter-end" type="date"><label class="checkbox"><input id="filter-voided" type="checkbox"> 显示已冲销记录</label></div>
-                        <div class="table-wrap flow-table-wrap"><table id="flow-table" aria-label="事件流水"><thead><tr><th>日期</th><th>账户</th><th>类型</th><th>合约</th><th>数量</th><th>价格</th><th>现金</th><th id="flow-position-heading">累计股数</th><th title="包含所有现金流；与上方可排除长期 Long Option 的综合成本口径不同">全现金累计成本</th><th>来源</th><th>操作</th></tr></thead><tbody><tr><td colspan="11" class="empty">未选择账本</td></tr></tbody></table></div>
+                        <div class="table-wrap flow-table-wrap"><table id="flow-table" aria-label="事件流水"><thead><tr><th>日期</th><th>账户</th><th id="flow-kind-heading" class="th-filter"><span class="th-filter-face" aria-hidden="true"><span>类型</span><span id="flow-kind-heading-value" class="th-filter-value"></span><span class="th-filter-caret">▾</span></span><select id="flow-kind-header-filter" class="th-filter-select" aria-label="按类型筛选事件流水" title="按类型筛选"><option value="">全部</option></select></th><th>合约</th><th>数量</th><th>价格</th><th>现金</th><th id="flow-position-heading">累计股数</th><th title="包含所有现金流；与上方可排除长期 Long Option 的综合成本口径不同">全现金累计成本</th><th>来源</th><th>操作</th></tr></thead><tbody><tr><td colspan="11" class="empty">未选择账本</td></tr></tbody></table></div>
                         <div class="flow-pagination"><span id="flow-page-label"></span><div><button id="flow-prev" type="button">上一页</button><button id="flow-next" type="button">下一页</button></div></div>
                         </details>
                         <div id="import-workspace" class="import-workspace" hidden>
@@ -340,6 +340,6 @@
     <script src="js/cost_basis_stress_core.js?v=76e942b27d9d"></script>
     <script src="js/cost_basis_stress_band.js?v=6f716f8dc838"></script>
     <script src="js/cost_basis_stress_worker.js?v=3d63d7e54061"></script>
-    <script src="js/cost_basis.js?v=218b3bdb9ae4"></script>
+    <script src="js/cost_basis.js?v=9afe473848c3"></script>
 </body>
 </html>
