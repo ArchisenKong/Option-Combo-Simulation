@@ -34,6 +34,7 @@ const READ_ONLY_ACTIONS = [
     'request_portfolio_positions_snapshot', 'request_portfolio_avg_cost_snapshot',
     'request_managed_accounts_snapshot', 'request_cost_basis_executions',
     'request_cost_basis_market_price', 'request_cost_basis_option_scenario_inputs',
+    'subscribe_cost_basis_underlying_quote', 'unsubscribe_cost_basis_underlying_quote',
 ];
 
 function loadCore() {

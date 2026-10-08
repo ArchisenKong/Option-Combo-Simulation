@@ -149,6 +149,130 @@ class CostBasisMarketPriceContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['currency'], 'EUR')
 
 
+class CostBasisUnderlyingQuoteTests(unittest.IsolatedAsyncioTestCase):
+    """The ledger page's one pooled streaming quote (cost_basis.html 参考价)."""
+
+    class FakeSocket:
+        remote_address = ('127.0.0.1', 1)
+
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, message):
+            self.sent.append(message)
+
+    class FakeIb:
+        def __init__(self, connected=True):
+            self.connected = connected
+            self.requested = []
+            self.cancelled = []
+            self.cached = SimpleNamespace(
+                secType='STK', conId=456, symbol='TQQQ', exchange='', primaryExchange='NASDAQ',
+                currency='USD', localSymbol='TQQQ', tradingClass='NMS')
+
+        def isConnected(self):
+            return self.connected
+
+        def positions(self):
+            return [SimpleNamespace(account='U1', contract=self.cached)]
+
+        async def qualifyContractsAsync(self, contract):
+            return [SimpleNamespace(secType='STK', conId=789, symbol=contract.symbol,
+                                    exchange='SMART', currency='USD')]
+
+        def reqMktData(self, contract, generic_ticks='', snapshot=False, regulatory=False):
+            self.requested.append(contract)
+            return SimpleNamespace(contract=contract, marketPrice=lambda: 71.25,
+                                   last=float('nan'), close=float('nan'),
+                                   bid=71.2, ask=71.3, marketDataType=1)
+
+        def cancelMktData(self, contract):
+            self.cancelled.append(contract)
+
+    def setUp(self):
+        self.ib = self.FakeIb()
+        patches = [
+            patch.object(ib_server, 'ib', self.ib),
+            patch.dict(ib_server.client_subscriptions, {}, clear=True),
+            patch.dict(ib_server.client_subscription_settings, {}, clear=True),
+            patch.dict(ib_server.market_data_generic_ticks_by_con_id, {}, clear=True),
+            patch.dict(ib_server.market_data_quote_as_of_by_ticker_key, {}, clear=True),
+            patch.dict(ib_server.market_data_quote_fingerprint_by_ticker_key, {}, clear=True),
+        ]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+        saved_clients = set(ib_server.connected_clients)
+        ib_server.connected_clients.clear()
+        self.addCleanup(lambda: (ib_server.connected_clients.clear(),
+                                 ib_server.connected_clients.update(saved_clients)))
+
+    def connect(self):
+        socket = self.FakeSocket()
+        ib_server.connected_clients.add(socket)
+        ib_server.client_subscriptions[socket] = {}
+        ib_server.client_subscription_settings[socket] = {'greeks_enabled': False}
+        return socket
+
+    REQUEST = {'account': 'U1', 'symbol': 'TQQQ', 'secType': 'STK', 'currency': 'USD'}
+
+    async def test_a_disconnected_tws_opens_no_line(self):
+        self.ib.connected = False
+        socket = self.connect()
+        result = await ib_server._subscribe_cost_basis_underlying_quote(socket, self.REQUEST)
+        self.assertEqual(result['subscribed'], False)
+        self.assertEqual(result['reason'], 'ib_disconnected')
+        self.assertEqual(self.ib.requested, [])
+
+    async def test_one_pooled_line_per_contract_kept_until_unused(self):
+        socket = self.connect()
+        result = await ib_server._subscribe_cost_basis_underlying_quote(socket, self.REQUEST)
+        self.assertTrue(result['subscribed'])
+        self.assertEqual(result['quote']['mark'], 71.25)
+        self.assertEqual(result['marketDataGeneration'], ib_server.api_market_data_generation)
+        self.assertEqual(len(self.ib.requested), 1)
+        # The account's position contract, completed for market data.
+        self.assertEqual(self.ib.requested[0].conId, 456)
+        self.assertEqual(self.ib.requested[0].exchange, 'SMART')
+        self.assertIn('stock_TQQQ', ib_server.client_subscriptions[socket])
+        # Asking again keeps the line rather than reopening it.
+        await ib_server._subscribe_cost_basis_underlying_quote(socket, self.REQUEST)
+        self.assertEqual(len(self.ib.requested), 1)
+        self.assertEqual(self.ib.cancelled, [])
+        # A second page shares the same line.
+        other = self.connect()
+        await ib_server._subscribe_cost_basis_underlying_quote(other, self.REQUEST)
+        self.assertEqual(len(self.ib.requested), 1)
+        self.assertTrue(ib_server._unsubscribe_cost_basis_underlying_quote(socket))
+        self.assertEqual(self.ib.cancelled, [])
+        self.assertTrue(ib_server._unsubscribe_cost_basis_underlying_quote(other))
+        self.assertEqual(len(self.ib.cancelled), 1)
+        self.assertFalse(ib_server._unsubscribe_cost_basis_underlying_quote(other))
+
+    async def test_switching_ledgers_moves_the_line(self):
+        socket = self.connect()
+        await ib_server._subscribe_cost_basis_underlying_quote(socket, self.REQUEST)
+        await ib_server._subscribe_cost_basis_underlying_quote(
+            socket, {**self.REQUEST, 'symbol': 'QQQ'})
+        self.assertEqual(list(ib_server.client_subscriptions[socket]), ['stock_QQQ'])
+        self.assertEqual(len(self.ib.cancelled), 1)
+        self.assertEqual(self.ib.cancelled[0].conId, 456)
+        self.assertEqual(self.ib.requested[-1].conId, 789)
+
+    async def test_ticks_reach_the_ledger_page_as_its_stocks_quote(self):
+        socket = self.connect()
+        await ib_server._subscribe_cost_basis_underlying_quote(socket, self.REQUEST)
+        ticker = ib_server.client_subscriptions[socket]['stock_TQQQ']
+        ib_server.on_pending_tickers([ticker])
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        payloads = [ib_server.json.loads(message) for message in socket.sent]
+        self.assertEqual(len(payloads), 1, payloads)
+        self.assertNotIn('action', payloads[0])
+        self.assertEqual(payloads[0]['stocks']['TQQQ']['mark'], 71.25)
+        self.assertEqual(payloads[0]['marketDataGeneration'], ib_server.api_market_data_generation)
+
+
 class CostBasisExecutionRequestTests(unittest.IsolatedAsyncioTestCase):
     def test_tws_timezone_is_configured_before_connection(self):
         self.assertEqual(ib_server.ib.TimezoneTWS, ib_server.TWS_TIMEZONE)

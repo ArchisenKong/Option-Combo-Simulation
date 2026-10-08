@@ -20,7 +20,8 @@ const readJson = (relative) => JSON.parse(read(relative));
 const CONTRACT = 'tests/fixtures/cost_basis_fop/contract';
 
 // The stock page's action list as P0 shipped it. Moving the catalogue into
-// the common layer must not add, drop or reorder anything.
+// the common layer must not add, drop or reorder anything. Later additions
+// are appended at the end: the live underlying quote pair (2026-10-08).
 const EQUITY_ACTIONS_AT_P0 = [
     'request_cost_basis_status', 'list_cost_basis_books', 'create_cost_basis_book',
     'request_cost_basis_delete_plan', 'delete_cost_basis_book', 'list_cost_basis_events',
@@ -32,6 +33,7 @@ const EQUITY_ACTIONS_AT_P0 = [
     'request_portfolio_avg_cost_snapshot', 'request_managed_accounts_snapshot',
     'request_cost_basis_executions', 'request_cost_basis_market_price',
     'request_cost_basis_option_scenario_inputs',
+    'subscribe_cost_basis_underlying_quote', 'unsubscribe_cost_basis_underlying_quote',
 ];
 
 const FUT_BOOK = {

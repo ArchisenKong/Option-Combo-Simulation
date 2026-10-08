@@ -44,7 +44,8 @@ function loadReconciliationHarness() {
             stubReload() { _loadBooks = async () => {}; },
             message: _handleMessage, renderWhatIf: _renderWhatIf,
             editPrice: _editWhatIfPrice, followPrice: _setWhatIfFollowReference,
-            refreshPrice: _refreshWhatIfMarketPrice, invalidate: _invalidatePositions,
+            syncLiveQuote: _syncLiveQuote, toggleLiveQuote: _toggleLiveQuote,
+            invalidate: _invalidatePositions,
             selectPriceBook: _beginBookSelection, loadEvents: _loadEvents,
             configureEventLoad() { _syncBookMode = () => {}; },
             renderStress: _renderStressTest,
@@ -128,6 +129,8 @@ function loadReconciliationHarness() {
             if (!nodes.has(id)) nodes.set(id, node());
             return nodes.get(id);
         },
+        // One node per selector, like getElementById (e.g. '.hero-foot').
+        querySelector(selector) { return this.getElementById(`selector:${selector}`); },
         body: node(),
     };
     context.alert = (message) => alerts.push(message);
@@ -137,6 +140,9 @@ function loadReconciliationHarness() {
         positionsConnected: true, positionsTimestamp: '2026-09-03T10:00:00',
         ledger: context.OptionComboCostBasisCore.computeLedger([]),
     });
+    // The live underlying quote is opt-in here; its own tests switch it on.
+    harness.state.liveQuote.wanted = false;
+    harness.state.liveQuote.status = 'off';
     harness.configure({});
     return { ...harness, context, alerts,
         buttons() { return nodes.get('reconcile-table').body.children[0].children[7].children; },
@@ -473,60 +479,143 @@ module.exports = {
             },
         },
         {
-            name: 'explicit current-price refresh resumes following and later portfolio pushes are not frozen',
+            name: 'the live underlying quote fills the reference and What If, and slower prices cannot freeze it',
             async run() {
                 const h = loadPriceHarness();
-                let calls = 0;
+                const asked = [];
+                const tick = () => new Promise((done) => setTimeout(done, 5));
                 h.configure({request: async (action, fields) => {
-                    calls += 1;
-                    assert.equal(action, 'request_cost_basis_market_price');
-                    assert.equal(fields.bookId, 'book-test');
-                    return {marketPrice:71.25,fetchedAt:'2026-09-03T10:15:00'};
+                    asked.push([action, fields]);
+                    if (action === 'subscribe_cost_basis_underlying_quote') {
+                        return {subscribed:true, symbol:'TQQQ', marketDataGeneration:4,
+                            quote:{mark:71.25, quoteAsOf:'2026-09-03T02:15:00Z'}};
+                    }
+                    return {unsubscribed:true};
                 }});
                 h.configurePrice();
-                h.edit('60');
-                h.state.referencePrice = 65;
-                h.state.referencePriceByBook['book-test'] = 65;
-                await h.refreshPrice();
-                assert.equal(calls, 1);
+                const socket = {readyState:1, sent:[], send(message) { this.sent.push(JSON.parse(message)); }};
+                h.state.ws = socket;
+                h.state.liveQuote.wanted = true;
+                h.syncLiveQuote();
+                await tick();
+                // The backend picks the contract from the book; the page names only the book.
+                assert.equal(JSON.stringify(asked),
+                    JSON.stringify([['subscribe_cost_basis_underlying_quote', {bookId:'book-test'}]]));
+                assert.equal(h.state.liveQuote.status, 'live');
+                assert.equal(h.state.marketPrice, 71.25);
+                assert.equal(h.node('reference-price').value, '71.25');
+                assert.match(h.node('reference-source').textContent, /^TWS 实时 · \d\d:\d\d:\d\d$/);
                 assert.equal(h.node('what-if-price').value, '71.25');
-                assert.equal(h.node('what-if-follow-reference').checked, true);
-                assert.equal(h.state.referencePrice, null);
-                assert.equal(h.state.referencePriceByBook['book-test'], undefined);
-                assert.match(h.node('what-if-context').textContent, /10:15:00/);
-                h.update(72.1234);
-                assert.equal(h.node('what-if-price').value, '72.1234');
-                assert.doesNotMatch(h.node('what-if-context').textContent, /10:15:00/);
-                assert.equal(calls, 1);
+                assert.match(h.node('what-if-context').textContent, /自动跟随 TWS 实时价/);
+
+                // A push of the stream's generation moves the price; an older line's does not.
+                h.state.liveQuoteRenderedAt = 0;
+                h.message({stocks:{TQQQ:{mark:72.5}}, marketDataGeneration:4});
+                h.message({stocks:{TQQQ:{mark:10}}, marketDataGeneration:3});
+                h.message({stocks:{TSM:{mark:300}}, marketDataGeneration:4});
+                await tick();
+                assert.equal(h.state.marketPrice, 72.5);
+                assert.equal(h.node('what-if-price').value, '72.5');
+                // The minutes-old portfolio push never overwrites a live price.
+                h.update(60);
+                assert.equal(h.state.marketPrice, 72.5);
+                h.invalidate();
+                assert.equal(h.state.marketPrice, 72.5);
+                // A typed reference overrides the stream until it is cleared.
+                h.state.referencePrice = 65;
+                h.state.liveQuoteRenderedAt = 0;
+                h.message({stocks:{TQQQ:{mark:73}}, marketDataGeneration:4});
+                await tick();
+                assert.match(h.node('reference-source').textContent, /手工输入 · 清空后跟随实时价/);
+                assert.equal(h.node('what-if-price').value, '65');
+                h.state.referencePrice = null;
+
+                // Switching it off drops the stream, the price it set and is remembered.
+                const stored = new Map();
+                h.context.localStorage = {getItem: (key) => (stored.has(key) ? stored.get(key) : null),
+                    setItem: (key, value) => stored.set(key, String(value))};
+                h.toggleLiveQuote();
+                await tick();
+                assert.equal(JSON.stringify(asked.at(-1)), '["unsubscribe_cost_basis_underlying_quote",{}]');
+                assert.equal(h.state.liveQuote.status, 'off');
+                assert.equal(h.state.marketPrice, null);
+                assert.equal(h.context.localStorage.getItem('optionComboCostBasisLiveQuote'), '0');
+                assert.equal(socket.sent.at(-1).action, 'request_portfolio_avg_cost_snapshot');
+                h.message({stocks:{TQQQ:{mark:80}}, marketDataGeneration:4});
+                await tick();
+                assert.equal(h.state.marketPrice, null);
+                h.update(70.5);
+                assert.equal(h.state.marketPrice, 70.5);
+                assert.equal(h.node('btn-live-quote')['aria-pressed'], 'false');
             },
         },
         {
-            name: 'late quote responses cannot clobber new edits or a different book, and failures preserve the scenario',
+            name: 'the live quote waits out TWS, pauses after a global reset, and drops late answers',
             async run() {
                 const h = loadPriceHarness();
-                let resolve;
-                h.configure({request: () => new Promise((done) => { resolve = done; })});
+                const tick = () => new Promise((done) => setTimeout(done, 5));
+                const answers = [];
+                const asked = [];
+                h.configure({request: (action) => {
+                    asked.push(action);
+                    if (action !== 'subscribe_cost_basis_underlying_quote') return Promise.resolve({});
+                    return new Promise((resolve, reject) => answers.push({resolve, reject}));
+                }});
                 h.configurePrice();
-                const pending = h.refreshPrice();
-                h.edit('60');
-                resolve({marketPrice:72});
-                await pending;
-                assert.equal(h.node('what-if-price').value, '60');
-                assert.equal(h.node('what-if-follow-reference').checked, false);
-                const otherBook = h.refreshPrice();
+                h.state.ws = {readyState:1, send() {}};
+                h.state.liveQuote.wanted = true;
+
+                // TWS down: nothing streams; a ready status with a new generation asks again.
+                h.syncLiveQuote();
+                answers.shift().resolve({subscribed:false, reason:'ib_disconnected', marketDataGeneration:5});
+                await tick();
+                assert.equal(h.state.liveQuote.status, 'ib_down');
+                assert.match(h.node('reference-source').textContent, /TWS 未连接 · 连上后自动订阅/);
+                h.message({action:'ib_connection_status', connected:true, marketDataState:'ready',
+                    marketDataGeneration:6});
+                assert.equal(asked.filter((action) => action.startsWith('subscribe')).length, 2);
+                answers.shift().resolve({subscribed:true, marketDataGeneration:6, quote:{mark:70}});
+                await tick();
+                assert.equal(h.state.liveQuote.status, 'live');
+
+                // A drop keeps the last price, labelled; the reconnect re-asks.
+                h.message({action:'ib_connection_status', connected:false, marketDataState:'invalidated',
+                    marketDataGeneration:7});
+                assert.equal(h.state.liveQuote.status, 'ib_down');
+                assert.match(h.node('reference-source').textContent, /TWS 断开 · 最后价/);
+                h.message({action:'ib_connection_status', connected:true, marketDataState:'ready',
+                    marketDataGeneration:7});
+                assert.equal(asked.filter((action) => action.startsWith('subscribe')).length, 3);
+                answers.shift().resolve({subscribed:true, marketDataGeneration:7, quote:null});
+                await tick();
+                assert.equal(h.state.liveQuote.status, 'waiting');
+
+                // A manual global reset is a boundary: no automatic replay until the operator acts.
+                h.message({action:'api_market_data_subscriptions_reset', success:true, marketDataGeneration:8});
+                assert.equal(h.state.liveQuote.status, 'paused');
+                h.message({action:'ib_connection_status', connected:true, marketDataState:'ready',
+                    marketDataGeneration:9, recoveryReason:'explicit_stream_reset'});
+                assert.equal(asked.filter((action) => action.startsWith('subscribe')).length, 3);
+                assert.equal(h.node('btn-live-quote').textContent, '恢复实时');
+                h.toggleLiveQuote();
+                assert.equal(asked.filter((action) => action.startsWith('subscribe')).length, 4);
+
+                // An answer for a book the page has left is dropped.
                 h.state.bookId = 'other';
-                h.state.marketPrice = null;
-                resolve({marketPrice:500});
-                await otherBook;
-                assert.equal(h.state.marketPrice, null);
+                answers.shift().resolve({subscribed:true, marketDataGeneration:9, quote:{mark:500}});
+                await tick();
+                assert.notEqual(h.state.marketPrice, 500);
                 h.state.bookId = 'book-test';
-                h.edit('60');
-                h.configure({request: async () => { throw new Error('quote unavailable'); }});
-                h.configurePrice();
-                await h.refreshPrice();
-                assert.equal(h.node('what-if-price').value, '60');
-                assert.equal(h.state.marketPriceRefreshPending, false);
-                assert.equal(h.alerts.length, 1);
+
+                // The historical backend has no stream: said so, and offered as a retry.
+                h.syncLiveQuote({force:true});
+                const failure = new Error('this backend has no live TWS market data');
+                failure.code = 'broker_market_data_unavailable';
+                answers.shift().reject(failure);
+                await tick();
+                assert.equal(h.state.liveQuote.status, 'unavailable');
+                assert.match(h.node('reference-source').textContent, /当前后端没有实时行情/);
+                assert.equal(h.node('btn-live-quote').textContent, '重试实时');
             },
         },
         {
@@ -2376,7 +2465,9 @@ module.exports = {
                 const source = readScript();
                 assert.ok(html.includes('id="what-if-price"'));
                 assert.ok(html.includes('id="what-if-expiry"'));
-                assert.ok(html.includes('id="btn-what-if-current"'));
+                // The one-shot 使用当前价 refresh retired for the live quote.
+                assert.ok(!html.includes('id="btn-what-if-current"'));
+                assert.ok(html.includes('id="btn-live-quote"'));
                 assert.ok(html.includes('id="what-if-total-cost"'));
                 assert.ok(html.includes('id="what-if-total-caption"'));
                 assert.ok(html.includes('id="what-if-final-shares"'));
@@ -2387,9 +2478,8 @@ module.exports = {
                 assert.match(html, /不包含期权时间价值/);
                 assert.match(html, /若未平仓卖方期权归零/);
                 assert.match(source, /core\.computeOptionSettlementScenario\(/);
-                assert.match(source, /request\('request_cost_basis_market_price'/);
-                assert.match(source, /state\.marketPriceRefreshPending/);
-                assert.match(source, /TWS 最新价/);
+                assert.match(source, /request\('subscribe_cost_basis_underlying_quote'/);
+                assert.match(source, /自动跟随 TWS 实时价/);
                 assert.match(source, /throughExpiry: state\.whatIfExpiry/);
                 assert.match(source, /继续保留：\$\{deferredText\}/);
                 assert.match(source, /被指派：\$\{assignedText\}/);

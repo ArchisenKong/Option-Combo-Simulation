@@ -24,6 +24,7 @@
     "list_cost_basis_resets", "list_cost_basis_snapshots", "export_cost_basis_backup",
     "request_cost_basis_delete_plan", "request_cost_basis_reset_plan", "request_cost_basis_status",
     "request_cost_basis_executions", "request_cost_basis_market_price", "request_cost_basis_option_scenario_inputs",
+    "subscribe_cost_basis_underlying_quote", "unsubscribe_cost_basis_underlying_quote",
     "request_cost_basis_fop_contract_details", "request_cost_basis_fop_statement_bindings",
     "request_cost_basis_fop_market_snapshot", "request_cost_basis_fop_positions",
     "request_cost_basis_fop_discount_curve"

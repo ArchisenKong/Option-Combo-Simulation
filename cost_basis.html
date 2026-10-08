@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>综合成本账本 — Option Combo Simulator</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="cost_basis.css?v=abc34bc3e14e">
+    <link rel="stylesheet" href="cost_basis.css?v=0e03b1e973c5">
 </head>
 <body data-option-combo-page="cost-basis">
     <div class="app-shell">
@@ -60,7 +60,7 @@
                             <p id="headline-cost-caption" class="hero-caption">选择账本后显示</p>
                             <div class="hero-foot">
                                 <div><span>当前净头寸</span><strong id="headline-position">—</strong></div>
-                                <div class="hero-foot-input"><span><label for="reference-price">参考价</label></span><input id="reference-price" type="number" step="0.01" min="0" autocomplete="off" placeholder="输入"><small id="reference-source" class="hint"></small></div>
+                                <div class="hero-foot-input"><span><label for="reference-price">参考价</label><button id="btn-live-quote" class="live-toggle is-on" type="button" aria-pressed="true" title="关闭标的实时价订阅">实时</button></span><input id="reference-price" type="number" step="0.01" min="0" autocomplete="off" placeholder="输入"><small id="reference-source" class="hint"></small></div>
                                 <div data-needs-reference><span>持有资产市值</span><strong id="headline-market-value">—</strong></div>
                                 <div data-needs-reference><span>摊薄后浮盈亏（当前口径）</span><strong id="headline-diluted-pnl">—</strong></div>
                                 <div><span>若未平仓卖方期权归零</span><strong id="headline-expired-cost">—</strong></div>
@@ -83,7 +83,7 @@
                             <div class="what-if-controls">
                                 <div class="what-if-field"><label for="what-if-expiry">计算至</label><select id="what-if-expiry" disabled><option value="">等待未平期权</option></select></div>
                                 <div class="what-if-field"><label id="what-if-price-label" for="what-if-price">假设标的到期结算价</label><input id="what-if-price" type="number" step="0.01" min="0" autocomplete="off" placeholder="等待当前价"></div>
-                                <button id="btn-what-if-current" type="button" title="重新拉取 TWS 最新价并恢复自动跟随；清除手工参考价">使用当前价</button><button id="btn-open-stress-test" class="primary" type="button" disabled>打开压力测试</button>
+                                <button id="btn-open-stress-test" class="primary" type="button" disabled>打开压力测试</button>
                             </div>
                         </div>
                         <div class="what-if-context-row">
@@ -330,7 +330,7 @@
         <p id="premium-expiry-note" class="premium-expiry-note">这是已收取权利金的到期分布，不是到期日再收款，也不是最终盈亏。金额为未平 Short Call / Put 分摊的开仓净收入（含已记开仓费用）；部分平仓后只保留未平部分，不含 Long Option 支出。分摊可能产生不足一美分的金额，明细保留 4 位小数，顶部合计按 2 位小数显示。是否已结算以账本流水为准，过期但尚无结算记录的仓位仍列在这里。</p>
     </dialog>
 
-    <script src="js/cost_basis_common.js?v=7c9ea6cc8739"></script>
+    <script src="js/cost_basis_common.js?v=c328963e68a6"></script>
     <script src="js/cost_basis_core.js?v=604fda82b972"></script>
     <script src="js/american_binomial.js?v=a49313f2567b"></script>
     <script src="js/cost_basis_import_common.js?v=68181c7c6bc1"></script>
@@ -340,6 +340,6 @@
     <script src="js/cost_basis_stress_core.js?v=76e942b27d9d"></script>
     <script src="js/cost_basis_stress_band.js?v=6f716f8dc838"></script>
     <script src="js/cost_basis_stress_worker.js?v=3d63d7e54061"></script>
-    <script src="js/cost_basis.js?v=9afe473848c3"></script>
+    <script src="js/cost_basis.js?v=b6e06951ed02"></script>
 </body>
 </html>

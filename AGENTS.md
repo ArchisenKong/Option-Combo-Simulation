@@ -50,7 +50,10 @@ Do not assume a bare `python` command will work in every shell, especially on Wi
   - reads TWS positions through the existing
     `request_portfolio_positions_snapshot` /
     `request_portfolio_avg_cost_snapshot` actions and writes its own
-    `cost_basis.db`; it cannot trade or subscribe to market data
+    `cost_basis.db`; it cannot trade. Its one market-data stream is the open
+    stock ledger's own underlying quote (`subscribe_cost_basis_underlying_quote`):
+    the backend derives the contract from the book, shares the pooled TWS line
+    and drops it when the page switches ledgers or disconnects
   - loads `js/cost_basis_common.js` first: the shared action catalogue and
     ledger routing (`OptionComboCostBasisCore.ALLOWED_CLIENT_ACTIONS` is
     derived from it). It lists and computes STK ledgers only: a FOP ledger

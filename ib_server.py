@@ -74,6 +74,7 @@ from ib_server_market_data import (
     cost_basis_option_request_matches,
     build_pending_tickers_handler,
     cancel_all_api_market_data_subscriptions,
+    cancel_mkt_data_if_unused,
     coerce_positive_int,
     extract_market_price,
     extract_option_delta,
@@ -85,7 +86,10 @@ from ib_server_market_data import (
     normalize_bool,
     option_contract_timing_is_publishable,
     positive_contract_id as _positive_contract_id,
+    req_mkt_data_pooled,
     request_ib_historical_bars,
+    stamp_quote_as_of,
+    ticker_quote_as_of,
     unsubscribe_client_safely as unsubscribe_client_safely_via_market_data,
 )
 from ib_server_ws import (
@@ -2246,33 +2250,40 @@ async def _request_cost_basis_executions(request):
 cost_basis_store_env['fetch_executions'] = _request_cost_basis_executions
 
 
-async def _request_cost_basis_market_price(request):
-    """Request one fresh snapshot quote for a ledger underlying."""
-    if not ib.isConnected():
-        raise RuntimeError('TWS is not connected')
-
+def _cost_basis_underlying_request(request):
+    """The account, symbol, secType and currency of a stock ledger's request."""
     account = str((request or {}).get('account') or '').strip().upper()
     symbol = str((request or {}).get('symbol') or '').strip().upper()
     sec_type = str((request or {}).get('secType') or 'STK').strip().upper()
     currency = str((request or {}).get('currency') or 'USD').strip().upper()
     if not account or not symbol or sec_type != 'STK' or len(currency) != 3:
         raise ValueError('a stock/ETF cost-basis book is required')
-    contract = None
+    return account, symbol, sec_type, currency
+
+
+async def _cost_basis_underlying_contract(account, symbol, currency):
+    """The ledger's own STK: the account's position contract, else qualified."""
     for position in list(ib.positions() or []):
         candidate = getattr(position, 'contract', None)
         if (str(getattr(position, 'account', '') or '').strip().upper() == account
                 and str(getattr(candidate, 'secType', '') or '').upper() == 'STK'
                 and str(getattr(candidate, 'symbol', '') or '').strip().upper() == symbol):
-            contract = _cost_basis_stock_snapshot_contract(candidate, currency)
-            break
+            return _cost_basis_stock_snapshot_contract(candidate, currency)
+    qualified = list(await asyncio.wait_for(
+        ib.qualifyContractsAsync(Stock(symbol, 'SMART', currency)),
+        timeout=10.0) or [])
+    if not qualified:
+        raise RuntimeError('TWS could not qualify the underlying')
+    return qualified[0]
 
-    if contract is None:
-        qualified = list(await asyncio.wait_for(
-            ib.qualifyContractsAsync(Stock(symbol, 'SMART', currency)),
-            timeout=10.0) or [])
-        if not qualified:
-            raise RuntimeError('TWS could not qualify the underlying')
-        contract = qualified[0]
+
+async def _request_cost_basis_market_price(request):
+    """Request one fresh snapshot quote for a ledger underlying."""
+    if not ib.isConnected():
+        raise RuntimeError('TWS is not connected')
+
+    account, symbol, sec_type, currency = _cost_basis_underlying_request(request)
+    contract = await _cost_basis_underlying_contract(account, symbol, currency)
 
     tickers = list(await asyncio.wait_for(
         ib.reqTickersAsync(contract), timeout=12.0) or [])
@@ -2302,6 +2313,86 @@ async def _request_cost_basis_market_price(request):
 
 
 cost_basis_store_env['fetch_market_price'] = _request_cost_basis_market_price
+
+# The client_subscriptions key a ledger page's live underlying quote uses.
+# Kept in that socket's subscription settings, which its disconnect clears.
+COST_BASIS_QUOTE_KEY_SETTING = 'cost_basis_underlying_quote_key'
+
+
+def _unsubscribe_cost_basis_underlying_quote(websocket):
+    """Drop a ledger page's live underlying quote; cancel the line if unused."""
+    settings = client_subscription_settings.get(websocket) or {}
+    key = settings.pop(COST_BASIS_QUOTE_KEY_SETTING, None)
+    ticker = (client_subscriptions.get(websocket) or {}).pop(key, None) if key else None
+    if ticker is None:
+        return False
+    cancel_mkt_data_if_unused(
+        ticker,
+        client_subscriptions=client_subscriptions,
+        ib=ib,
+        generic_ticks_by_con_id=market_data_generic_ticks_by_con_id,
+        quote_as_of_by_ticker_key=market_data_quote_as_of_by_ticker_key,
+        quote_fingerprint_by_ticker_key=market_data_quote_fingerprint_by_ticker_key,
+    )
+    return True
+
+
+async def _subscribe_cost_basis_underlying_quote(websocket, request):
+    """Keep one streaming quote of a stock ledger's underlying for its page.
+
+    The line is the pooled one (req_mkt_data_pooled): a symbol the trading
+    page already streams costs no new TWS line. It sits in this socket's
+    client_subscriptions as `stock_<SYMBOL>`, so the shared pending-tickers
+    handler pushes its quotes (the payload's `stocks`) and the socket's
+    disconnect cleanup cancels it. A TWS disconnect or a global stream reset
+    clears every subscription; the page subscribes again on the next ready
+    status. Read-only: nothing here can place or change an order.
+    """
+    account, symbol, _sec_type, currency = _cost_basis_underlying_request(request)
+    generation = api_market_data_generation
+    if not ib.isConnected():
+        return {'subscribed': False, 'reason': 'ib_disconnected',
+                'symbol': symbol, 'marketDataGeneration': generation}
+    contract = await _cost_basis_underlying_contract(account, symbol, currency)
+    if websocket not in connected_clients:
+        return {'subscribed': False, 'reason': 'socket_closed', 'symbol': symbol}
+    if generation != api_market_data_generation or not ib.isConnected():
+        # TWS went away while the contract was qualified.
+        return {'subscribed': False, 'reason': 'ib_disconnected',
+                'symbol': symbol, 'marketDataGeneration': api_market_data_generation}
+    key = f'stock_{symbol}'
+    subscriptions = client_subscriptions.setdefault(websocket, {})
+    settings = client_subscription_settings.setdefault(websocket, {})
+    # Asking again for the line this socket already holds keeps it: no
+    # cancel-and-reopen churn on a reconnecting page or a repeated click.
+    ticker = subscriptions.get(key) if settings.get(COST_BASIS_QUOTE_KEY_SETTING) == key else None
+    if ticker is None:
+        _unsubscribe_cost_basis_underlying_quote(websocket)
+        ticker = req_mkt_data_pooled(
+            contract, '', ib=ib, client_subscriptions=client_subscriptions,
+            generic_ticks_by_con_id=market_data_generic_ticks_by_con_id)
+        subscriptions[key] = ticker
+        settings[COST_BASIS_QUOTE_KEY_SETTING] = key
+    quote = extract_quote_snapshot(ticker, 'STK')
+    if quote is not None:
+        # A pooled line may already hold a price that will not tick again soon.
+        quote = stamp_quote_as_of(quote, ticker_quote_as_of(
+            {'market_data_quote_as_of_by_ticker_key': market_data_quote_as_of_by_ticker_key},
+            ticker))
+    return {
+        'subscribed': True,
+        'symbol': symbol,
+        'quoteKey': symbol,
+        'conId': getattr(getattr(ticker, 'contract', None), 'conId', None)
+        or getattr(contract, 'conId', None),
+        'marketDataGeneration': generation,
+        'marketDataType': getattr(ticker, 'marketDataType', None),
+        'quote': quote,
+    }
+
+
+cost_basis_store_env['subscribe_underlying_quote'] = _subscribe_cost_basis_underlying_quote
+cost_basis_store_env['unsubscribe_underlying_quote'] = _unsubscribe_cost_basis_underlying_quote
 
 
 def _cost_basis_fop_details_dict(details):

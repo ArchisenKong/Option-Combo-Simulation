@@ -364,6 +364,24 @@ main { width: 100%; max-width: 1560px; margin: 0 auto; padding: 1.5rem 2rem 3rem
     font-variant-numeric: tabular-nums;
 }
 .hero-foot-input .hint { font-size: .73rem; line-height: 1.3; }
+/* The 实时 switch beside the 参考价 label. On and streaming it shows a
+   pulsing dot; an input that follows a price (rather than one typed) reads
+   in the accent colour, teal while the price is live. */
+.hero-foot-input span { display: flex; align-items: flex-start; justify-content: space-between; gap: .4rem; }
+.live-toggle {
+    display: inline-flex; align-items: center; gap: .28rem; flex: none;
+    min-height: 0; padding: .06rem .5rem; border: 1px solid var(--border-strong); border-radius: 999px;
+    background: var(--panel); color: var(--faint); font-size: .68rem; font-weight: 700; line-height: 1.5; cursor: pointer;
+}
+.live-toggle::before { content: ""; width: .42rem; height: .42rem; border-radius: 50%; background: currentColor; opacity: .55; }
+.live-toggle.is-on { border-color: #b9e6d8; background: var(--teal-soft); color: var(--teal-text); }
+.live-toggle.is-streaming::before { opacity: 1; animation: live-pulse 1.6s ease-in-out infinite; }
+.live-toggle.needs-action { border-color: var(--warn); background: var(--warn-soft); color: var(--warn-text); }
+.live-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .live-toggle.is-streaming::before { animation: none; } }
+.hero-foot-input input.is-following { color: var(--accent-text); }
+.hero-foot-input input.is-live { color: var(--teal-text); }
 .hero-foot.needs-reference .hero-foot-input input {
     border-color: var(--accent);
     background: var(--accent-soft);

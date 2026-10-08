@@ -33,6 +33,11 @@
     const RECONNECT_MAX_DELAY_MS = 60000;
     const REQUEST_TIMEOUT_MS = 20000;
     const POSITIONS_TIMEOUT_MS = 8000;
+    // The live underlying quote: the operator's switch is remembered, and a
+    // stream of ticks re-prices the page at most once per interval.
+    const LIVE_QUOTE_STORAGE_KEY = 'optionComboCostBasisLiveQuote';
+    const LIVE_QUOTE_RENDER_MS = 1000;
+    const LIVE_QUOTE_ACTIVE = Object.freeze(['pending', 'waiting', 'live']);
     const FLOW_PAGE_SIZE = 25;
     const MANUAL_ACCOUNT_VALUE = '__manual_account__';
     // One request per 2000 rows (the store's page cap), looped until the
@@ -243,8 +248,20 @@
         stressLinkedInputsPending: false,
         stressLinkedInputsError: '',
         stressLinkedInputsGeneration: 0,
-        marketPriceRefreshPending: false,
         marketPriceFetchedAt: '',
+        // Where state.marketPrice came from: 'live' (the streaming quote),
+        // 'snapshot' (TWS portfolio push), 'refresh' (a stress refresh).
+        marketPriceSource: '',
+        // One streaming TWS quote of the open ledger's underlying, held by
+        // the backend for this socket. `wanted` is the operator's switch.
+        // status: off | idle | pending | waiting | live | ib_down | paused |
+        // unavailable | error.
+        liveQuote: {
+            wanted: true, status: 'idle', bookId: '', symbol: '', socket: null,
+            generation: null, price: null, at: 0, message: '', requestSeq: 0,
+        },
+        liveQuoteTimer: null,
+        liveQuoteRenderedAt: 0,
         importResult: null,
         importText: '',
         importMeta: null,
@@ -293,6 +310,15 @@
                 ? fallback : value;
         } catch (_) {
             return fallback;
+        }
+    }
+
+    function _writeStorage(key, value) {
+        try {
+            globalScope.localStorage.setItem(key, value);
+        } catch (_) {
+            // Private mode or a blocked store: the switch still works for
+            // this page, it is just not remembered.
         }
     }
 
@@ -688,6 +714,7 @@
             if (state.ws !== socket) return;
             state.ws = null;
             _failPending('socket closed');
+            _resetLiveQuote();
             _invalidatePositions();
             _invalidateManagedAccounts();
             _setConnection('disconnected');
@@ -831,6 +858,20 @@
             _recompute();
             return;
         }
+        if (data.action === 'ib_connection_status') {
+            _handleLiveQuoteIbStatus(data);
+            return;
+        }
+        if (data.action === 'api_market_data_subscriptions_reset') {
+            _pauseLiveQuoteForReset(data);
+            return;
+        }
+        // The backend's shared market-data push carries no action; for this
+        // page it holds only the live underlying quote under `stocks`.
+        if (!data.action && data.stocks && typeof data.stocks === 'object') {
+            _absorbLiveQuotePayload(data);
+            return;
+        }
 
         const requestId = typeof data.requestId === 'string' ? data.requestId : '';
         const entry = requestId ? state.pending.get(requestId) : null;
@@ -862,11 +903,14 @@
                 avgCost: Number(item.avgCostPerUnit),
                 marketPrice: Number(item.marketPrice),
             };
-            if (Number.isFinite(Number(item.marketPrice)) && Number(item.marketPrice) > 0) {
+            if (Number.isFinite(Number(item.marketPrice)) && Number(item.marketPrice) > 0
+                    && !_liveQuoteDrivesPrice()) {
                 // Price is the same in every account, so any account that
-                // reports it gives the whole page a reference price.
+                // reports it gives the whole page a reference price. The
+                // portfolio push is minutes old, so a live quote wins.
                 state.marketPrice = Number(item.marketPrice);
                 state.marketPriceFetchedAt = '';
+                state.marketPriceSource = 'snapshot';
             }
         });
     }
@@ -1037,6 +1081,7 @@
             }
             _text($('store-status'), `就绪 · schema v${status.storeSchemaVersion}`);
             await _loadBooks();
+            if (state.ws === socket) _syncLiveQuote();
         } catch (error) {
             if (state.ws !== socket || state.connection !== 'connected') return;
             _text($('store-status'), `不可用（${error.message}）`);
@@ -1357,6 +1402,7 @@
             whatIfPrice: null,
             whatIfPriceSource: '',
             marketPriceFetchedAt: '',
+            marketPriceSource: '',
             whatIfExpiry: '',
             stressLongOptionInputs: null,
             stressInputsError: '',
@@ -1441,6 +1487,8 @@
         // The initial account push can arrive before books load. Prime this
         // selection from the existing cache once, then rely on normal pushes.
         _sendOneWay('request_portfolio_avg_cost_snapshot');
+        // The stream follows the open ledger's underlying.
+        _syncLiveQuote();
     }
 
     async function _selectBook(bookId) {
@@ -1605,48 +1653,205 @@
         }, POSITIONS_TIMEOUT_MS);
     }
 
-    async function _refreshWhatIfMarketPrice() {
-        const book = _currentBook();
-        if (!book || !state.bookId || state.marketPriceRefreshPending) return;
-        const bookId = state.bookId;
-        const loadGeneration = state.eventLoadGeneration;
-        const editGeneration = state.whatIfEditGeneration;
-        const socket = state.ws;
-        state.marketPriceRefreshPending = true;
-        _renderWhatIf();
-        try {
-            const response = await request('request_cost_basis_market_price', {
-                bookId,
-            });
-            if (state.bookId !== bookId || state.ws !== socket
-                || state.eventLoadGeneration !== loadGeneration) return;
-            const price = Number(response.marketPrice);
-            if (!Number.isFinite(price) || price <= 0) {
-                throw new Error('TWS 返回的最新价格无效');
-            }
-            state.marketPrice = price;
-            state.marketPriceFetchedAt = String(response.fetchedAt || '');
-            // A successful explicit refresh resumes following the reference.
-            // Never overwrite an edit made while the quote was in flight.
-            if (state.whatIfEditGeneration === editGeneration) {
-                state.referencePrice = null;
-                delete state.referencePriceByBook[bookId];
-                $('reference-price').value = '';
-                state.whatIfPrice = null;
-                state.whatIfPriceSource = '';
-            }
-            _recompute();
-        } catch (error) {
-            if (state.bookId !== bookId || state.ws !== socket
-                || state.eventLoadGeneration !== loadGeneration) return;
-            const unavailable = error.code === 'broker_market_price_unavailable';
-            globalScope.alert(unavailable
-                ? '当前后端不支持主动刷新 TWS 价格，请连接实时 IB 后端。'
-                : `刷新 TWS 当前价失败：${error.message}`);
-        } finally {
-            state.marketPriceRefreshPending = false;
-            _renderWhatIf();
+    // ------------------------------------------------------------------
+    // Live underlying quote
+    // ------------------------------------------------------------------
+
+    /** True while the streaming quote, not a slower source, sets the price. */
+    function _liveQuoteDrivesPrice() {
+        return state.liveQuote.status === 'live' && state.marketPriceSource === 'live';
+    }
+
+    function _localIsoSeconds(date) {
+        const pad = (value) => String(value).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+            + `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+    }
+
+    /** Forget the stream on this side (a closed socket's stream is already
+     * gone at the backend); a price it set stays until replaced. In-flight
+     * answers are dropped by the request sequence. */
+    function _resetLiveQuote(status) {
+        const live = state.liveQuote;
+        live.requestSeq += 1;
+        Object.assign(live, {
+            status: status || (live.wanted ? (live.status === 'paused' ? 'paused' : 'idle') : 'off'),
+            bookId: '', symbol: '', socket: null, generation: null, message: '',
+        });
+        if (state.liveQuoteTimer) {
+            globalScope.clearTimeout(state.liveQuoteTimer);
+            state.liveQuoteTimer = null;
         }
+    }
+
+    /**
+     * Hold, move or drop the live quote so it matches the open ledger.
+     *
+     * The backend keeps one pooled TWS line for this socket and derives the
+     * contract from the book, so switching ledgers moves the stream and a
+     * closed socket ends it. `force` re-asks after TWS came back; `resume`
+     * lifts the pause a global stream reset leaves behind.
+     */
+    function _syncLiveQuote(options) {
+        const opts = options || {};
+        const live = state.liveQuote;
+        const book = _currentBook();
+        const socket = state.ws;
+        if (opts.resume && live.status === 'paused') live.status = 'idle';
+        const eligible = Boolean(book && !_bookIsFutures() && socket
+            && state.connection === 'connected');
+        if (!live.wanted || !eligible || live.status === 'paused') {
+            if (socket && live.socket === socket && LIVE_QUOTE_ACTIVE.indexOf(live.status) >= 0) {
+                request('unsubscribe_cost_basis_underlying_quote', {}).catch(() => {});
+            }
+            _resetLiveQuote();
+            _renderReferenceSource();
+            return;
+        }
+        if (!opts.force && live.socket === socket && live.bookId === book.bookId
+            && LIVE_QUOTE_ACTIVE.indexOf(live.status) >= 0) return;
+        void _subscribeLiveQuote(book, socket);
+    }
+
+    async function _subscribeLiveQuote(book, socket) {
+        const live = state.liveQuote;
+        live.requestSeq += 1;
+        const sequence = live.requestSeq;
+        Object.assign(live, {
+            status: 'pending', bookId: book.bookId, symbol: String(book.symbol || '').toUpperCase(),
+            socket, generation: null, message: '',
+        });
+        _renderReferenceSource();
+        let response;
+        try {
+            response = await request('subscribe_cost_basis_underlying_quote', { bookId: book.bookId });
+        } catch (error) {
+            if (sequence !== live.requestSeq) return;
+            live.status = error.code === 'broker_market_data_unavailable' ? 'unavailable' : 'error';
+            live.message = String(error.message || '');
+            _renderReferenceSource();
+            return;
+        }
+        if (sequence !== live.requestSeq) return;
+        const generation = Number(response.marketDataGeneration);
+        live.generation = Number.isFinite(generation) ? generation : null;
+        // TWS is down: the next ready status brings the stream back.
+        live.status = response.subscribed === true ? 'waiting' : 'ib_down';
+        if (response.subscribed === true && response.quote) _applyLiveQuote(response.quote);
+        _renderReferenceSource();
+    }
+
+    function _applyLiveQuote(quote) {
+        const live = state.liveQuote;
+        const price = Number(quote && quote.mark);
+        if (!Number.isFinite(price) || price <= 0 || state.bookId !== live.bookId) return;
+        const parsed = Date.parse(String((quote && quote.quoteAsOf) || ''));
+        live.at = Number.isFinite(parsed) ? parsed : Date.now();
+        live.price = price;
+        live.status = 'live';
+        state.marketPrice = price;
+        state.marketPriceFetchedAt = _localIsoSeconds(new Date(live.at));
+        state.marketPriceSource = 'live';
+        _scheduleLiveQuoteRender();
+    }
+
+    function _absorbLiveQuotePayload(data) {
+        const live = state.liveQuote;
+        if ((live.status !== 'waiting' && live.status !== 'live') || !live.symbol) return;
+        // A push from before the stream was (re)opened belongs to a dead line.
+        const generation = Number(data.marketDataGeneration);
+        if (live.generation !== null && Number.isFinite(generation)
+            && generation !== live.generation) return;
+        const quote = data.stocks[live.symbol];
+        if (quote) _applyLiveQuote(quote);
+    }
+
+    /**
+     * Ticks can arrive several times a second; the page re-prices at most
+     * once per LIVE_QUOTE_RENDER_MS and redraws only what the price moves.
+     * The stress view prices from its own snapshot, so a tick never re-runs
+     * its chart; it reads the price when it is next refreshed.
+     */
+    function _scheduleLiveQuoteRender() {
+        if (state.liveQuoteTimer) return;
+        const wait = Math.max(0, LIVE_QUOTE_RENDER_MS - (Date.now() - state.liveQuoteRenderedAt));
+        state.liveQuoteTimer = globalScope.setTimeout(() => {
+            state.liveQuoteTimer = null;
+            state.liveQuoteRenderedAt = Date.now();
+            if (state.stressOpen || !state.ledger || _bookIsFutures()) {
+                _renderReferenceSource();
+                return;
+            }
+            const reference = state.referencePrice !== null
+                ? state.referencePrice : state.marketPrice;
+            state.ledger = core.computeLedger(state.allEvents, { referencePrice: reference });
+            // Summary, hero and What If; the flow and reconciliation do not
+            // depend on the price, and redrawing them would eat clicks.
+            _renderSummary();
+        }, wait);
+    }
+
+    /** TWS went away or came back. The backend clears every stream when it
+     * drops, so a ready status with a new generation re-asks. A manual global
+     * stream reset is a boundary the operator lifts (as on the trading page). */
+    function _handleLiveQuoteIbStatus(data) {
+        const live = state.liveQuote;
+        if (!live.wanted || live.status === 'off' || live.status === 'paused') return;
+        const generation = Number(data.marketDataGeneration);
+        const ready = data.connected === true
+            && String(data.marketDataState || '').toLowerCase() === 'ready';
+        if (!ready) {
+            if (LIVE_QUOTE_ACTIVE.indexOf(live.status) >= 0) {
+                live.requestSeq += 1;
+                live.status = 'ib_down';
+                _renderReferenceSource();
+            }
+            return;
+        }
+        const changed = Number.isFinite(generation) && generation !== live.generation;
+        const blocked = String(data.recoveryReason || '').toLowerCase() === 'explicit_stream_reset'
+            || (data.subscriptionsRequired === true && data.automaticReplayAllowed === false);
+        if (blocked && changed) {
+            _resetLiveQuote('paused');
+            _renderReferenceSource();
+            return;
+        }
+        if (live.status === 'ib_down' || (changed && LIVE_QUOTE_ACTIVE.indexOf(live.status) >= 0)) {
+            _syncLiveQuote({ force: true });
+        }
+    }
+
+    function _pauseLiveQuoteForReset(data) {
+        if (!data || data.success !== true) return;
+        const live = state.liveQuote;
+        if (!live.wanted || live.status === 'off') return;
+        _resetLiveQuote('paused');
+        _renderReferenceSource();
+    }
+
+    /** The 实时 switch: on/off, or resume after a reset, or retry a failure. */
+    function _toggleLiveQuote() {
+        const live = state.liveQuote;
+        if (live.wanted && ['paused', 'error', 'unavailable'].indexOf(live.status) >= 0) {
+            _syncLiveQuote({ resume: true, force: true });
+            return;
+        }
+        live.wanted = !live.wanted;
+        _writeStorage(LIVE_QUOTE_STORAGE_KEY, live.wanted ? '1' : '0');
+        if (live.wanted) {
+            _syncLiveQuote({ force: true });
+            return;
+        }
+        _syncLiveQuote();
+        if (state.marketPriceSource === 'live') {
+            // Stop valuing at a price that no longer moves; the portfolio
+            // push supplies one again.
+            state.marketPrice = null;
+            state.marketPriceSource = '';
+            state.marketPriceFetchedAt = '';
+            _sendOneWay('request_portfolio_avg_cost_snapshot');
+        }
+        _recompute();
     }
 
     function _invalidatePositions() {
@@ -1661,7 +1866,10 @@
         state.positionsConnected = false;
         state.positionsRequestId = '';
         state.avgCostByAccount = {};
-        state.marketPrice = null;
+        if (!_liveQuoteDrivesPrice()) {
+            state.marketPrice = null;
+            state.marketPriceSource = '';
+        }
         state.reconciliation = null;
         _renderPositionsStatus();
         _renderReconciliation();
@@ -1982,7 +2190,6 @@
     function _renderWhatIf() {
         const book = _currentBook();
         const input = $('what-if-price');
-        const currentButton = $('btn-what-if-current');
         const followInput = $('what-if-follow-reference');
         followInput.checked = state.whatIfPriceSource !== 'custom';
         const stressButton = $('btn-open-stress-test');
@@ -2003,7 +2210,6 @@
             _renderWhatIfExpiryOptions([], true);
             input.value = '';
             input.disabled = true;
-            currentButton.disabled = true;
             followInput.disabled = true;
             stressButton.disabled = true;
             stressNavButton.disabled = true;
@@ -2015,10 +2221,6 @@
         const expiries = _renderWhatIfExpiryOptions(state.ledger.openOptions || []);
         input.disabled = !expiries.length;
         followInput.disabled = input.disabled;
-        currentButton.textContent = state.marketPriceRefreshPending
-            ? '刷新中…' : '使用当前价';
-        currentButton.disabled = !expiries.length
-            || state.marketPriceRefreshPending || state.connection !== 'connected';
         stressButton.disabled = !expiries.length;
         stressNavButton.disabled = stressButton.disabled;
         _text($('what-if-price-label'), `${book.symbol} 假设到期结算价`);
@@ -2038,8 +2240,9 @@
         const priceSource = !followInput.checked ? '自定义到期价 · 自动跟随已暂停'
             : (state.referencePrice !== null ? '自动跟随手工参考价'
                 : (price === null ? '自动跟随 · 等待 TWS 参考价'
-                    : (refreshedClock ? `自动跟随 TWS 最新价（${refreshedClock} 刷新）`
-                        : '自动跟随 TWS 持仓快照价')));
+                    : (state.marketPriceSource === 'live' ? '自动跟随 TWS 实时价'
+                        : (refreshedClock ? `自动跟随 TWS 最新价（${refreshedClock} 刷新）`
+                            : '自动跟随 TWS 持仓快照价'))));
         const openCount = (state.ledger.openOptions || []).reduce(
             (total, option) => total + Math.abs(Number(option.contracts) || 0), 0);
         _text($('what-if-context'), `${book.symbol} · 现有 ${_quantity(currentSummary.shares)} 股`
@@ -2048,7 +2251,7 @@
             + `-${state.whatIfExpiry.slice(6, 8)}`
             + ` · ${BASIS_LABELS[state.basisMode] || state.basisMode}口径`);
         if (price === null) {
-            _text($('what-if-result-caption'), '请先拉取 TWS 当前价，或输入假设到期结算价');
+            _text($('what-if-result-caption'), '等待 TWS 实时价，或输入假设到期结算价');
             return;
         }
         const scenario = core.computeOptionSettlementScenario(state.allEvents, price, {
@@ -3520,8 +3723,11 @@
                 if (!isCurrent()) return;
             }
             state.stressLongOptionInputs = response;
-            state.marketPrice = price;
-            state.marketPriceFetchedAt = String(response.fetchedAt || '');
+            if (!_liveQuoteDrivesPrice()) {
+                state.marketPrice = price;
+                state.marketPriceFetchedAt = String(response.fetchedAt || '');
+                state.marketPriceSource = 'refresh';
+            }
             state.stressBasePrice = price;
             _recompute();
         } catch (error) {
@@ -4461,27 +4667,70 @@
         state.priceClearedBySplit = typedReference || typedWhatIf || typedStress;
     }
 
+    function _plainPrice(value) {
+        return String(Number(Number(value).toFixed(4)));
+    }
+
+    function _liveQuoteClock() {
+        const at = state.liveQuote.at;
+        return at ? _localIsoSeconds(new Date(at)).slice(11, 19) : '';
+    }
+
+    /** The 参考价 cell: the price the page follows, where it comes from and
+     * the 实时 switch. Following, the field shows that price; typing one
+     * overrides it, and clearing the field follows again. */
     function _renderReferenceSource() {
         const node = $('reference-source');
         const input = $('reference-price');
-        const missing = state.referencePrice === null && state.marketPrice === null;
+        const toggle = $('btn-live-quote');
+        const live = state.liveQuote;
+        const following = state.referencePrice === null;
+        const missing = following && state.marketPrice === null;
         const foot = globalScope.document.querySelector('.hero-foot');
         if (foot) foot.classList.toggle('needs-reference', missing);
         if (input) {
-            input.placeholder = state.marketPrice === null
-                ? '输入' : _money(state.marketPrice, 4);
+            if (following && globalScope.document.activeElement !== input) {
+                input.value = state.marketPrice === null ? '' : _plainPrice(state.marketPrice);
+            }
+            input.placeholder = '输入';
+            if (input.classList) {
+                input.classList.toggle('is-following', following && state.marketPrice !== null);
+                input.classList.toggle('is-live', following && _liveQuoteDrivesPrice());
+            }
         }
-        if (state.referencePrice !== null) {
-            _text(node, '手工输入');
-            return;
+        if (toggle) {
+            const retry = live.wanted && ['paused', 'error', 'unavailable'].indexOf(live.status) >= 0;
+            toggle.textContent = retry ? (live.status === 'paused' ? '恢复实时' : '重试实时') : '实时';
+            toggle.setAttribute('aria-pressed', live.wanted ? 'true' : 'false');
+            toggle.className = `live-toggle${live.wanted ? ' is-on' : ''}`
+                + `${live.status === 'live' ? ' is-streaming' : ''}${retry ? ' needs-action' : ''}`;
+            toggle.title = live.wanted
+                ? (retry ? '重新订阅 TWS 实时价' : '关闭标的实时价订阅')
+                : '开启标的实时价订阅（TWS 实时报价，自动填入参考价）';
         }
-        if (state.marketPrice !== null) {
-            _text(node, '来自 TWS 持仓快照');
-            return;
+        let text;
+        if (!following) {
+            text = live.wanted ? '手工输入 · 清空后跟随实时价' : '手工输入 · 清空后跟随 TWS 价';
+        } else if (_liveQuoteDrivesPrice()) {
+            text = `TWS 实时 · ${_liveQuoteClock()}`;
+        } else if (live.wanted && live.status === 'ib_down') {
+            text = state.marketPrice === null ? 'TWS 未连接 · 连上后自动订阅'
+                : `TWS 断开 · 最后价 ${_liveQuoteClock() || '—'}，连上后自动恢复`;
+        } else if (live.wanted && live.status === 'paused') {
+            text = '行情已被全局重置 · 点「恢复实时」';
+        } else if (live.wanted && live.status === 'unavailable') {
+            text = '当前后端没有实时行情';
+        } else if (live.wanted && live.status === 'error') {
+            text = `实时价订阅失败${live.message ? `：${live.message}` : ''}`;
+        } else if (live.wanted && (live.status === 'pending' || live.status === 'waiting')) {
+            text = state.marketPrice === null ? '正在订阅 TWS 实时价…'
+                : '来自 TWS 持仓快照 · 实时价订阅中';
+        } else if (state.marketPrice !== null) {
+            text = state.marketPriceSource === 'refresh' ? '来自 TWS 行情刷新' : '来自 TWS 持仓快照';
+        } else {
+            text = state.priceClearedBySplit ? '拆股后已清空，请重填' : '填入后可算市值与浮盈亏';
         }
-        _text(node, state.priceClearedBySplit
-            ? '拆股后已清空，请重填'
-            : '填入后可算市值与浮盈亏');
+        _text(node, text);
     }
 
     async function _adoptTwsPosition(entry, event, button) {
@@ -8441,7 +8690,7 @@
             state.whatIfExpiry = changeEvent.target.value;
             _renderWhatIf();
         });
-        $('btn-what-if-current').addEventListener('click', _refreshWhatIfMarketPrice);
+        if ($('btn-live-quote')) $('btn-live-quote').addEventListener('click', _toggleLiveQuote);
         $('btn-open-premium-expiry').addEventListener('click', _openPremiumExpiry);
         $('btn-close-premium-expiry').addEventListener('click', () => {
             $('premium-expiry-modal').close();
@@ -8756,6 +9005,7 @@
         state.bookId = globalScope.OptionComboCostBasisCommon.bookIdFromSearch(
             globalScope.location && globalScope.location.search);
         state.linkedBookId = state.bookId;
+        state.liveQuote.wanted = _readStorage(LIVE_QUOTE_STORAGE_KEY, '1') !== '0';
         _wire();
         _renderAll();
         connect();

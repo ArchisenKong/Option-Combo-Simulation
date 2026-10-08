@@ -95,7 +95,7 @@ There is no frontend build step. The UI is plain HTML/CSS/JavaScript loaded in o
     flow, and restore
 - Blended cost ledger (`cost_basis.html`):
   - standalone per-underlying event ledger with its own SQLite database;
-    it cannot place orders or subscribe to market data
+    it cannot place orders; its one live quote is its own underlying's
   - three cost lenses off one event stream (net cash, stock only, tax
     adjusted), with a short share balance treated as supported state
   - IBKR Activity Statement / Flex CSV import, and TWS reconciliation that only
@@ -176,7 +176,7 @@ Default configured symbols:
 Standalone per-underlying blended-cost ledger. It loads the ledger/import/page
 scripts plus DOM-free American pricing, market curves and `cost_basis_stress_*` —
 never the trading shell — and writes its own `cost_basis.db`. It cannot place
-an order or subscribe to market data. Full details in
+an order; the only market data it streams is its own underlying's quote. Full details in
 [Blended Cost Ledger](#blended-cost-ledger-cost_basishtml) below.
 
 `cost_basis_fop.html` is the standalone FOP ledger that replaced the retired
@@ -666,18 +666,18 @@ empty edit) pauses following; unchecking the control freezes the displayed
 assumption. Checking it again resumes following without a request. No TWS
 price and no manual reference means an unavailable automatic scenario, not a
 stale last quote.
-The **使用当前价** button still requests a fresh one-shot TWS snapshot quote.
-On success it clears the manual hero reference and resumes automatic following;
-later portfolio updates replace that quote rather than leaving What If frozen.
-Failure preserves the assumption, and a late response cannot overwrite a newer
-edit or another book. The displayed refresh time belongs only to that one-shot
-quote and is cleared when a portfolio update replaces it. Refreshing stress-test
-inputs does not override a manually chosen What If price.
-The automatic cadence is the existing account/portfolio feed, not streaming
-tick data. IB documents updates at position changes or approximately three-minute
-intervals; repeatedly reading the backend cache cannot make the broker feed
-faster. See [IB account updates](https://interactivebrokers.github.io/tws-api/account_updates.html).
-None of these actions leaves a new live market-data subscription behind.
+The **实时** switch beside 参考价 (on by default, remembered per browser) keeps
+one streaming TWS quote of the open ledger's underlying and fills 参考价 with it
+(`TWS 实时 · hh:mm:ss`); What If follows it. The backend shares the pooled line
+the trading page may already hold, moves it when you switch ledgers and drops it
+when the page closes. The page re-prices at most once a second and never re-runs
+the stress chart on a tick. Typing a 参考价 overrides the stream until the field
+is cleared. After a TWS drop the last price stays, labelled, and the stream
+returns on reconnect; after a manual global stream reset it waits for
+「恢复实时」. With the switch off (or on the historical backend) the price falls
+back to the TWS portfolio push, which IB sends at position changes or about every
+three minutes. The one-shot **使用当前价** refresh is retired. Refreshing
+stress-test inputs does not override a manually chosen What If price.
 **Nothing auto-writes an event.** When the ledger has none of a position and
 the authoritative TWS snapshot includes both quantity and average cost, an
 explicit `采信 TWS` click plus confirmation records it directly as a

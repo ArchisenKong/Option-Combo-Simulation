@@ -70,6 +70,10 @@ SERVER_ACTIONS = {
     'list_cost_basis_import_batches': 'cost_basis_import_batches_list',
     'request_cost_basis_executions': 'cost_basis_executions',
     'request_cost_basis_market_price': 'cost_basis_market_price',
+    # One streaming quote of the open stock ledger's own underlying; the
+    # backend derives the contract from the book, never from the page.
+    'subscribe_cost_basis_underlying_quote': 'cost_basis_underlying_quote_subscribed',
+    'unsubscribe_cost_basis_underlying_quote': 'cost_basis_underlying_quote_unsubscribed',
     'request_cost_basis_option_scenario_inputs': 'cost_basis_option_scenario_inputs',
     # Standalone FOP ledger (CODE PLAN/COST_BASIS_FOP_STANDALONE_PLAN.md §10.2).
     'commit_cost_basis_fop_metadata': 'cost_basis_fop_metadata_committed',
@@ -594,6 +598,46 @@ async def build_cost_basis_response(store_env, websocket, data, *,
         response.update(result)
         _log_result(action, request_id, data, started, result=result)
         return response
+
+    if action == 'subscribe_cost_basis_underlying_quote':
+        subscriber = store_env.get('subscribe_underlying_quote')
+        if not callable(subscriber):
+            return _error_response(
+                server_action, request_id, 'broker_market_data_unavailable',
+                'this backend has no live TWS market data',
+            )
+        try:
+            book = await asyncio.to_thread(
+                store.get_book, _required_str(data, 'bookId'))
+            if str(book.get('secType') or 'STK').upper() != 'STK' or book.get('fop'):
+                raise InvalidRequestError(
+                    'a live underlying quote is offered for stock/ETF ledgers only')
+            result = await subscriber(websocket, {
+                'account': book['account'],
+                'symbol': book['symbol'],
+                'secType': book['secType'],
+                'currency': book['currency'],
+            })
+        except CostBasisStoreError as exc:
+            _log_result(action, request_id, data, started, error=exc.code)
+            return _error_response(server_action, request_id, exc.code, str(exc))
+        except Exception:
+            logger.exception('live underlying quote subscription failed')
+            return _error_response(
+                server_action, request_id, 'broker_market_data_failed',
+                'failed to subscribe to the live TWS quote',
+            )
+        response = {'action': server_action, 'requestId': request_id, 'success': True,
+                    'bookId': book['bookId']}
+        response.update(result)
+        _log_result(action, request_id, data, started, result=result)
+        return response
+
+    if action == 'unsubscribe_cost_basis_underlying_quote':
+        unsubscriber = store_env.get('unsubscribe_underlying_quote')
+        removed = bool(unsubscriber(websocket)) if callable(unsubscriber) else False
+        return {'action': server_action, 'requestId': request_id, 'success': True,
+                'unsubscribed': removed}
 
     if action == 'request_cost_basis_option_scenario_inputs':
         fetcher = store_env.get('fetch_option_scenario_inputs')

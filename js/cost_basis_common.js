@@ -16,8 +16,10 @@
     // always listed them. `writes` marks actions that change stored state;
     // `pages` names the pages allowed to send the action. The backend keeps
     // its own allowlist (cost_basis_ws.SERVER_ACTIONS); these lists only stop
-    // a page from sending what it has no business sending, so orders, market
-    // data subscriptions and execution stay structurally out of reach.
+    // a page from sending what it has no business sending, so orders and
+    // execution stay structurally out of reach. The one market-data stream a
+    // page may hold is the open stock ledger's own underlying quote, whose
+    // contract the backend derives from the book.
     const PROTOCOL_ACTIONS = Object.freeze([
         { action: 'request_cost_basis_status', writes: false, pages: ['equity', 'fop'] },
         { action: 'list_cost_basis_books', writes: false, pages: ['equity', 'fop'] },
@@ -40,13 +42,17 @@
         { action: 'restore_cost_basis_backup', writes: true, pages: ['equity', 'fop'] },
         { action: 'list_cost_basis_import_batches', writes: false, pages: ['equity', 'fop'] },
         // Read-only corroboration from the live backend. The market-price
-        // action is a one-shot TWS snapshot and leaves no live subscription.
+        // action is a one-shot TWS snapshot and leaves no live subscription;
+        // the underlying-quote pair holds one streaming quote of the open
+        // ledger's underlying until the page drops it or disconnects.
         { action: 'request_portfolio_positions_snapshot', writes: false, pages: ['equity'] },
         { action: 'request_portfolio_avg_cost_snapshot', writes: false, pages: ['equity'] },
         { action: 'request_managed_accounts_snapshot', writes: false, pages: ['equity'] },
         { action: 'request_cost_basis_executions', writes: false, pages: ['equity'] },
         { action: 'request_cost_basis_market_price', writes: false, pages: ['equity'] },
         { action: 'request_cost_basis_option_scenario_inputs', writes: false, pages: ['equity'] },
+        { action: 'subscribe_cost_basis_underlying_quote', writes: false, pages: ['equity'] },
+        { action: 'unsubscribe_cost_basis_underlying_quote', writes: false, pages: ['equity'] },
         // Standalone FOP ledger actions (plan §10.2). The FOP page sends its
         // writes only as FOP packages; writes are open since the release stage
         // (P6) unless the backend's fop_writes_enabled switch closes them.

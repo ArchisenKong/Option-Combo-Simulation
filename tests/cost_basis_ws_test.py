@@ -318,6 +318,55 @@ class MarketPriceTests(CostBasisWsTestBase):
         self.assertEqual(response['marketPrice'], 71.23)
 
 
+class UnderlyingQuoteTests(CostBasisWsTestBase):
+    """One streaming quote of the open stock ledger's underlying."""
+
+    async def test_historical_backend_has_no_live_quote(self):
+        book_id = await self.make_book()
+        response = await self.call('subscribe_cost_basis_underlying_quote', bookId=book_id)
+        self.assertFalse(response['success'])
+        self.assertEqual(response['code'], 'broker_market_data_unavailable')
+        response = await self.call('unsubscribe_cost_basis_underlying_quote')
+        self.assertTrue(response['success'], response)
+        self.assertFalse(response['unsubscribed'])
+
+    async def test_the_contract_comes_from_the_book_and_the_stream_from_this_socket(self):
+        book_id = await self.make_book()
+        captured = []
+
+        async def subscriber(websocket, request):
+            captured.append((websocket, request))
+            return {'subscribed': True, 'symbol': 'TQQQ', 'marketDataGeneration': 3,
+                    'quote': {'mark': 71.5}}
+
+        self.env['subscribe_underlying_quote'] = subscriber
+        self.env['unsubscribe_underlying_quote'] = lambda websocket: websocket is self.ws
+        response = await self.call(
+            'subscribe_cost_basis_underlying_quote', ws=self.ws, bookId=book_id,
+            account='ATTACKER', symbol='SPY', conId=1)
+        self.assertTrue(response['success'], response)
+        self.assertEqual(captured, [(self.ws, {
+            'account': 'U1111111', 'symbol': 'TQQQ', 'secType': 'STK', 'currency': 'USD'})])
+        self.assertEqual(response['bookId'], book_id)
+        self.assertEqual(response['quote'], {'mark': 71.5})
+        self.ws.sent.clear()
+        response = await self.call('unsubscribe_cost_basis_underlying_quote', ws=self.ws)
+        self.assertTrue(response['unsubscribed'])
+
+    async def test_a_missing_book_or_a_failed_subscription_is_an_error(self):
+        async def subscriber(websocket, request):
+            raise RuntimeError('TWS could not qualify the underlying')
+
+        self.env['subscribe_underlying_quote'] = subscriber
+        response = await self.call(
+            'subscribe_cost_basis_underlying_quote', bookId='missingbook0001')
+        self.assertFalse(response['success'])
+        book_id = await self.make_book()
+        response = await self.call('subscribe_cost_basis_underlying_quote', bookId=book_id)
+        self.assertFalse(response['success'])
+        self.assertEqual(response['code'], 'broker_market_data_failed')
+
+
 class OptionScenarioInputTests(CostBasisWsTestBase):
     async def test_historical_backend_reports_option_inputs_unavailable(self):
         book_id = await self.make_book()

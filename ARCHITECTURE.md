@@ -20,7 +20,7 @@ Runtime surfaces:
 
 4. `cost_basis.html`
    - standalone per-underlying blended-cost ledger
-   - event-sourced accounting over its own SQLite database; cannot trade or subscribe to market data
+   - event-sourced accounting over its own SQLite database; cannot trade; streams only its own underlying's quote
 
 5. `workspace_db_admin.html`
    - standalone read-mostly admin page for the workspace database and its archive
@@ -1303,7 +1303,7 @@ Use `cleanup_logs.bat` or `cleanup_logs_mac.command` for periodic runtime log cl
 - `historical_server.py` cannot serve Chart Lab bars or IV term-structure sync.
 - `ib_server.py` supports more runtime paths than the lightweight historical server.
 - If multiple unmanaged `ib_server.py` processes are left running, broker-status debugging becomes unreliable because the browser may connect to a different backend than the logs you are reading.
-- The blended-cost ledger is deliberately not wired to trading: it cannot place an order or subscribe to market data, and a TWS snapshot can only produce a draft for a human to confirm.
+- The blended-cost ledger is deliberately not wired to trading: it cannot place an order, and a TWS snapshot can only produce a draft for a human to confirm. Its only market-data stream is the open stock ledger's underlying quote: `subscribe_cost_basis_underlying_quote` names a book, `ib_server.py` resolves the contract and keeps one pooled line in that socket's `client_subscriptions` as `stock_<SYMBOL>`, the shared pending-tickers handler pushes it (the payload's `stocks`), and the socket's disconnect, a TWS drop or a global stream reset ends it. `historical_server.py` answers `broker_market_data_unavailable`.
 - `Rehydrate Original` on the workspace database admin page is not implemented; the backend answers `rehydrateOriginal: False` until its re-archive semantics are frozen and tested.
 - Auto-archive stays opt-in and off by default.
 

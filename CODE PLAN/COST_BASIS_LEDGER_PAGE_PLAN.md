@@ -68,7 +68,16 @@
    只有账本完全没有、
    TWS 同时给出完整数量和均价的当前持仓，才允许用户显式“采信 TWS”建立
    当日临时基线；其余差异必须来自 CSV 或手工核实后的事件。
-7. 页面永不下单、永不建立持续行情订阅。平时市价来自持仓快照里的 `marketPrice`；用户点击 What If 的「使用当前价」时，后端另外发起一次 TWS snapshot quote，返回后即结束，不留下订阅。失败时保留原假设价并显示错误。
+7. 页面永不下单。唯一的持续行情是当前股票账本自己标的的实时报价（2026-10-08 起，见下方「标的实时价」）；关闭「实时」开关或在历史后端时，市价来自持仓快照里的 `marketPrice`。原 What If「使用当前价」一次性 snapshot 已退役。
+
+### 标的实时价（2026-10-08）
+
+- 参考价旁的「实时」开关默认开启，按浏览器记住。开启时页面发 `subscribe_cost_basis_underlying_quote`（只带 bookId），后端按账本取合约（同账户持仓合约，否则 SMART 资格化），复用行情池里已有的同一条 TWS 线路，挂在该 socket 的 `client_subscriptions` 下（键 `stock_<SYMBOL>`）。
+- 报价走后端现有的 tick 推送（无 action 的行情载荷，`stocks[SYMBOL].mark`，口径与原 snapshot 相同：marketPrice → last → close），带行情代次；页面丢弃其他代次的推送。
+- 页面每秒至多重算一次，只重绘头条、汇总表和 What If；压力测试视图打开时不随 tick 重跑。
+- 参考价输入框跟随时直接显示实时价；手工输入覆盖，清空后恢复跟随。持仓快照推送和压力测试行情刷新不覆盖实时价。
+- 换账本时后端改订新标的（旧线路无人使用才取消）；页面断开、TWS 断线或全局重置行情时线路随之结束。TWS 重连后（ready 且代次变化）自动重订；手动全局重置是人工边界，需点「恢复实时」，与交易页一致。
+- 历史后端没有实时行情，返回 `broker_market_data_unavailable`，页面显示并提供「重试实时」。
 
 ### 批量 TWS 成交归账（2026-09-22）
 
@@ -344,7 +353,8 @@ avg = totalBasis / sharesHeld
 
 - `request_portfolio_positions_snapshot` → 全账户权威数量
 - `request_portfolio_avg_cost_snapshot` → TWS 均价、市价、已实现盈亏（**覆盖面受限，仅作旁证**）
-- `request_cost_basis_market_price` → 用户点击「使用当前价」后读取一次 TWS snapshot quote（只读、无持续订阅）
+- `request_cost_basis_market_price` → 一次性 TWS snapshot quote（只读；页面已不再调用，保留给协议兼容）
+- `subscribe_cost_basis_underlying_quote` / `unsubscribe_cost_basis_underlying_quote` → 当前账本标的的一条实时报价
 
 按 `symbol` 过滤（股票 `secType='STK'`，期权 `secType='OPT'` 且 `symbol` 相同；调整后合约 `tradingClass` 可能不同，一并纳入），按账户分组，与引擎算出的账本持仓逐合约比对。
 
@@ -424,7 +434,7 @@ TWS 未连接时：整块降级为「持仓快照不可用」，账本与成本�
 
 页面另有一张只读的 **What If · 期权结算后成本** 情景卡：
 默认勾选「自动跟随参考价」，与头条有效参考价共用同一数值；已有 TWS 持仓价格推送到达后立即重算，不轮询、不新增行情订阅、不写账本。上方手工参考价也会被跟随。手动输入 What If 假设价（包括 0 或编辑中的空值）自动暂停跟随，取消勾选则固定当前假设；重新勾选无需请求即可恢复。没有 TWS 价格或手工参考价时自动情景显示不可用，不把断线前的旧报价当作当前价。
-点击「使用当前价」仍重新请求一次 TWS snapshot quote；成功后清除上方手工参考价并恢复自动跟随，后续持仓价格可以继续更新 What If。请求失败保留原假设；迟到响应不能覆盖用户新输入或其他账本。抓取时间只标注主动 quote，后续持仓价格替代时清除。压力测试参数刷新不覆盖手工 What If 假设价。
+开启「实时」时 What If 跟随标的实时价；「使用当前价」已退役（恢复跟随用「自动跟随参考价」勾选，清除手工参考价即清空上方输入框）。迟到的订阅应答不能落到其他账本。压力测试参数刷新不覆盖手工 What If 假设价。
 选择账本时读取一次已有持仓均价/市价缓存，避免首次推送早于账本加载而丢失参考价；之后依靠已有推送。自动频率由 TWS 账户/持仓推送决定，不是逐笔行情。IB 文档说明持仓变化或约三分钟周期更新；重复读取服务器缓存不会提高券商价格频率。
 用户可选择「计算至」某个到期日：只虚拟结算该日及以前的未平期权，更晚的仓位仍保持未平与在险状态。
 当前股票不卖出；选中范围内的期权按同一个标的到期价进行虚拟指派、行权或归零，
@@ -474,7 +484,9 @@ Tailscale 网络。本开关不改变工作区数据库管理与交易执行的�
 | `restore_cost_basis_backup` | `cost_basis_backup_restored` |
 | `list_cost_basis_import_batches` | `cost_basis_import_batches_list` |
 | `request_cost_basis_executions` | `cost_basis_executions`（实时后端） |
-| `request_cost_basis_market_price` | `cost_basis_market_price`（实时后端一次性 quote） |
+| `request_cost_basis_market_price` | `cost_basis_market_price`（实时后端一次性 quote；页面已不再调用） |
+| `subscribe_cost_basis_underlying_quote` | `cost_basis_underlying_quote_subscribed`（实时后端；历史后端 `broker_market_data_unavailable`） |
+| `unsubscribe_cost_basis_underlying_quote` | `cost_basis_underlying_quote_unsubscribed` |
 | `request_cost_basis_option_scenario_inputs` | `cost_basis_option_scenario_inputs`（v2 报价/IV、时点/身份及共享折现曲线；本地 IV 在前端反解） |
 
 挂载点：`ib_server_ws.py` 的
