@@ -8567,8 +8567,9 @@
             });
             $('new-book-symbol').value = '';
             _resetNewBookType();
-            state.linkedBookId = '';
-            state.bookId = response.book ? response.book.bookId : state.bookId;
+            // Select after the list contains the new book so the normal
+            // switch clears old prices and moves the underlying stream.
+            state.linkedBookId = response.book ? response.book.bookId : state.bookId;
             await _loadBooks();
             _showView('ledger');
         } catch (error) {

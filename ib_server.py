@@ -128,7 +128,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # Load Config
 config = configparser.ConfigParser()
-config.read('config.ini')
+config.read('config.ini', encoding='utf-8')
 
 TWS_HOST = config.get('tws', 'host', fallback='127.0.0.1')
 TWS_PORT = config.getint('tws', 'port', fallback=7496)

@@ -47,6 +47,14 @@ function loadReconciliationHarness() {
             syncLiveQuote: _syncLiveQuote, toggleLiveQuote: _toggleLiveQuote,
             invalidate: _invalidatePositions,
             selectPriceBook: _beginBookSelection, loadEvents: _loadEvents,
+            createBook: _createBook,
+            configureBookCreation() {
+                _renderManagedAccounts = () => {};
+                _renderSidebarBooks = () => {};
+                _showView = () => {};
+                _syncBookMode = () => {};
+                _renderBookMeta = () => {};
+            },
             configureEventLoad() { _syncBookMode = () => {}; },
             renderStress: _renderStressTest,
             stressSeries: _stressSeries, stressJob, cancelStressJob: _cancelStressJob,
@@ -547,6 +555,88 @@ module.exports = {
                 h.update(70.5);
                 assert.equal(h.state.marketPrice, 70.5);
                 assert.equal(h.node('btn-live-quote')['aria-pressed'], 'false');
+            },
+        },
+        {
+            name: 'creating a book clears the previous price and subscribes for the new account and symbol',
+            async run() {
+                for (const previousSymbol of ['TSM', 'TQQQ', null]) {
+                    const h = loadPriceHarness();
+                    h.configureBookCreation();
+                    const tick = () => new Promise((done) => setTimeout(done, 5));
+                    const previous = previousSymbol && {
+                        bookId:'previous', account:'U1', symbol:previousSymbol, secType:'STK',
+                    };
+                    const created = {bookId:'remote-tqqq', account:'U2', symbol:'TQQQ', secType:'STK'};
+                    h.state.books = previous ? [previous] : [];
+                    h.state.bookId = previous ? previous.bookId : '';
+                    h.state.ws = {readyState:1, send() {}};
+                    h.state.liveQuote.wanted = true;
+                    h.node('reference-price').value = '';
+                    h.context.confirm = () => true;
+                    const asked = [];
+                    let answerNewQuote;
+                    h.configure({request: async (action, fields) => {
+                        asked.push([action, fields]);
+                        if (action === 'create_cost_basis_book') return {book:created};
+                        if (action === 'list_cost_basis_books') return {books:previous ? [previous, created] : [created]};
+                        if (action === 'list_cost_basis_events') return {events:[], total:0};
+                        if (action === 'subscribe_cost_basis_underlying_quote') {
+                            if (fields.bookId === 'previous') {
+                                return {subscribed:true, marketDataGeneration:4, quote:{mark:452.18}};
+                            }
+                            return new Promise(resolve => { answerNewQuote = resolve; });
+                        }
+                        return {};
+                    }});
+                    if (previous) {
+                        h.syncLiveQuote();
+                        await tick();
+                        assert.equal(h.state.marketPrice, 452.18);
+                        if (previousSymbol === 'TQQQ') {
+                            h.state.referencePrice = 450;
+                            h.state.referencePriceByBook.previous = 450;
+                        }
+                    }
+                    h.node('new-book-type').value = 'STK';
+                    h.node('new-book-account').value = 'U2';
+                    h.node('new-book-symbol').value = 'TQQQ';
+                    h.node('new-book-start').value = '2026-09-01';
+                    h.node('new-book-spc').value = '100';
+                    await h.createBook({preventDefault() {}});
+                    assert.equal(h.alerts.length, 0);
+                    assert.equal(h.state.bookId, created.bookId);
+                    assert.equal(h.state.referencePrice, null);
+                    assert.equal(h.state.marketPrice, null);
+                    assert.equal(h.state.marketPriceSource, '');
+                    assert.equal(h.node('reference-price').value, '');
+                    assert.equal(h.state.liveQuote.bookId, created.bookId);
+                    assert.equal(h.state.liveQuote.symbol, 'TQQQ');
+                    assert.equal(asked.filter(([action, fields]) => action === 'subscribe_cost_basis_underlying_quote'
+                        && fields.bookId === created.bookId).length, 1);
+                    h.message({stocks:{TSM:{mark:453}}, marketDataGeneration:4});
+                    assert.equal(h.state.marketPrice, null);
+                    h.state.liveQuoteRenderedAt = 0;
+                    answerNewQuote({subscribed:true, marketDataGeneration:4, quote:{mark:81.5}});
+                    await tick();
+                    assert.equal(h.state.marketPrice, 81.5);
+                    assert.equal(h.node('reference-price').value, '81.5');
+                    h.state.allEvents = [
+                        {kind:'share_trade', account:'U2', tradeDate:'2026-10-09',
+                            shares:100, price:80, cashAmount:-8000},
+                        {kind:'option_trade', account:'U2', tradeDate:'2026-10-09',
+                        right:'P', strike:80, expiry:'20261009', sharesPerContract:100,
+                        contracts:-1, price:1, cashAmount:100}];
+                    h.state.ledger = h.context.OptionComboCostBasisCore.computeLedger(h.state.allEvents);
+                    h.renderWhatIf();
+                    assert.equal(h.node('what-if-price').value, '81.5');
+                    h.state.liveQuoteRenderedAt = 0;
+                    h.message({stocks:{TSM:{mark:454}}, marketDataGeneration:4});
+                    h.message({stocks:{TQQQ:{mark:81.6}}, marketDataGeneration:4});
+                    await tick();
+                    assert.equal(h.state.marketPrice, 81.6);
+                    assert.equal(h.node('what-if-price').value, '81.6');
+                }
             },
         },
         {
